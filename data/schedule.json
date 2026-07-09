@@ -1,0 +1,113 @@
+[
+    {
+      "round": 1,
+      "match_date": "2026-05-01",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "温州大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 2,
+      "match_date": "2026-05-08",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "长江大学与三峡大学联队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 3,
+      "match_date": "2026-05-15",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "中国民航大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 4,
+      "match_date": "2026-05-22",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "清华大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 5,
+      "match_date": "2026-05-29",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "华东理工大学与上海机电大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 6,
+      "match_date": "2026-06-05",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "上海电力大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 7,
+      "match_date": "2026-06-12",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "武汉大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 8,
+      "match_date": "2026-06-19",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "四川外国语大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 9,
+      "match_date": "2026-06-26",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "西北工业大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 10,
+      "match_date": "2026-07-03",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "重庆师范大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    },
+    {
+      "round": 11,
+      "match_date": "2026-07-10",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "桂林电子科技大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  ]
+  

@@ -1,0 +1,10 @@
+agentscope
+agentscope-runtime
+fastapi
+uvicorn
+fakeredis
+openai
+httpx
+requests
+rank-bm25
+qdrant-client

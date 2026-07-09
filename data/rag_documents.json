@@ -1,0 +1,3703 @@
+[
+  {
+    "doc_id": "schedule_1",
+    "source_type": "schedule",
+    "text": "赛程信息。第 1 轮，电子科技大学与四川大学联队 对阵 温州大学队。比赛日期是 2026-05-01。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 1,
+      "match_date": "2026-05-01",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "温州大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_2",
+    "source_type": "schedule",
+    "text": "赛程信息。第 2 轮，电子科技大学与四川大学联队 对阵 长江大学与三峡大学联队。比赛日期是 2026-05-08。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 2,
+      "match_date": "2026-05-08",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "长江大学与三峡大学联队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_3",
+    "source_type": "schedule",
+    "text": "赛程信息。第 3 轮，电子科技大学与四川大学联队 对阵 中国民航大学队。比赛日期是 2026-05-15。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 3,
+      "match_date": "2026-05-15",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "中国民航大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_4",
+    "source_type": "schedule",
+    "text": "赛程信息。第 4 轮，电子科技大学与四川大学联队 对阵 清华大学队。比赛日期是 2026-05-22。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 4,
+      "match_date": "2026-05-22",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "清华大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_5",
+    "source_type": "schedule",
+    "text": "赛程信息。第 5 轮，电子科技大学与四川大学联队 对阵 华东理工大学与上海机电大学队。比赛日期是 2026-05-29。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 5,
+      "match_date": "2026-05-29",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "华东理工大学与上海机电大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_6",
+    "source_type": "schedule",
+    "text": "赛程信息。第 6 轮，电子科技大学与四川大学联队 对阵 上海电力大学队。比赛日期是 2026-06-05。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 6,
+      "match_date": "2026-06-05",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "上海电力大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_7",
+    "source_type": "schedule",
+    "text": "赛程信息。第 7 轮，电子科技大学与四川大学联队 对阵 武汉大学队。比赛日期是 2026-06-12。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 7,
+      "match_date": "2026-06-12",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "武汉大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_8",
+    "source_type": "schedule",
+    "text": "赛程信息。第 8 轮，电子科技大学与四川大学联队 对阵 四川外国语大学队。比赛日期是 2026-06-19。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 8,
+      "match_date": "2026-06-19",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "四川外国语大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_9",
+    "source_type": "schedule",
+    "text": "赛程信息。第 9 轮，电子科技大学与四川大学联队 对阵 西北工业大学队。比赛日期是 2026-06-26。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 9,
+      "match_date": "2026-06-26",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "西北工业大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_10",
+    "source_type": "schedule",
+    "text": "赛程信息。第 10 轮，电子科技大学与四川大学联队 对阵 重庆师范大学队。比赛日期是 2026-07-03。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 10,
+      "match_date": "2026-07-03",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "重庆师范大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "schedule_11",
+    "source_type": "schedule",
+    "text": "赛程信息。第 11 轮，电子科技大学与四川大学联队 对阵 桂林电子科技大学队。比赛日期是 2026-07-10。我方选手是 TBD。对手选手是 TBD。比赛状态是 upcoming。备注是 Bo3。",
+    "metadata": {
+      "round": 11,
+      "match_date": "2026-07-10",
+      "team_name": "电子科技大学与四川大学联队",
+      "player_name": "TBD",
+      "opponent_team": "桂林电子科技大学队",
+      "opponent_player": "TBD",
+      "status": "upcoming",
+      "note": "Bo3"
+    }
+  },
+  {
+    "doc_id": "deck_1",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 1 的卡组是 Electro Dragon Evolution / Monk。使用该卡组的玩家是 zweite affäre，战队是 Meethegods。平均费用是 3.9。战斗数是 12。奖杯数是 2779。卡组构成包括：Electro Dragon Evolution，Monk，Executioner Evolution，Elixir Golem，Dark Prince，Battle Healer，Tornado，Barbarian Barrel。",
+    "metadata": {
+      "rank": 1,
+      "player_name": "zweite affäre",
+      "clan_name": "Meethegods",
+      "deck_name": "Electro Dragon Evolution / Monk",
+      "avg_elixir": 3.9,
+      "battles": 12,
+      "trophies": 2779,
+      "cards": [
+        "Electro Dragon Evolution",
+        "Monk",
+        "Executioner Evolution",
+        "Elixir Golem",
+        "Dark Prince",
+        "Battle Healer",
+        "Tornado",
+        "Barbarian Barrel"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_2",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 2 的卡组是 Zap Evolution / Hero Giant。使用该卡组的玩家是 NK⚡Kamikaze，战队是 Night Kingdom™️。平均费用是 3.6。战斗数是 9。奖杯数是 2772。卡组构成包括：Zap Evolution，Hero Giant，Hero Mega Minion，Prince，Dark Prince，Lightning，Bomber，Rage。",
+    "metadata": {
+      "rank": 2,
+      "player_name": "NK⚡Kamikaze",
+      "clan_name": "Night Kingdom™️",
+      "deck_name": "Zap Evolution / Hero Giant",
+      "avg_elixir": 3.6,
+      "battles": 9,
+      "trophies": 2772,
+      "cards": [
+        "Zap Evolution",
+        "Hero Giant",
+        "Hero Mega Minion",
+        "Prince",
+        "Dark Prince",
+        "Lightning",
+        "Bomber",
+        "Rage"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_3",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 3 的卡组是 Mortar Evolution / Skeleton King。使用该卡组的玩家是 ElMollejas，战队是 CLAMOS:)。平均费用是 3.6。战斗数是 11。奖杯数是 2738。卡组构成包括：Mortar Evolution，Skeleton King，Minion Horde Evolution，Miner，Cannon Cart，Goblin Gang，Arrows，Spear Goblins。",
+    "metadata": {
+      "rank": 3,
+      "player_name": "ElMollejas",
+      "clan_name": "CLAMOS:)",
+      "deck_name": "Mortar Evolution / Skeleton King",
+      "avg_elixir": 3.6,
+      "battles": 11,
+      "trophies": 2738,
+      "cards": [
+        "Mortar Evolution",
+        "Skeleton King",
+        "Minion Horde Evolution",
+        "Miner",
+        "Cannon Cart",
+        "Goblin Gang",
+        "Arrows",
+        "Spear Goblins"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_4",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 4 的卡组是 Archers Evolution / Hero Knight。使用该卡组的玩家是 ♣️ֆʀ.ɬʊʍɮασ♣️，战队是 No Clan。平均费用是 3.3。战斗数是 7。奖杯数是 2736。卡组构成包括：Archers Evolution，Hero Knight，Tesla Evolution，X-Bow，Rocket，Skeletons，Electro Spirit，The Log。",
+    "metadata": {
+      "rank": 4,
+      "player_name": "♣️ֆʀ.ɬʊʍɮασ♣️",
+      "clan_name": "No Clan",
+      "deck_name": "Archers Evolution / Hero Knight",
+      "avg_elixir": 3.3,
+      "battles": 7,
+      "trophies": 2736,
+      "cards": [
+        "Archers Evolution",
+        "Hero Knight",
+        "Tesla Evolution",
+        "X-Bow",
+        "Rocket",
+        "Skeletons",
+        "Electro Spirit",
+        "The Log"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_5",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 5 的卡组是 Goblin Drill Evolution / Hero Knight。使用该卡组的玩家是 Ryley，战队是 MRN Esports。平均费用是 2.8。战斗数是 7。奖杯数是 2736。卡组构成包括：Goblin Drill Evolution，Hero Knight，Giant Snowball Evolution，Berserker，Poison，Bomber，Fire Spirit，Tesla。",
+    "metadata": {
+      "rank": 5,
+      "player_name": "Ryley",
+      "clan_name": "MRN Esports",
+      "deck_name": "Goblin Drill Evolution / Hero Knight",
+      "avg_elixir": 2.8,
+      "battles": 7,
+      "trophies": 2736,
+      "cards": [
+        "Goblin Drill Evolution",
+        "Hero Knight",
+        "Giant Snowball Evolution",
+        "Berserker",
+        "Poison",
+        "Bomber",
+        "Fire Spirit",
+        "Tesla"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_6",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 6 的卡组是 Executioner Evolution / Hero Ice Golem。使用该卡组的玩家是 Abdulbarřy，战队是 Twitter。平均费用是 4.0。战斗数是 13。奖杯数是 2721。卡组构成包括：Executioner Evolution，Hero Ice Golem，Inferno Dragon Evolution，Graveyard，Bowler，Goblin Cage，Tornado，Freeze。",
+    "metadata": {
+      "rank": 6,
+      "player_name": "Abdulbarřy",
+      "clan_name": "Twitter",
+      "deck_name": "Executioner Evolution / Hero Ice Golem",
+      "avg_elixir": 4.0,
+      "battles": 13,
+      "trophies": 2721,
+      "cards": [
+        "Executioner Evolution",
+        "Hero Ice Golem",
+        "Inferno Dragon Evolution",
+        "Graveyard",
+        "Bowler",
+        "Goblin Cage",
+        "Tornado",
+        "Freeze"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_7",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 7 的卡组是 Battle Ram Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 Madkidツ，战队是 pp。平均费用是 3.6。战斗数是 11。奖杯数是 2704。卡组构成包括：Battle Ram Evolution，Hero Barbarian Barrel，Lumberjack Evolution，Giant Skeleton，Mother Witch，Skeleton Dragons，Bandit，Zap。",
+    "metadata": {
+      "rank": 7,
+      "player_name": "Madkidツ",
+      "clan_name": "pp",
+      "deck_name": "Battle Ram Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 3.6,
+      "battles": 11,
+      "trophies": 2704,
+      "cards": [
+        "Battle Ram Evolution",
+        "Hero Barbarian Barrel",
+        "Lumberjack Evolution",
+        "Giant Skeleton",
+        "Mother Witch",
+        "Skeleton Dragons",
+        "Bandit",
+        "Zap"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_8",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 8 的卡组是 Valkyrie Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 Shadow黑暗的，战队是 Romania Gods。平均费用是 4.0。战斗数是 11。奖杯数是 2704。卡组构成包括：Valkyrie Evolution，Hero Barbarian Barrel，Zap Evolution，Lava Hound，Spirit Empress，Fireball，Skeleton Dragons，Tombstone。",
+    "metadata": {
+      "rank": 8,
+      "player_name": "Shadow黑暗的",
+      "clan_name": "Romania Gods",
+      "deck_name": "Valkyrie Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 4.0,
+      "battles": 11,
+      "trophies": 2704,
+      "cards": [
+        "Valkyrie Evolution",
+        "Hero Barbarian Barrel",
+        "Zap Evolution",
+        "Lava Hound",
+        "Spirit Empress",
+        "Fireball",
+        "Skeleton Dragons",
+        "Tombstone"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_9",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 9 的卡组是 Executioner Evolution / Boss Bandit。使用该卡组的玩家是 RamboOo，战队是 CRL。平均费用是 4.4。战斗数是 13。奖杯数是 2702。卡组构成包括：Executioner Evolution，Boss Bandit，Minion Horde Evolution，Hog Rider，Elite Barbarians，Guards，Freeze，Zap。",
+    "metadata": {
+      "rank": 9,
+      "player_name": "RamboOo",
+      "clan_name": "CRL",
+      "deck_name": "Executioner Evolution / Boss Bandit",
+      "avg_elixir": 4.4,
+      "battles": 13,
+      "trophies": 2702,
+      "cards": [
+        "Executioner Evolution",
+        "Boss Bandit",
+        "Minion Horde Evolution",
+        "Hog Rider",
+        "Elite Barbarians",
+        "Guards",
+        "Freeze",
+        "Zap"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_10",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 10 的卡组是 Mortar Evolution / Hero Goblins。使用该卡组的玩家是 Zehaha D. Teach，战队是 Meethegods。平均费用是 3.9。战斗数是 12。奖杯数是 2698。卡组构成包括：Mortar Evolution，Hero Goblins，Minion Horde Evolution，Miner，Cannon Cart，Skeleton Dragons，Rascals，Arrows。",
+    "metadata": {
+      "rank": 10,
+      "player_name": "Zehaha D. Teach",
+      "clan_name": "Meethegods",
+      "deck_name": "Mortar Evolution / Hero Goblins",
+      "avg_elixir": 3.9,
+      "battles": 12,
+      "trophies": 2698,
+      "cards": [
+        "Mortar Evolution",
+        "Hero Goblins",
+        "Minion Horde Evolution",
+        "Miner",
+        "Cannon Cart",
+        "Skeleton Dragons",
+        "Rascals",
+        "Arrows"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_11",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 11 的卡组是 Royal Giant Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 ManuelRay，战队是 Kings eSports。平均费用是 3.0。战斗数是 7。奖杯数是 2696。卡组构成包括：Royal Giant Evolution，Hero Barbarian Barrel，Hunter Evolution，Royal Ghost，Fisherman，Fireball，Skeletons，Electro Spirit。",
+    "metadata": {
+      "rank": 11,
+      "player_name": "ManuelRay",
+      "clan_name": "Kings eSports",
+      "deck_name": "Royal Giant Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 3.0,
+      "battles": 7,
+      "trophies": 2696,
+      "cards": [
+        "Royal Giant Evolution",
+        "Hero Barbarian Barrel",
+        "Hunter Evolution",
+        "Royal Ghost",
+        "Fisherman",
+        "Fireball",
+        "Skeletons",
+        "Electro Spirit"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_12",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 12 的卡组是 Archers Evolution / Hero Knight。使用该卡组的玩家是 Light Work，战队是 Roiki Tenkai。平均费用是 3.0。战斗数是 7。奖杯数是 2689。卡组构成包括：Archers Evolution，Hero Knight，Tesla Evolution，X-Bow，Fireball，Skeletons，Electro Spirit，The Log。",
+    "metadata": {
+      "rank": 12,
+      "player_name": "Light Work",
+      "clan_name": "Roiki Tenkai",
+      "deck_name": "Archers Evolution / Hero Knight",
+      "avg_elixir": 3.0,
+      "battles": 7,
+      "trophies": 2689,
+      "cards": [
+        "Archers Evolution",
+        "Hero Knight",
+        "Tesla Evolution",
+        "X-Bow",
+        "Fireball",
+        "Skeletons",
+        "Electro Spirit",
+        "The Log"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_13",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 13 的卡组是 Executioner Evolution / Golden Knight。使用该卡组的玩家是 Marshmello✨，战队是 France Travail.。平均费用是 3.3。战斗数是 8。奖杯数是 2682。卡组构成包括：Executioner Evolution，Golden Knight，Giant Snowball Evolution，Graveyard，Goblin Cage，Tornado，Skeletons，Barbarian Barrel。",
+    "metadata": {
+      "rank": 13,
+      "player_name": "Marshmello✨",
+      "clan_name": "France Travail.",
+      "deck_name": "Executioner Evolution / Golden Knight",
+      "avg_elixir": 3.3,
+      "battles": 8,
+      "trophies": 2682,
+      "cards": [
+        "Executioner Evolution",
+        "Golden Knight",
+        "Giant Snowball Evolution",
+        "Graveyard",
+        "Goblin Cage",
+        "Tornado",
+        "Skeletons",
+        "Barbarian Barrel"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_14",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 14 的卡组是 Royal Hogs Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 INA.BenZerRidel，战队是 CRL。平均费用是 3.8。战斗数是 12。奖杯数是 2681。卡组构成包括：Royal Hogs Evolution，Hero Barbarian Barrel，Goblin Cage Evolution，Cannon Cart，Mother Witch，Fireball，Skeleton Dragons，Spear Goblins。",
+    "metadata": {
+      "rank": 14,
+      "player_name": "INA.BenZerRidel",
+      "clan_name": "CRL",
+      "deck_name": "Royal Hogs Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 3.8,
+      "battles": 12,
+      "trophies": 2681,
+      "cards": [
+        "Royal Hogs Evolution",
+        "Hero Barbarian Barrel",
+        "Goblin Cage Evolution",
+        "Cannon Cart",
+        "Mother Witch",
+        "Fireball",
+        "Skeleton Dragons",
+        "Spear Goblins"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_15",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 15 的卡组是 Valkyrie Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 HUNGRY$GERMAN，战队是 Night Kingdom™️。平均费用是 4.0。战斗数是 11。奖杯数是 2677。卡组构成包括：Valkyrie Evolution，Hero Barbarian Barrel，Zap Evolution，Lava Hound，Spirit Empress，Fireball，Skeleton Dragons，Tombstone。",
+    "metadata": {
+      "rank": 15,
+      "player_name": "HUNGRY$GERMAN",
+      "clan_name": "Night Kingdom™️",
+      "deck_name": "Valkyrie Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 4.0,
+      "battles": 11,
+      "trophies": 2677,
+      "cards": [
+        "Valkyrie Evolution",
+        "Hero Barbarian Barrel",
+        "Zap Evolution",
+        "Lava Hound",
+        "Spirit Empress",
+        "Fireball",
+        "Skeleton Dragons",
+        "Tombstone"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_16",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 16 的卡组是 Valkyrie Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 SaintBelikin，战队是 APUK。平均费用是 4.0。战斗数是 11。奖杯数是 2671。卡组构成包括：Valkyrie Evolution，Hero Barbarian Barrel，Zap Evolution，Lava Hound，Spirit Empress，Fireball，Skeleton Dragons，Tombstone。",
+    "metadata": {
+      "rank": 16,
+      "player_name": "SaintBelikin",
+      "clan_name": "APUK",
+      "deck_name": "Valkyrie Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 4.0,
+      "battles": 11,
+      "trophies": 2671,
+      "cards": [
+        "Valkyrie Evolution",
+        "Hero Barbarian Barrel",
+        "Zap Evolution",
+        "Lava Hound",
+        "Spirit Empress",
+        "Fireball",
+        "Skeleton Dragons",
+        "Tombstone"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_17",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 17 的卡组是 Hunter Evolution / Hero Balloon。使用该卡组的玩家是 HC │ Sirenoman⚡，战队是 Meethegods。平均费用是 3.3。战斗数是 8。奖杯数是 2651。卡组构成包括：Hunter Evolution，Hero Balloon，Hero Ice Golem，Miner，Giant Skeleton，Minions，Electro Spirit，Giant Snowball。",
+    "metadata": {
+      "rank": 17,
+      "player_name": "HC │ Sirenoman⚡",
+      "clan_name": "Meethegods",
+      "deck_name": "Hunter Evolution / Hero Balloon",
+      "avg_elixir": 3.3,
+      "battles": 8,
+      "trophies": 2651,
+      "cards": [
+        "Hunter Evolution",
+        "Hero Balloon",
+        "Hero Ice Golem",
+        "Miner",
+        "Giant Skeleton",
+        "Minions",
+        "Electro Spirit",
+        "Giant Snowball"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_18",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 18 的卡组是 Executioner Evolution / Golden Knight。使用该卡组的玩家是 Meta，战队是 Meethegods。平均费用是 4.3。战斗数是 15。奖杯数是 2650。卡组构成包括：Executioner Evolution，Golden Knight，Inferno Dragon Evolution，Graveyard，Bowler，Zappies，Tornado，Freeze。",
+    "metadata": {
+      "rank": 18,
+      "player_name": "Meta",
+      "clan_name": "Meethegods",
+      "deck_name": "Executioner Evolution / Golden Knight",
+      "avg_elixir": 4.3,
+      "battles": 15,
+      "trophies": 2650,
+      "cards": [
+        "Executioner Evolution",
+        "Golden Knight",
+        "Inferno Dragon Evolution",
+        "Graveyard",
+        "Bowler",
+        "Zappies",
+        "Tornado",
+        "Freeze"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_19",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 19 的卡组是 Goblin Barrel Evolution / Wall Breakers。使用该卡组的玩家是 Hypno ❤️ Ethan，战队是 Night Kingdom™️。平均费用是 2.8。战斗数是 9。奖杯数是 2646。卡组构成包括：Goblin Barrel Evolution，Wall Breakers，Skeleton Army Evolution，Valkyrie，Princess，Dart Goblin，Ice Spirit，Cannon。",
+    "metadata": {
+      "rank": 19,
+      "player_name": "Hypno ❤️ Ethan",
+      "clan_name": "Night Kingdom™️",
+      "deck_name": "Goblin Barrel Evolution / Wall Breakers",
+      "avg_elixir": 2.8,
+      "battles": 9,
+      "trophies": 2646,
+      "cards": [
+        "Goblin Barrel Evolution",
+        "Wall Breakers",
+        "Skeleton Army Evolution",
+        "Valkyrie",
+        "Princess",
+        "Dart Goblin",
+        "Ice Spirit",
+        "Cannon"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_20",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 20 的卡组是 Executioner Evolution / Hero Knight。使用该卡组的玩家是 ❄️Đ₳Ɽ₮Ⱨ V₳ĐɆⱤ❄️，战队是 MINIPEKKLAN。平均费用是 3.9。战斗数是 12。奖杯数是 2646。卡组构成包括：Executioner Evolution，Hero Knight，Inferno Dragon Evolution，Graveyard，Bowler，Goblins，Tornado，Freeze。",
+    "metadata": {
+      "rank": 20,
+      "player_name": "❄️Đ₳Ɽ₮Ⱨ V₳ĐɆⱤ❄️",
+      "clan_name": "MINIPEKKLAN",
+      "deck_name": "Executioner Evolution / Hero Knight",
+      "avg_elixir": 3.9,
+      "battles": 12,
+      "trophies": 2646,
+      "cards": [
+        "Executioner Evolution",
+        "Hero Knight",
+        "Inferno Dragon Evolution",
+        "Graveyard",
+        "Bowler",
+        "Goblins",
+        "Tornado",
+        "Freeze"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_21",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 21 的卡组是 Mortar Evolution / Archer Queen。使用该卡组的玩家是 продам гараж，战队是 фрвшфшрв。平均费用是 3.0。战斗数是 7。奖杯数是 2645。卡组构成包括：Mortar Evolution，Archer Queen，Lumberjack Evolution，Miner，Fireball，Fire Spirit，Skeletons，The Log。",
+    "metadata": {
+      "rank": 21,
+      "player_name": "продам гараж",
+      "clan_name": "фрвшфшрв",
+      "deck_name": "Mortar Evolution / Archer Queen",
+      "avg_elixir": 3.0,
+      "battles": 7,
+      "trophies": 2645,
+      "cards": [
+        "Mortar Evolution",
+        "Archer Queen",
+        "Lumberjack Evolution",
+        "Miner",
+        "Fireball",
+        "Fire Spirit",
+        "Skeletons",
+        "The Log"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_22",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 22 的卡组是 Archers Evolution / Hero Knight。使用该卡组的玩家是 Heisenberg，战队是 SmokedOut。平均费用是 3.0。战斗数是 7。奖杯数是 2645。卡组构成包括：Archers Evolution，Hero Knight，Tesla Evolution，X-Bow，Fireball，Skeletons，Electro Spirit，The Log。",
+    "metadata": {
+      "rank": 22,
+      "player_name": "Heisenberg",
+      "clan_name": "SmokedOut",
+      "deck_name": "Archers Evolution / Hero Knight",
+      "avg_elixir": 3.0,
+      "battles": 7,
+      "trophies": 2645,
+      "cards": [
+        "Archers Evolution",
+        "Hero Knight",
+        "Tesla Evolution",
+        "X-Bow",
+        "Fireball",
+        "Skeletons",
+        "Electro Spirit",
+        "The Log"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_23",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 23 的卡组是 Executioner Evolution / Boss Bandit。使用该卡组的玩家是 RUBIZALEZ，战队是 warmup。平均费用是 3.6。战斗数是 7。奖杯数是 2642。卡组构成包括：Executioner Evolution，Boss Bandit，Giant Snowball Evolution，Ram Rider，Lightning，Bomber，Skeletons，Barbarian Barrel。",
+    "metadata": {
+      "rank": 23,
+      "player_name": "RUBIZALEZ",
+      "clan_name": "warmup",
+      "deck_name": "Executioner Evolution / Boss Bandit",
+      "avg_elixir": 3.6,
+      "battles": 7,
+      "trophies": 2642,
+      "cards": [
+        "Executioner Evolution",
+        "Boss Bandit",
+        "Giant Snowball Evolution",
+        "Ram Rider",
+        "Lightning",
+        "Bomber",
+        "Skeletons",
+        "Barbarian Barrel"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_24",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 24 的卡组是 Goblin Drill Evolution / Hero Knight。使用该卡组的玩家是 Flash Light，战队是 No Clan。平均费用是 2.6。战斗数是 6。奖杯数是 2641。卡组构成包括：Goblin Drill Evolution，Hero Knight，Giant Snowball Evolution，Poison，Bomber，Fire Spirit，Skeletons，Tesla。",
+    "metadata": {
+      "rank": 24,
+      "player_name": "Flash Light",
+      "clan_name": "No Clan",
+      "deck_name": "Goblin Drill Evolution / Hero Knight",
+      "avg_elixir": 2.6,
+      "battles": 6,
+      "trophies": 2641,
+      "cards": [
+        "Goblin Drill Evolution",
+        "Hero Knight",
+        "Giant Snowball Evolution",
+        "Poison",
+        "Bomber",
+        "Fire Spirit",
+        "Skeletons",
+        "Tesla"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_25",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 25 的卡组是 Musketeer Evolution / Hero Goblins。使用该卡组的玩家是 WL✨まつもとColin✨安之，战队是 Elite Forcers。平均费用是 3.6。战斗数是 12。奖杯数是 2641。卡组构成包括：Musketeer Evolution，Hero Goblins，Knight Evolution，Graveyard，Skeleton Dragons，Arrows，Freeze，Bomb Tower。",
+    "metadata": {
+      "rank": 25,
+      "player_name": "WL✨まつもとColin✨安之",
+      "clan_name": "Elite Forcers",
+      "deck_name": "Musketeer Evolution / Hero Goblins",
+      "avg_elixir": 3.6,
+      "battles": 12,
+      "trophies": 2641,
+      "cards": [
+        "Musketeer Evolution",
+        "Hero Goblins",
+        "Knight Evolution",
+        "Graveyard",
+        "Skeleton Dragons",
+        "Arrows",
+        "Freeze",
+        "Bomb Tower"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_26",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 26 的卡组是 Archers Evolution / Hero Knight。使用该卡组的玩家是 smok，战队是 epicstyletacos。平均费用是 3.3。战斗数是 7。奖杯数是 2638。卡组构成包括：Archers Evolution，Hero Knight，Tesla Evolution，X-Bow，Rocket，Skeletons，Electro Spirit，The Log。",
+    "metadata": {
+      "rank": 26,
+      "player_name": "smok",
+      "clan_name": "epicstyletacos",
+      "deck_name": "Archers Evolution / Hero Knight",
+      "avg_elixir": 3.3,
+      "battles": 7,
+      "trophies": 2638,
+      "cards": [
+        "Archers Evolution",
+        "Hero Knight",
+        "Tesla Evolution",
+        "X-Bow",
+        "Rocket",
+        "Skeletons",
+        "Electro Spirit",
+        "The Log"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_27",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 27 的卡组是 Zap Evolution / Hero Giant。使用该卡组的玩家是 Tanjiro，战队是 deck。平均费用是 3.4。战斗数是 9。奖杯数是 2638。卡组构成包括：Zap Evolution，Hero Giant，Hero Mega Minion，Prince，Dark Prince，Fireball，Bomber，Rage。",
+    "metadata": {
+      "rank": 27,
+      "player_name": "Tanjiro",
+      "clan_name": "deck",
+      "deck_name": "Zap Evolution / Hero Giant",
+      "avg_elixir": 3.4,
+      "battles": 9,
+      "trophies": 2638,
+      "cards": [
+        "Zap Evolution",
+        "Hero Giant",
+        "Hero Mega Minion",
+        "Prince",
+        "Dark Prince",
+        "Fireball",
+        "Bomber",
+        "Rage"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_28",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 28 的卡组是 Furnace Evolution / Goblin Drill。使用该卡组的玩家是 Benjamin，战队是 Meethegods。平均费用是 2.9。战斗数是 8。奖杯数是 2632。卡组构成包括：Furnace Evolution，Goblin Drill，Giant Snowball Evolution，Berserker，Poison，Skeletons，Royal Delivery，Cannon。",
+    "metadata": {
+      "rank": 28,
+      "player_name": "Benjamin",
+      "clan_name": "Meethegods",
+      "deck_name": "Furnace Evolution / Goblin Drill",
+      "avg_elixir": 2.9,
+      "battles": 8,
+      "trophies": 2632,
+      "cards": [
+        "Furnace Evolution",
+        "Goblin Drill",
+        "Giant Snowball Evolution",
+        "Berserker",
+        "Poison",
+        "Skeletons",
+        "Royal Delivery",
+        "Cannon"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_29",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 29 的卡组是 Valkyrie Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 Dominik，战队是 CRL。平均费用是 4.0。战斗数是 11。奖杯数是 2628。卡组构成包括：Valkyrie Evolution，Hero Barbarian Barrel，Zap Evolution，Lava Hound，Spirit Empress，Fireball，Skeleton Dragons，Tombstone。",
+    "metadata": {
+      "rank": 29,
+      "player_name": "Dominik",
+      "clan_name": "CRL",
+      "deck_name": "Valkyrie Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 4.0,
+      "battles": 11,
+      "trophies": 2628,
+      "cards": [
+        "Valkyrie Evolution",
+        "Hero Barbarian Barrel",
+        "Zap Evolution",
+        "Lava Hound",
+        "Spirit Empress",
+        "Fireball",
+        "Skeleton Dragons",
+        "Tombstone"
+      ]
+    }
+  },
+  {
+    "doc_id": "deck_30",
+    "source_type": "deck",
+    "text": "热门卡组信息。排名第 30 的卡组是 Furnace Evolution / Hero Barbarian Barrel。使用该卡组的玩家是 ATN Schwarzen，战队是 Spfr Stockheim。平均费用是 3.4。战斗数是 10。奖杯数是 2627。卡组构成包括：Furnace Evolution，Hero Barbarian Barrel，Knight Evolution，Graveyard，Dark Prince，Poison，Goblin Hut，Skeletons。",
+    "metadata": {
+      "rank": 30,
+      "player_name": "ATN Schwarzen",
+      "clan_name": "Spfr Stockheim",
+      "deck_name": "Furnace Evolution / Hero Barbarian Barrel",
+      "avg_elixir": 3.4,
+      "battles": 10,
+      "trophies": 2627,
+      "cards": [
+        "Furnace Evolution",
+        "Hero Barbarian Barrel",
+        "Knight Evolution",
+        "Graveyard",
+        "Dark Prince",
+        "Poison",
+        "Goblin Hut",
+        "Skeletons"
+      ]
+    }
+  },
+  {
+    "doc_id": "card_1_Tower Princess",
+    "source_type": "card",
+    "text": "卡牌统计信息。Tower Princess 在 Ultimate Champion 模式下，排名第 1。评分是 50。使用率是 94.0%，变化是 0.4%。胜率是 50.0%，变化是 0.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 1,
+      "card_name": "Tower Princess",
+      "rating": 50,
+      "usage_rate": 94.0,
+      "usage_delta": 0.4,
+      "win_rate": 50.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_2_Fireball",
+    "source_type": "card",
+    "text": "卡牌统计信息。Fireball 在 Ultimate Champion 模式下，排名第 2。评分是 51。使用率是 36.0%，变化是 -9.1%。胜率是 50.0%，变化是 0.1%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 2,
+      "card_name": "Fireball",
+      "rating": 51,
+      "usage_rate": 36.0,
+      "usage_delta": -9.1,
+      "win_rate": 50.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_3_Skeletons",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeletons 在 Ultimate Champion 模式下，排名第 3。评分是 47。使用率是 21.0%，变化是 -4.5%。胜率是 49.0%，变化是 0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 3,
+      "card_name": "Skeletons",
+      "rating": 47,
+      "usage_rate": 21.0,
+      "usage_delta": -4.5,
+      "win_rate": 49.0,
+      "win_delta": 0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_4_The Log",
+    "source_type": "card",
+    "text": "卡牌统计信息。The Log 在 Ultimate Champion 模式下，排名第 4。评分是 48。使用率是 19.0%，变化是 -5.2%。胜率是 49.0%，变化是 -0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 4,
+      "card_name": "The Log",
+      "rating": 48,
+      "usage_rate": 19.0,
+      "usage_delta": -5.2,
+      "win_rate": 49.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_5_Barbarian Barrel",
+    "source_type": "card",
+    "text": "卡牌统计信息。Barbarian Barrel 在 Ultimate Champion 模式下，排名第 5。评分是 50。使用率是 19.0%，变化是 -4.8%。胜率是 50.0%，变化是 -0.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 5,
+      "card_name": "Barbarian Barrel",
+      "rating": 50,
+      "usage_rate": 19.0,
+      "usage_delta": -4.8,
+      "win_rate": 50.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_6_Tornado",
+    "source_type": "card",
+    "text": "卡牌统计信息。Tornado 在 Ultimate Champion 模式下，排名第 6。评分是 48。使用率是 17.0%，变化是 4.4%。胜率是 50.0%，变化是 0.1%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 6,
+      "card_name": "Tornado",
+      "rating": 48,
+      "usage_rate": 17.0,
+      "usage_delta": 4.4,
+      "win_rate": 50.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_7_Arrows",
+    "source_type": "card",
+    "text": "卡牌统计信息。Arrows 在 Ultimate Champion 模式下，排名第 7。评分是 49。使用率是 17.0%，变化是 1.0%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 7,
+      "card_name": "Arrows",
+      "rating": 49,
+      "usage_rate": 17.0,
+      "usage_delta": 1.0,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_8_Hero Barbarian Barrel",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Barbarian Barrel 在 Ultimate Champion 模式下，排名第 8。评分是 49。使用率是 14.0%，变化是 3.1%。胜率是 50.0%，变化是 0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 8,
+      "card_name": "Hero Barbarian Barrel",
+      "rating": 49,
+      "usage_rate": 14.0,
+      "usage_delta": 3.1,
+      "win_rate": 50.0,
+      "win_delta": 0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_9_Electro Spirit",
+    "source_type": "card",
+    "text": "卡牌统计信息。Electro Spirit 在 Ultimate Champion 模式下，排名第 9。评分是 49。使用率是 14.0%，变化是 -6.3%。胜率是 50.0%，变化是 -0.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 9,
+      "card_name": "Electro Spirit",
+      "rating": 49,
+      "usage_rate": 14.0,
+      "usage_delta": -6.3,
+      "win_rate": 50.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_10_Giant Skeleton",
+    "source_type": "card",
+    "text": "卡牌统计信息。Giant Skeleton 在 Ultimate Champion 模式下，排名第 10。评分是 53。使用率是 14.0%，变化是 2.5%。胜率是 51.0%，变化是 0.5%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 10,
+      "card_name": "Giant Skeleton",
+      "rating": 53,
+      "usage_rate": 14.0,
+      "usage_delta": 2.5,
+      "win_rate": 51.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_11_Skeleton Dragons",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeleton Dragons 在 Ultimate Champion 模式下，排名第 11。评分是 51。使用率是 14.0%，变化是 11.4%。胜率是 51.0%，变化是 -0.1%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 11,
+      "card_name": "Skeleton Dragons",
+      "rating": 51,
+      "usage_rate": 14.0,
+      "usage_delta": 11.4,
+      "win_rate": 51.0,
+      "win_delta": -0.1,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_12_Dark Prince",
+    "source_type": "card",
+    "text": "卡牌统计信息。Dark Prince 在 Ultimate Champion 模式下，排名第 12。评分是 52。使用率是 14.0%，变化是 1.6%。胜率是 51.0%，变化是 0.5%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 12,
+      "card_name": "Dark Prince",
+      "rating": 52,
+      "usage_rate": 14.0,
+      "usage_delta": 1.6,
+      "win_rate": 51.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_13_Zap",
+    "source_type": "card",
+    "text": "卡牌统计信息。Zap 在 Ultimate Champion 模式下，排名第 13。评分是 49。使用率是 12.0%，变化是 -0.4%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 13,
+      "card_name": "Zap",
+      "rating": 49,
+      "usage_rate": 12.0,
+      "usage_delta": -0.4,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_14_Hero Knight",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Knight 在 Ultimate Champion 模式下，排名第 14。评分是 48。使用率是 12.0%，变化是 1.8%。胜率是 50.0%，变化是 0.4%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 14,
+      "card_name": "Hero Knight",
+      "rating": 48,
+      "usage_rate": 12.0,
+      "usage_delta": 1.8,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_15_Lumberjack Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Lumberjack Evolution 在 Ultimate Champion 模式下，排名第 15。评分是 52。使用率是 11.0%，变化是 5.2%。胜率是 51.0%，变化是 1.0%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 15,
+      "card_name": "Lumberjack Evolution",
+      "rating": 52,
+      "usage_rate": 11.0,
+      "usage_delta": 5.2,
+      "win_rate": 51.0,
+      "win_delta": 1.0,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_16_Hero Goblins",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Goblins 在 Ultimate Champion 模式下，排名第 16。评分是 51。使用率是 11.0%，变化是 -1.1%。胜率是 51.0%，变化是 -0.0%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 16,
+      "card_name": "Hero Goblins",
+      "rating": 51,
+      "usage_rate": 11.0,
+      "usage_delta": -1.1,
+      "win_rate": 51.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_17_Poison",
+    "source_type": "card",
+    "text": "卡牌统计信息。Poison 在 Ultimate Champion 模式下，排名第 17。评分是 47。使用率是 10.0%，变化是 2.6%。胜率是 49.0%，变化是 1.6%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 17,
+      "card_name": "Poison",
+      "rating": 47,
+      "usage_rate": 10.0,
+      "usage_delta": 2.6,
+      "win_rate": 49.0,
+      "win_delta": 1.6,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_18_Battle Ram Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Battle Ram Evolution 在 Ultimate Champion 模式下，排名第 18。评分是 53。使用率是 10.0%，变化是 1.1%。胜率是 52.0%，变化是 0.3%。净胜率是 52.0%。",
+    "metadata": {
+      "rank": 18,
+      "card_name": "Battle Ram Evolution",
+      "rating": 53,
+      "usage_rate": 10.0,
+      "usage_delta": 1.1,
+      "win_rate": 52.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 52.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_19_Hog Rider",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hog Rider 在 Ultimate Champion 模式下，排名第 19。评分是 47。使用率是 9.0%，变化是 1.0%。胜率是 49.0%，变化是 -0.5%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 19,
+      "card_name": "Hog Rider",
+      "rating": 47,
+      "usage_rate": 9.0,
+      "usage_delta": 1.0,
+      "win_rate": 49.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_20_Zap Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Zap Evolution 在 Ultimate Champion 模式下，排名第 20。评分是 50。使用率是 9.0%，变化是 0.3%。胜率是 51.0%，变化是 0.1%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 20,
+      "card_name": "Zap Evolution",
+      "rating": 50,
+      "usage_rate": 9.0,
+      "usage_delta": 0.3,
+      "win_rate": 51.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_21_Hero Balloon",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Balloon 在 Ultimate Champion 模式下，排名第 21。评分是 49。使用率是 9.0%，变化是 7.5%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 21,
+      "card_name": "Hero Balloon",
+      "rating": 49,
+      "usage_rate": 9.0,
+      "usage_delta": 7.5,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_22_Valkyrie Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Valkyrie Evolution 在 Ultimate Champion 模式下，排名第 22。评分是 47。使用率是 9.0%，变化是 0.7%。胜率是 49.0%，变化是 -0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 22,
+      "card_name": "Valkyrie Evolution",
+      "rating": 47,
+      "usage_rate": 9.0,
+      "usage_delta": 0.7,
+      "win_rate": 49.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_23_Ice Spirit",
+    "source_type": "card",
+    "text": "卡牌统计信息。Ice Spirit 在 Ultimate Champion 模式下，排名第 23。评分是 46。使用率是 9.0%，变化是 0.8%。胜率是 49.0%，变化是 0.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 23,
+      "card_name": "Ice Spirit",
+      "rating": 46,
+      "usage_rate": 9.0,
+      "usage_delta": 0.8,
+      "win_rate": 49.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_24_Inferno Dragon Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Inferno Dragon Evolution 在 Ultimate Champion 模式下，排名第 24。评分是 50。使用率是 9.0%，变化是 2.3%。胜率是 50.0%，变化是 0.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 24,
+      "card_name": "Inferno Dragon Evolution",
+      "rating": 50,
+      "usage_rate": 9.0,
+      "usage_delta": 2.3,
+      "win_rate": 50.0,
+      "win_delta": 0.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_25_Lightning",
+    "source_type": "card",
+    "text": "卡牌统计信息。Lightning 在 Ultimate Champion 模式下，排名第 25。评分是 47。使用率是 9.0%，变化是 1.5%。胜率是 49.0%，变化是 -0.4%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 25,
+      "card_name": "Lightning",
+      "rating": 47,
+      "usage_rate": 9.0,
+      "usage_delta": 1.5,
+      "win_rate": 49.0,
+      "win_delta": -0.4,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_26_Graveyard",
+    "source_type": "card",
+    "text": "卡牌统计信息。Graveyard 在 Ultimate Champion 模式下，排名第 26。评分是 50。使用率是 9.0%，变化是 2.6%。胜率是 50.0%，变化是 1.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 26,
+      "card_name": "Graveyard",
+      "rating": 50,
+      "usage_rate": 9.0,
+      "usage_delta": 2.6,
+      "win_rate": 50.0,
+      "win_delta": 1.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_27_Zappies",
+    "source_type": "card",
+    "text": "卡牌统计信息。Zappies 在 Ultimate Champion 模式下，排名第 27。评分是 53。使用率是 9.0%，变化是 2.3%。胜率是 51.0%，变化是 0.5%。净胜率是 52.0%。",
+    "metadata": {
+      "rank": 27,
+      "card_name": "Zappies",
+      "rating": 53,
+      "usage_rate": 9.0,
+      "usage_delta": 2.3,
+      "win_rate": 51.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 52.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_28_Executioner Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Executioner Evolution 在 Ultimate Champion 模式下，排名第 28。评分是 50。使用率是 8.0%，变化是 3.7%。胜率是 50.0%，变化是 0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 28,
+      "card_name": "Executioner Evolution",
+      "rating": 50,
+      "usage_rate": 8.0,
+      "usage_delta": 3.7,
+      "win_rate": 50.0,
+      "win_delta": 0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_29_Miner",
+    "source_type": "card",
+    "text": "卡牌统计信息。Miner 在 Ultimate Champion 模式下，排名第 29。评分是 47。使用率是 8.0%，变化是 1.4%。胜率是 49.0%，变化是 0.7%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 29,
+      "card_name": "Miner",
+      "rating": 47,
+      "usage_rate": 8.0,
+      "usage_delta": 1.4,
+      "win_rate": 49.0,
+      "win_delta": 0.7,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_30_Minions",
+    "source_type": "card",
+    "text": "卡牌统计信息。Minions 在 Ultimate Champion 模式下，排名第 30。评分是 51。使用率是 8.0%，变化是 0.4%。胜率是 51.0%，变化是 0.4%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 30,
+      "card_name": "Minions",
+      "rating": 51,
+      "usage_rate": 8.0,
+      "usage_delta": 0.4,
+      "win_rate": 51.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_31_Tesla Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Tesla Evolution 在 Ultimate Champion 模式下，排名第 31。评分是 48。使用率是 8.0%，变化是 1.3%。胜率是 50.0%，变化是 0.5%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 31,
+      "card_name": "Tesla Evolution",
+      "rating": 48,
+      "usage_rate": 8.0,
+      "usage_delta": 1.3,
+      "win_rate": 50.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_32_Royal Ghost Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Ghost Evolution 在 Ultimate Champion 模式下，排名第 32。评分是 49。使用率是 8.0%，变化是 -21.2%。胜率是 50.0%，变化是 -0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 32,
+      "card_name": "Royal Ghost Evolution",
+      "rating": 49,
+      "usage_rate": 8.0,
+      "usage_delta": -21.2,
+      "win_rate": 50.0,
+      "win_delta": -0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_33_Freeze",
+    "source_type": "card",
+    "text": "卡牌统计信息。Freeze 在 Ultimate Champion 模式下，排名第 33。评分是 50。使用率是 7.0%，变化是 3.1%。胜率是 50.0%，变化是 0.1%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 33,
+      "card_name": "Freeze",
+      "rating": 50,
+      "usage_rate": 7.0,
+      "usage_delta": 3.1,
+      "win_rate": 50.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_34_Hero Mega Minion",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Mega Minion 在 Ultimate Champion 模式下，排名第 34。评分是 47。使用率是 7.0%，变化是 -2.4%。胜率是 49.0%，变化是 -0.5%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 34,
+      "card_name": "Hero Mega Minion",
+      "rating": 47,
+      "usage_rate": 7.0,
+      "usage_delta": -2.4,
+      "win_rate": 49.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_35_Bowler",
+    "source_type": "card",
+    "text": "卡牌统计信息。Bowler 在 Ultimate Champion 模式下，排名第 35。评分是 50。使用率是 7.0%，变化是 1.8%。胜率是 51.0%，变化是 -0.2%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 35,
+      "card_name": "Bowler",
+      "rating": 50,
+      "usage_rate": 7.0,
+      "usage_delta": 1.8,
+      "win_rate": 51.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_36_Lava Hound",
+    "source_type": "card",
+    "text": "卡牌统计信息。Lava Hound 在 Ultimate Champion 模式下，排名第 36。评分是 48。使用率是 7.0%，变化是 1.7%。胜率是 50.0%，变化是 -0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 36,
+      "card_name": "Lava Hound",
+      "rating": 48,
+      "usage_rate": 7.0,
+      "usage_delta": 1.7,
+      "win_rate": 50.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_37_Spirit Empress",
+    "source_type": "card",
+    "text": "卡牌统计信息。Spirit Empress 在 Ultimate Champion 模式下，排名第 37。评分是 48。使用率是 7.0%，变化是 0.3%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 37,
+      "card_name": "Spirit Empress",
+      "rating": 48,
+      "usage_rate": 7.0,
+      "usage_delta": 0.3,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_38_Giant Snowball Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Giant Snowball Evolution 在 Ultimate Champion 模式下，排名第 38。评分是 48。使用率是 7.0%，变化是 2.7%。胜率是 50.0%，变化是 0.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 38,
+      "card_name": "Giant Snowball Evolution",
+      "rating": 48,
+      "usage_rate": 7.0,
+      "usage_delta": 2.7,
+      "win_rate": 50.0,
+      "win_delta": 0.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_39_Golem",
+    "source_type": "card",
+    "text": "卡牌统计信息。Golem 在 Ultimate Champion 模式下，排名第 39。评分是 48。使用率是 7.0%，变化是 -0.3%。胜率是 50.0%，变化是 0.1%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 39,
+      "card_name": "Golem",
+      "rating": 48,
+      "usage_rate": 7.0,
+      "usage_delta": -0.3,
+      "win_rate": 50.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_40_Furnace Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Furnace Evolution 在 Ultimate Champion 模式下，排名第 40。评分是 48。使用率是 7.0%，变化是 2.1%。胜率是 50.0%，变化是 0.9%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 40,
+      "card_name": "Furnace Evolution",
+      "rating": 48,
+      "usage_rate": 7.0,
+      "usage_delta": 2.1,
+      "win_rate": 50.0,
+      "win_delta": 0.9,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_41_Goblin Cage Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Cage Evolution 在 Ultimate Champion 模式下，排名第 41。评分是 49。使用率是 7.0%，变化是 3.1%。胜率是 50.0%，变化是 -0.1%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 41,
+      "card_name": "Goblin Cage Evolution",
+      "rating": 49,
+      "usage_rate": 7.0,
+      "usage_delta": 3.1,
+      "win_rate": 50.0,
+      "win_delta": -0.1,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_42_Hero Magic Archer",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Magic Archer 在 Ultimate Champion 模式下，排名第 42。评分是 48。使用率是 7.0%，变化是 -19.7%。胜率是 50.0%，变化是 -0.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 42,
+      "card_name": "Hero Magic Archer",
+      "rating": 48,
+      "usage_rate": 7.0,
+      "usage_delta": -19.7,
+      "win_rate": 50.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_43_Skeleton Barrel Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeleton Barrel Evolution 在 Ultimate Champion 模式下，排名第 43。评分是 50。使用率是 7.0%，变化是 -2.8%。胜率是 50.0%，变化是 -0.9%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 43,
+      "card_name": "Skeleton Barrel Evolution",
+      "rating": 50,
+      "usage_rate": 7.0,
+      "usage_delta": -2.8,
+      "win_rate": 50.0,
+      "win_delta": -0.9,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_44_Electro Wizard",
+    "source_type": "card",
+    "text": "卡牌统计信息。Electro Wizard 在 Ultimate Champion 模式下，排名第 44。评分是 49。使用率是 6.0%，变化是 -0.8%。胜率是 50.0%，变化是 -0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 44,
+      "card_name": "Electro Wizard",
+      "rating": 49,
+      "usage_rate": 6.0,
+      "usage_delta": -0.8,
+      "win_rate": 50.0,
+      "win_delta": -0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_45_Cannon Cart",
+    "source_type": "card",
+    "text": "卡牌统计信息。Cannon Cart 在 Ultimate Champion 模式下，排名第 45。评分是 51。使用率是 6.0%，变化是 2.4%。胜率是 51.0%，变化是 -0.3%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 45,
+      "card_name": "Cannon Cart",
+      "rating": 51,
+      "usage_rate": 6.0,
+      "usage_delta": 2.4,
+      "win_rate": 51.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_46_Rascals",
+    "source_type": "card",
+    "text": "卡牌统计信息。Rascals 在 Ultimate Champion 模式下，排名第 46。评分是 52。使用率是 6.0%，变化是 -1.6%。胜率是 51.0%，变化是 -0.5%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 46,
+      "card_name": "Rascals",
+      "rating": 52,
+      "usage_rate": 6.0,
+      "usage_delta": -1.6,
+      "win_rate": 51.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_47_Hero Wizard",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Wizard 在 Ultimate Champion 模式下，排名第 47。评分是 52。使用率是 6.0%，变化是 3.2%。胜率是 51.0%，变化是 0.7%。净胜率是 52.0%。",
+    "metadata": {
+      "rank": 47,
+      "card_name": "Hero Wizard",
+      "rating": 52,
+      "usage_rate": 6.0,
+      "usage_delta": 3.2,
+      "win_rate": 51.0,
+      "win_delta": 0.7,
+      "clean_win_rate": 52.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_48_Tombstone",
+    "source_type": "card",
+    "text": "卡牌统计信息。Tombstone 在 Ultimate Champion 模式下，排名第 48。评分是 48。使用率是 6.0%，变化是 1.0%。胜率是 50.0%，变化是 -0.1%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 48,
+      "card_name": "Tombstone",
+      "rating": 48,
+      "usage_rate": 6.0,
+      "usage_delta": 1.0,
+      "win_rate": 50.0,
+      "win_delta": -0.1,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_49_Skeleton Army Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeleton Army Evolution 在 Ultimate Champion 模式下，排名第 49。评分是 49。使用率是 6.0%，变化是 1.3%。胜率是 50.0%，变化是 0.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 49,
+      "card_name": "Skeleton Army Evolution",
+      "rating": 49,
+      "usage_rate": 6.0,
+      "usage_delta": 1.3,
+      "win_rate": 50.0,
+      "win_delta": 0.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_50_Fire Spirit",
+    "source_type": "card",
+    "text": "卡牌统计信息。Fire Spirit 在 Ultimate Champion 模式下，排名第 50。评分是 45。使用率是 6.0%，变化是 -0.9%。胜率是 49.0%，变化是 0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 50,
+      "card_name": "Fire Spirit",
+      "rating": 45,
+      "usage_rate": 6.0,
+      "usage_delta": -0.9,
+      "win_rate": 49.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_51_Bandit",
+    "source_type": "card",
+    "text": "卡牌统计信息。Bandit 在 Ultimate Champion 模式下，排名第 51。评分是 49。使用率是 6.0%，变化是 -0.3%。胜率是 50.0%，变化是 -0.8%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 51,
+      "card_name": "Bandit",
+      "rating": 49,
+      "usage_rate": 6.0,
+      "usage_delta": -0.3,
+      "win_rate": 50.0,
+      "win_delta": -0.8,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_52_Bomber",
+    "source_type": "card",
+    "text": "卡牌统计信息。Bomber 在 Ultimate Champion 模式下，排名第 52。评分是 48。使用率是 6.0%，变化是 0.9%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 52,
+      "card_name": "Bomber",
+      "rating": 48,
+      "usage_rate": 6.0,
+      "usage_delta": 0.9,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_53_Night Witch",
+    "source_type": "card",
+    "text": "卡牌统计信息。Night Witch 在 Ultimate Champion 模式下，排名第 53。评分是 48。使用率是 6.0%，变化是 -0.7%。胜率是 50.0%，变化是 -0.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 53,
+      "card_name": "Night Witch",
+      "rating": 48,
+      "usage_rate": 6.0,
+      "usage_delta": -0.7,
+      "win_rate": 50.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_54_Mortar Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mortar Evolution 在 Ultimate Champion 模式下，排名第 54。评分是 50。使用率是 6.0%，变化是 1.3%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 54,
+      "card_name": "Mortar Evolution",
+      "rating": 50,
+      "usage_rate": 6.0,
+      "usage_delta": 1.3,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_55_Baby Dragon Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Baby Dragon Evolution 在 Ultimate Champion 模式下，排名第 55。评分是 47。使用率是 5.0%，变化是 -0.6%。胜率是 49.0%，变化是 -0.9%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 55,
+      "card_name": "Baby Dragon Evolution",
+      "rating": 47,
+      "usage_rate": 5.0,
+      "usage_delta": -0.6,
+      "win_rate": 49.0,
+      "win_delta": -0.9,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_56_Guards",
+    "source_type": "card",
+    "text": "卡牌统计信息。Guards 在 Ultimate Champion 模式下，排名第 56。评分是 47。使用率是 5.0%，变化是 0.7%。胜率是 50.0%，变化是 0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 56,
+      "card_name": "Guards",
+      "rating": 47,
+      "usage_rate": 5.0,
+      "usage_delta": 0.7,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_57_Mega Knight Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mega Knight Evolution 在 Ultimate Champion 模式下，排名第 57。评分是 48。使用率是 5.0%，变化是 -1.1%。胜率是 50.0%，变化是 -0.8%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 57,
+      "card_name": "Mega Knight Evolution",
+      "rating": 48,
+      "usage_rate": 5.0,
+      "usage_delta": -1.1,
+      "win_rate": 50.0,
+      "win_delta": -0.8,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_58_Bats Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Bats Evolution 在 Ultimate Champion 模式下，排名第 58。评分是 49。使用率是 5.0%，变化是 1.0%。胜率是 50.0%，变化是 1.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 58,
+      "card_name": "Bats Evolution",
+      "rating": 49,
+      "usage_rate": 5.0,
+      "usage_delta": 1.0,
+      "win_rate": 50.0,
+      "win_delta": 1.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_59_Goblin Hut",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Hut 在 Ultimate Champion 模式下，排名第 59。评分是 47。使用率是 5.0%，变化是 -4.7%。胜率是 50.0%，变化是 -0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 59,
+      "card_name": "Goblin Hut",
+      "rating": 47,
+      "usage_rate": 5.0,
+      "usage_delta": -4.7,
+      "win_rate": 50.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_60_Cannon Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Cannon Evolution 在 Ultimate Champion 模式下，排名第 60。评分是 46。使用率是 5.0%，变化是 -1.3%。胜率是 49.0%，变化是 -0.6%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 60,
+      "card_name": "Cannon Evolution",
+      "rating": 46,
+      "usage_rate": 5.0,
+      "usage_delta": -1.3,
+      "win_rate": 49.0,
+      "win_delta": -0.6,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_61_Hero Giant",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Giant 在 Ultimate Champion 模式下，排名第 61。评分是 51。使用率是 5.0%，变化是 0.8%。胜率是 51.0%，变化是 1.0%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 61,
+      "card_name": "Hero Giant",
+      "rating": 51,
+      "usage_rate": 5.0,
+      "usage_delta": 0.8,
+      "win_rate": 51.0,
+      "win_delta": 1.0,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_62_Berserker",
+    "source_type": "card",
+    "text": "卡牌统计信息。Berserker 在 Ultimate Champion 模式下，排名第 62。评分是 48。使用率是 5.0%，变化是 -1.7%。胜率是 50.0%，变化是 -1.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 62,
+      "card_name": "Berserker",
+      "rating": 48,
+      "usage_rate": 5.0,
+      "usage_delta": -1.7,
+      "win_rate": 50.0,
+      "win_delta": -1.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_63_Royal Hogs Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Hogs Evolution 在 Ultimate Champion 模式下，排名第 63。评分是 48。使用率是 5.0%，变化是 -6.7%。胜率是 50.0%，变化是 -0.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 63,
+      "card_name": "Royal Hogs Evolution",
+      "rating": 48,
+      "usage_rate": 5.0,
+      "usage_delta": -6.7,
+      "win_rate": 50.0,
+      "win_delta": -0.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_64_Rocket",
+    "source_type": "card",
+    "text": "卡牌统计信息。Rocket 在 Ultimate Champion 模式下，排名第 64。评分是 47。使用率是 5.0%，变化是 1.1%。胜率是 49.0%，变化是 0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 64,
+      "card_name": "Rocket",
+      "rating": 47,
+      "usage_rate": 5.0,
+      "usage_delta": 1.1,
+      "win_rate": 49.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_65_Golden Knight",
+    "source_type": "card",
+    "text": "卡牌统计信息。Golden Knight 在 Ultimate Champion 模式下，排名第 65。评分是 47。使用率是 5.0%，变化是 1.6%。胜率是 50.0%，变化是 -0.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 65,
+      "card_name": "Golden Knight",
+      "rating": 47,
+      "usage_rate": 5.0,
+      "usage_delta": 1.6,
+      "win_rate": 50.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_66_Rage",
+    "source_type": "card",
+    "text": "卡牌统计信息。Rage 在 Ultimate Champion 模式下，排名第 66。评分是 48。使用率是 5.0%，变化是 0.2%。胜率是 50.0%，变化是 0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 66,
+      "card_name": "Rage",
+      "rating": 48,
+      "usage_rate": 5.0,
+      "usage_delta": 0.2,
+      "win_rate": 50.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_67_Cannon",
+    "source_type": "card",
+    "text": "卡牌统计信息。Cannon 在 Ultimate Champion 模式下，排名第 67。评分是 45。使用率是 5.0%，变化是 -1.3%。胜率是 49.0%，变化是 -0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 67,
+      "card_name": "Cannon",
+      "rating": 45,
+      "usage_rate": 5.0,
+      "usage_delta": -1.3,
+      "win_rate": 49.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_68_Hero Ice Golem",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Ice Golem 在 Ultimate Champion 模式下，排名第 68。评分是 47。使用率是 5.0%，变化是 0.7%。胜率是 49.0%，变化是 -0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 68,
+      "card_name": "Hero Ice Golem",
+      "rating": 47,
+      "usage_rate": 5.0,
+      "usage_delta": 0.7,
+      "win_rate": 49.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_69_Dart Goblin",
+    "source_type": "card",
+    "text": "卡牌统计信息。Dart Goblin 在 Ultimate Champion 模式下，排名第 69。评分是 48。使用率是 4.0%，变化是 -0.8%。胜率是 50.0%，变化是 -0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 69,
+      "card_name": "Dart Goblin",
+      "rating": 48,
+      "usage_rate": 4.0,
+      "usage_delta": -0.8,
+      "win_rate": 50.0,
+      "win_delta": -0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_70_Hero Mini P.E.K.K.A",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Mini P.E.K.K.A 在 Ultimate Champion 模式下，排名第 70。评分是 47。使用率是 4.0%，变化是 0.0%。胜率是 49.0%，变化是 -0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 70,
+      "card_name": "Hero Mini P.E.K.K.A",
+      "rating": 47,
+      "usage_rate": 4.0,
+      "usage_delta": 0.0,
+      "win_rate": 49.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_71_Goblin Drill Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Drill Evolution 在 Ultimate Champion 模式下，排名第 71。评分是 48。使用率是 4.0%，变化是 1.0%。胜率是 50.0%，变化是 0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 71,
+      "card_name": "Goblin Drill Evolution",
+      "rating": 48,
+      "usage_rate": 4.0,
+      "usage_delta": 1.0,
+      "win_rate": 50.0,
+      "win_delta": 0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_72_Archers Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Archers Evolution 在 Ultimate Champion 模式下，排名第 72。评分是 49。使用率是 4.0%，变化是 0.6%。胜率是 50.0%，变化是 0.1%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 72,
+      "card_name": "Archers Evolution",
+      "rating": 49,
+      "usage_rate": 4.0,
+      "usage_delta": 0.6,
+      "win_rate": 50.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_73_X-Bow",
+    "source_type": "card",
+    "text": "卡牌统计信息。X-Bow 在 Ultimate Champion 模式下，排名第 73。评分是 50。使用率是 4.0%，变化是 0.4%。胜率是 50.0%，变化是 0.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 73,
+      "card_name": "X-Bow",
+      "rating": 50,
+      "usage_rate": 4.0,
+      "usage_delta": 0.4,
+      "win_rate": 50.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_74_Elixir Collector",
+    "source_type": "card",
+    "text": "卡牌统计信息。Elixir Collector 在 Ultimate Champion 模式下，排名第 74。评分是 48。使用率是 4.0%，变化是 1.3%。胜率是 50.0%，变化是 -0.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 74,
+      "card_name": "Elixir Collector",
+      "rating": 48,
+      "usage_rate": 4.0,
+      "usage_delta": 1.3,
+      "win_rate": 50.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_75_Vines",
+    "source_type": "card",
+    "text": "卡牌统计信息。Vines 在 Ultimate Champion 模式下，排名第 75。评分是 48。使用率是 4.0%，变化是 -0.1%。胜率是 50.0%，变化是 0.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 75,
+      "card_name": "Vines",
+      "rating": 48,
+      "usage_rate": 4.0,
+      "usage_delta": -0.1,
+      "win_rate": 50.0,
+      "win_delta": 0.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_76_Balloon",
+    "source_type": "card",
+    "text": "卡牌统计信息。Balloon 在 Ultimate Champion 模式下，排名第 76。评分是 47。使用率是 4.0%，变化是 -3.6%。胜率是 49.0%，变化是 -1.0%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 76,
+      "card_name": "Balloon",
+      "rating": 47,
+      "usage_rate": 4.0,
+      "usage_delta": -3.6,
+      "win_rate": 49.0,
+      "win_delta": -1.0,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_77_Royal Giant Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Giant Evolution 在 Ultimate Champion 模式下，排名第 77。评分是 49。使用率是 4.0%，变化是 -1.7%。胜率是 50.0%，变化是 0.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 77,
+      "card_name": "Royal Giant Evolution",
+      "rating": 49,
+      "usage_rate": 4.0,
+      "usage_delta": -1.7,
+      "win_rate": 50.0,
+      "win_delta": 0.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_78_Minion Horde Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Minion Horde Evolution 在 Ultimate Champion 模式下，排名第 78。评分是 50。使用率是 4.0%，变化是 3.1%。胜率是 51.0%，变化是 0.6%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 78,
+      "card_name": "Minion Horde Evolution",
+      "rating": 50,
+      "usage_rate": 4.0,
+      "usage_delta": 3.1,
+      "win_rate": 51.0,
+      "win_delta": 0.6,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_79_Prince",
+    "source_type": "card",
+    "text": "卡牌统计信息。Prince 在 Ultimate Champion 模式下，排名第 79。评分是 49。使用率是 4.0%，变化是 0.6%。胜率是 50.0%，变化是 0.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 79,
+      "card_name": "Prince",
+      "rating": 49,
+      "usage_rate": 4.0,
+      "usage_delta": 0.6,
+      "win_rate": 50.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_80_Bomb Tower",
+    "source_type": "card",
+    "text": "卡牌统计信息。Bomb Tower 在 Ultimate Champion 模式下，排名第 80。评分是 46。使用率是 4.0%，变化是 -0.5%。胜率是 49.0%，变化是 0.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 80,
+      "card_name": "Bomb Tower",
+      "rating": 46,
+      "usage_rate": 4.0,
+      "usage_delta": -0.5,
+      "win_rate": 49.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_81_Musketeer Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Musketeer Evolution 在 Ultimate Champion 模式下，排名第 81。评分是 46。使用率是 4.0%，变化是 0.4%。胜率是 49.0%，变化是 -0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 81,
+      "card_name": "Musketeer Evolution",
+      "rating": 46,
+      "usage_rate": 4.0,
+      "usage_delta": 0.4,
+      "win_rate": 49.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_82_Princess",
+    "source_type": "card",
+    "text": "卡牌统计信息。Princess 在 Ultimate Champion 模式下，排名第 82。评分是 48。使用率是 4.0%，变化是 1.5%。胜率是 50.0%，变化是 0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 82,
+      "card_name": "Princess",
+      "rating": 48,
+      "usage_rate": 4.0,
+      "usage_delta": 1.5,
+      "win_rate": 50.0,
+      "win_delta": 0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_83_Wall Breakers Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Wall Breakers Evolution 在 Ultimate Champion 模式下，排名第 83。评分是 46。使用率是 4.0%，变化是 -2.1%。胜率是 49.0%，变化是 0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 83,
+      "card_name": "Wall Breakers Evolution",
+      "rating": 46,
+      "usage_rate": 4.0,
+      "usage_delta": -2.1,
+      "win_rate": 49.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_84_Fisherman",
+    "source_type": "card",
+    "text": "卡牌统计信息。Fisherman 在 Ultimate Champion 模式下，排名第 84。评分是 48。使用率是 3.0%，变化是 -2.7%。胜率是 50.0%，变化是 0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 84,
+      "card_name": "Fisherman",
+      "rating": 48,
+      "usage_rate": 3.0,
+      "usage_delta": -2.7,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_85_Electro Dragon Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Electro Dragon Evolution 在 Ultimate Champion 模式下，排名第 85。评分是 47。使用率是 3.0%，变化是 1.0%。胜率是 50.0%，变化是 -0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 85,
+      "card_name": "Electro Dragon Evolution",
+      "rating": 47,
+      "usage_rate": 3.0,
+      "usage_delta": 1.0,
+      "win_rate": 50.0,
+      "win_delta": -0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_86_Skeletons Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeletons Evolution 在 Ultimate Champion 模式下，排名第 86。评分是 46。使用率是 3.0%，变化是 -1.1%。胜率是 49.0%，变化是 -0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 86,
+      "card_name": "Skeletons Evolution",
+      "rating": 46,
+      "usage_rate": 3.0,
+      "usage_delta": -1.1,
+      "win_rate": 49.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_87_Sparky",
+    "source_type": "card",
+    "text": "卡牌统计信息。Sparky 在 Ultimate Champion 模式下，排名第 87。评分是 49。使用率是 3.0%，变化是 0.4%。胜率是 50.0%，变化是 0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 87,
+      "card_name": "Sparky",
+      "rating": 49,
+      "usage_rate": 3.0,
+      "usage_delta": 0.4,
+      "win_rate": 50.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_88_Skeleton King",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeleton King 在 Ultimate Champion 模式下，排名第 88。评分是 48。使用率是 3.0%，变化是 0.4%。胜率是 50.0%，变化是 0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 88,
+      "card_name": "Skeleton King",
+      "rating": 48,
+      "usage_rate": 3.0,
+      "usage_delta": 0.4,
+      "win_rate": 50.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_89_Dagger Duchess",
+    "source_type": "card",
+    "text": "卡牌统计信息。Dagger Duchess 在 Ultimate Champion 模式下，排名第 89。评分是 47。使用率是 3.0%，变化是 0.2%。胜率是 49.0%，变化是 -0.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 89,
+      "card_name": "Dagger Duchess",
+      "rating": 47,
+      "usage_rate": 3.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": -0.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_90_Mighty Miner",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mighty Miner 在 Ultimate Champion 模式下，排名第 90。评分是 46。使用率是 3.0%，变化是 1.1%。胜率是 49.0%，变化是 0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 90,
+      "card_name": "Mighty Miner",
+      "rating": 46,
+      "usage_rate": 3.0,
+      "usage_delta": 1.1,
+      "win_rate": 49.0,
+      "win_delta": 0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_91_Goblin Barrel Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Barrel Evolution 在 Ultimate Champion 模式下，排名第 91。评分是 47。使用率是 3.0%，变化是 0.6%。胜率是 50.0%，变化是 1.8%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 91,
+      "card_name": "Goblin Barrel Evolution",
+      "rating": 47,
+      "usage_rate": 3.0,
+      "usage_delta": 0.6,
+      "win_rate": 50.0,
+      "win_delta": 1.8,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_92_Earthquake",
+    "source_type": "card",
+    "text": "卡牌统计信息。Earthquake 在 Ultimate Champion 模式下，排名第 92。评分是 45。使用率是 3.0%，变化是 0.5%。胜率是 49.0%，变化是 -0.6%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 92,
+      "card_name": "Earthquake",
+      "rating": 45,
+      "usage_rate": 3.0,
+      "usage_delta": 0.5,
+      "win_rate": 49.0,
+      "win_delta": -0.6,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_93_Mother Witch",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mother Witch 在 Ultimate Champion 模式下，排名第 93。评分是 51。使用率是 3.0%，变化是 0.2%。胜率是 51.0%，变化是 0.4%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 93,
+      "card_name": "Mother Witch",
+      "rating": 51,
+      "usage_rate": 3.0,
+      "usage_delta": 0.2,
+      "win_rate": 51.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_94_P.E.K.K.A",
+    "source_type": "card",
+    "text": "卡牌统计信息。P.E.K.K.A 在 Ultimate Champion 模式下，排名第 94。评分是 48。使用率是 3.0%，变化是 -1.1%。胜率是 50.0%，变化是 -0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 94,
+      "card_name": "P.E.K.K.A",
+      "rating": 48,
+      "usage_rate": 3.0,
+      "usage_delta": -1.1,
+      "win_rate": 50.0,
+      "win_delta": -0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_95_Witch Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Witch Evolution 在 Ultimate Champion 模式下，排名第 95。评分是 47。使用率是 3.0%，变化是 0.5%。胜率是 50.0%，变化是 0.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 95,
+      "card_name": "Witch Evolution",
+      "rating": 47,
+      "usage_rate": 3.0,
+      "usage_delta": 0.5,
+      "win_rate": 50.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_96_Goblin Gang",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Gang 在 Ultimate Champion 模式下，排名第 96。评分是 46。使用率是 3.0%，变化是 0.2%。胜率是 49.0%，变化是 -0.0%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 96,
+      "card_name": "Goblin Gang",
+      "rating": 46,
+      "usage_rate": 3.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_97_Mini P.E.K.K.A",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mini P.E.K.K.A 在 Ultimate Champion 模式下，排名第 97。评分是 50。使用率是 3.0%，变化是 0.2%。胜率是 51.0%，变化是 1.1%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 97,
+      "card_name": "Mini P.E.K.K.A",
+      "rating": 50,
+      "usage_rate": 3.0,
+      "usage_delta": 0.2,
+      "win_rate": 51.0,
+      "win_delta": 1.1,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_98_Archer Queen",
+    "source_type": "card",
+    "text": "卡牌统计信息。Archer Queen 在 Ultimate Champion 模式下，排名第 98。评分是 45。使用率是 3.0%，变化是 0.7%。胜率是 49.0%，变化是 -0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 98,
+      "card_name": "Archer Queen",
+      "rating": 45,
+      "usage_rate": 3.0,
+      "usage_delta": 0.7,
+      "win_rate": 49.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_99_Giant Snowball",
+    "source_type": "card",
+    "text": "卡牌统计信息。Giant Snowball 在 Ultimate Champion 模式下，排名第 99。评分是 45。使用率是 3.0%，变化是 0.2%。胜率是 49.0%，变化是 -0.4%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 99,
+      "card_name": "Giant Snowball",
+      "rating": 45,
+      "usage_rate": 3.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": -0.4,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_100_Firecracker Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Firecracker Evolution 在 Ultimate Champion 模式下，排名第 100。评分是 45。使用率是 3.0%，变化是 1.1%。胜率是 49.0%，变化是 0.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 100,
+      "card_name": "Firecracker Evolution",
+      "rating": 45,
+      "usage_rate": 3.0,
+      "usage_delta": 1.1,
+      "win_rate": 49.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_101_Elixir Golem",
+    "source_type": "card",
+    "text": "卡牌统计信息。Elixir Golem 在 Ultimate Champion 模式下，排名第 101。评分是 47。使用率是 3.0%，变化是 0.4%。胜率是 50.0%，变化是 0.1%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 101,
+      "card_name": "Elixir Golem",
+      "rating": 47,
+      "usage_rate": 3.0,
+      "usage_delta": 0.4,
+      "win_rate": 50.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_102_Knight Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Knight Evolution 在 Ultimate Champion 模式下，排名第 102。评分是 49。使用率是 3.0%，变化是 1.1%。胜率是 50.0%，变化是 1.9%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 102,
+      "card_name": "Knight Evolution",
+      "rating": 49,
+      "usage_rate": 3.0,
+      "usage_delta": 1.1,
+      "win_rate": 50.0,
+      "win_delta": 1.9,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_103_Ram Rider",
+    "source_type": "card",
+    "text": "卡牌统计信息。Ram Rider 在 Ultimate Champion 模式下，排名第 103。评分是 47。使用率是 3.0%，变化是 -0.3%。胜率是 50.0%，变化是 -0.8%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 103,
+      "card_name": "Ram Rider",
+      "rating": 47,
+      "usage_rate": 3.0,
+      "usage_delta": -0.3,
+      "win_rate": 50.0,
+      "win_delta": -0.8,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_104_Bats",
+    "source_type": "card",
+    "text": "卡牌统计信息。Bats 在 Ultimate Champion 模式下，排名第 104。评分是 44。使用率是 3.0%，变化是 0.4%。胜率是 49.0%，变化是 -0.9%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 104,
+      "card_name": "Bats",
+      "rating": 44,
+      "usage_rate": 3.0,
+      "usage_delta": 0.4,
+      "win_rate": 49.0,
+      "win_delta": -0.9,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_105_Lumberjack",
+    "source_type": "card",
+    "text": "卡牌统计信息。Lumberjack 在 Ultimate Champion 模式下，排名第 105。评分是 46。使用率是 3.0%，变化是 1.0%。胜率是 49.0%，变化是 -0.9%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 105,
+      "card_name": "Lumberjack",
+      "rating": 46,
+      "usage_rate": 3.0,
+      "usage_delta": 1.0,
+      "win_rate": 49.0,
+      "win_delta": -0.9,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_106_Hunter",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hunter 在 Ultimate Champion 模式下，排名第 106。评分是 47。使用率是 3.0%，变化是 -2.3%。胜率是 50.0%，变化是 0.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 106,
+      "card_name": "Hunter",
+      "rating": 47,
+      "usage_rate": 3.0,
+      "usage_delta": -2.3,
+      "win_rate": 50.0,
+      "win_delta": 0.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_107_Ice Wizard",
+    "source_type": "card",
+    "text": "卡牌统计信息。Ice Wizard 在 Ultimate Champion 模式下，排名第 107。评分是 45。使用率是 3.0%，变化是 0.5%。胜率是 49.0%，变化是 0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 107,
+      "card_name": "Ice Wizard",
+      "rating": 45,
+      "usage_rate": 3.0,
+      "usage_delta": 0.5,
+      "win_rate": 49.0,
+      "win_delta": 0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_108_Wizard Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Wizard Evolution 在 Ultimate Champion 模式下，排名第 108。评分是 49。使用率是 2.0%，变化是 0.6%。胜率是 51.0%，变化是 1.1%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 108,
+      "card_name": "Wizard Evolution",
+      "rating": 49,
+      "usage_rate": 2.0,
+      "usage_delta": 0.6,
+      "win_rate": 51.0,
+      "win_delta": 1.1,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_109_Battle Healer",
+    "source_type": "card",
+    "text": "卡牌统计信息。Battle Healer 在 Ultimate Champion 模式下，排名第 109。评分是 47。使用率是 2.0%，变化是 0.6%。胜率是 50.0%，变化是 -0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 109,
+      "card_name": "Battle Healer",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": 0.6,
+      "win_rate": 50.0,
+      "win_delta": -0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_110_Tesla",
+    "source_type": "card",
+    "text": "卡牌统计信息。Tesla 在 Ultimate Champion 模式下，排名第 110。评分是 46。使用率是 2.0%，变化是 1.1%。胜率是 49.0%，变化是 2.4%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 110,
+      "card_name": "Tesla",
+      "rating": 46,
+      "usage_rate": 2.0,
+      "usage_delta": 1.1,
+      "win_rate": 49.0,
+      "win_delta": 2.4,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_111_Royal Ghost",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Ghost 在 Ultimate Champion 模式下，排名第 111。评分是 47。使用率是 2.0%，变化是 0.9%。胜率是 50.0%，变化是 0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 111,
+      "card_name": "Royal Ghost",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": 0.9,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_112_Royal Delivery",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Delivery 在 Ultimate Champion 模式下，排名第 112。评分是 45。使用率是 2.0%，变化是 0.2%。胜率是 49.0%，变化是 0.4%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 112,
+      "card_name": "Royal Delivery",
+      "rating": 45,
+      "usage_rate": 2.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_113_Heal Spirit",
+    "source_type": "card",
+    "text": "卡牌统计信息。Heal Spirit 在 Ultimate Champion 模式下，排名第 113。评分是 47。使用率是 2.0%，变化是 0.1%。胜率是 50.0%，变化是 0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 113,
+      "card_name": "Heal Spirit",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": 0.1,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_114_Inferno Tower",
+    "source_type": "card",
+    "text": "卡牌统计信息。Inferno Tower 在 Ultimate Champion 模式下，排名第 114。评分是 47。使用率是 2.0%，变化是 0.8%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 114,
+      "card_name": "Inferno Tower",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": 0.8,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_115_P.E.K.K.A Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。P.E.K.K.A Evolution 在 Ultimate Champion 模式下，排名第 115。评分是 44。使用率是 2.0%，变化是 0.7%。胜率是 49.0%，变化是 -1.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 115,
+      "card_name": "P.E.K.K.A Evolution",
+      "rating": 44,
+      "usage_rate": 2.0,
+      "usage_delta": 0.7,
+      "win_rate": 49.0,
+      "win_delta": -1.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_116_Barbarians Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Barbarians Evolution 在 Ultimate Champion 模式下，排名第 116。评分是 48。使用率是 2.0%，变化是 0.5%。胜率是 50.0%，变化是 0.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 116,
+      "card_name": "Barbarians Evolution",
+      "rating": 48,
+      "usage_rate": 2.0,
+      "usage_delta": 0.5,
+      "win_rate": 50.0,
+      "win_delta": 0.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_117_Ice Golem",
+    "source_type": "card",
+    "text": "卡牌统计信息。Ice Golem 在 Ultimate Champion 模式下，排名第 117。评分是 46。使用率是 2.0%，变化是 0.6%。胜率是 49.0%，变化是 -0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 117,
+      "card_name": "Ice Golem",
+      "rating": 46,
+      "usage_rate": 2.0,
+      "usage_delta": 0.6,
+      "win_rate": 49.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_118_Wall Breakers",
+    "source_type": "card",
+    "text": "卡牌统计信息。Wall Breakers 在 Ultimate Champion 模式下，排名第 118。评分是 48。使用率是 2.0%，变化是 0.8%。胜率是 50.0%，变化是 1.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 118,
+      "card_name": "Wall Breakers",
+      "rating": 48,
+      "usage_rate": 2.0,
+      "usage_delta": 0.8,
+      "win_rate": 50.0,
+      "win_delta": 1.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_119_Royal Recruits Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Recruits Evolution 在 Ultimate Champion 模式下，排名第 119。评分是 46。使用率是 2.0%，变化是 0.2%。胜率是 50.0%，变化是 -0.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 119,
+      "card_name": "Royal Recruits Evolution",
+      "rating": 46,
+      "usage_rate": 2.0,
+      "usage_delta": 0.2,
+      "win_rate": 50.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_120_Goblin Curse",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Curse 在 Ultimate Champion 模式下，排名第 120。评分是 49。使用率是 2.0%，变化是 0.4%。胜率是 51.0%，变化是 0.8%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 120,
+      "card_name": "Goblin Curse",
+      "rating": 49,
+      "usage_rate": 2.0,
+      "usage_delta": 0.4,
+      "win_rate": 51.0,
+      "win_delta": 0.8,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_121_Barbarians",
+    "source_type": "card",
+    "text": "卡牌统计信息。Barbarians 在 Ultimate Champion 模式下，排名第 121。评分是 47。使用率是 2.0%，变化是 0.3%。胜率是 50.0%，变化是 -0.9%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 121,
+      "card_name": "Barbarians",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": 0.3,
+      "win_rate": 50.0,
+      "win_delta": -0.9,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_122_Monk",
+    "source_type": "card",
+    "text": "卡牌统计信息。Monk 在 Ultimate Champion 模式下，排名第 122。评分是 46。使用率是 2.0%，变化是 0.2%。胜率是 49.0%，变化是 0.4%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 122,
+      "card_name": "Monk",
+      "rating": 46,
+      "usage_rate": 2.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_123_Three Musketeers",
+    "source_type": "card",
+    "text": "卡牌统计信息。Three Musketeers 在 Ultimate Champion 模式下，排名第 123。评分是 47。使用率是 2.0%，变化是 0.7%。胜率是 50.0%，变化是 0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 123,
+      "card_name": "Three Musketeers",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": 0.7,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_124_Phoenix",
+    "source_type": "card",
+    "text": "卡牌统计信息。Phoenix 在 Ultimate Champion 模式下，排名第 124。评分是 47。使用率是 2.0%，变化是 -0.0%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 124,
+      "card_name": "Phoenix",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": -0.0,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_125_Knight",
+    "source_type": "card",
+    "text": "卡牌统计信息。Knight 在 Ultimate Champion 模式下，排名第 125。评分是 47。使用率是 2.0%，变化是 -1.0%。胜率是 50.0%，变化是 0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 125,
+      "card_name": "Knight",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": -1.0,
+      "win_rate": 50.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_126_Skeleton Army",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeleton Army 在 Ultimate Champion 模式下，排名第 126。评分是 45。使用率是 2.0%，变化是 0.3%。胜率是 49.0%，变化是 0.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 126,
+      "card_name": "Skeleton Army",
+      "rating": 45,
+      "usage_rate": 2.0,
+      "usage_delta": 0.3,
+      "win_rate": 49.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_127_Spear Goblins",
+    "source_type": "card",
+    "text": "卡牌统计信息。Spear Goblins 在 Ultimate Champion 模式下，排名第 127。评分是 48。使用率是 2.0%，变化是 0.8%。胜率是 50.0%，变化是 1.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 127,
+      "card_name": "Spear Goblins",
+      "rating": 48,
+      "usage_rate": 2.0,
+      "usage_delta": 0.8,
+      "win_rate": 50.0,
+      "win_delta": 1.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_128_Royal Chef",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Chef 在 Ultimate Champion 模式下，排名第 128。评分是 47。使用率是 2.0%，变化是 -0.7%。胜率是 50.0%，变化是 -0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 128,
+      "card_name": "Royal Chef",
+      "rating": 47,
+      "usage_rate": 2.0,
+      "usage_delta": -0.7,
+      "win_rate": 50.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_129_Goblin Demolisher",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Demolisher 在 Ultimate Champion 模式下，排名第 129。评分是 46。使用率是 2.0%，变化是 -0.7%。胜率是 50.0%，变化是 0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 129,
+      "card_name": "Goblin Demolisher",
+      "rating": 46,
+      "usage_rate": 2.0,
+      "usage_delta": -0.7,
+      "win_rate": 50.0,
+      "win_delta": 0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_130_Elite Barbarians",
+    "source_type": "card",
+    "text": "卡牌统计信息。Elite Barbarians 在 Ultimate Champion 模式下，排名第 130。评分是 46。使用率是 2.0%，变化是 -0.6%。胜率是 50.0%，变化是 -0.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 130,
+      "card_name": "Elite Barbarians",
+      "rating": 46,
+      "usage_rate": 2.0,
+      "usage_delta": -0.6,
+      "win_rate": 50.0,
+      "win_delta": -0.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_131_Firecracker",
+    "source_type": "card",
+    "text": "卡牌统计信息。Firecracker 在 Ultimate Champion 模式下，排名第 131。评分是 49。使用率是 2.0%，变化是 1.1%。胜率是 51.0%，变化是 3.0%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 131,
+      "card_name": "Firecracker",
+      "rating": 49,
+      "usage_rate": 2.0,
+      "usage_delta": 1.1,
+      "win_rate": 51.0,
+      "win_delta": 3.0,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_132_Electro Giant",
+    "source_type": "card",
+    "text": "卡牌统计信息。Electro Giant 在 Ultimate Champion 模式下，排名第 132。评分是 44。使用率是 2.0%，变化是 0.3%。胜率是 49.0%，变化是 -1.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 132,
+      "card_name": "Electro Giant",
+      "rating": 44,
+      "usage_rate": 2.0,
+      "usage_delta": 0.3,
+      "win_rate": 49.0,
+      "win_delta": -1.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_133_Hero Musketeer",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hero Musketeer 在 Ultimate Champion 模式下，排名第 133。评分是 44。使用率是 1.0%，变化是 0.3%。胜率是 49.0%，变化是 1.0%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 133,
+      "card_name": "Hero Musketeer",
+      "rating": 44,
+      "usage_rate": 1.0,
+      "usage_delta": 0.3,
+      "win_rate": 49.0,
+      "win_delta": 1.0,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_134_Hunter Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Hunter Evolution 在 Ultimate Champion 模式下，排名第 134。评分是 46。使用率是 1.0%，变化是 0.6%。胜率是 50.0%，变化是 0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 134,
+      "card_name": "Hunter Evolution",
+      "rating": 46,
+      "usage_rate": 1.0,
+      "usage_delta": 0.6,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_135_Valkyrie",
+    "source_type": "card",
+    "text": "卡牌统计信息。Valkyrie 在 Ultimate Champion 模式下，排名第 135。评分是 43。使用率是 1.0%，变化是 -0.1%。胜率是 49.0%，变化是 1.6%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 135,
+      "card_name": "Valkyrie",
+      "rating": 43,
+      "usage_rate": 1.0,
+      "usage_delta": -0.1,
+      "win_rate": 49.0,
+      "win_delta": 1.6,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_136_Furnace",
+    "source_type": "card",
+    "text": "卡牌统计信息。Furnace 在 Ultimate Champion 模式下，排名第 136。评分是 49。使用率是 1.0%，变化是 -0.3%。胜率是 51.0%，变化是 -0.3%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 136,
+      "card_name": "Furnace",
+      "rating": 49,
+      "usage_rate": 1.0,
+      "usage_delta": -0.3,
+      "win_rate": 51.0,
+      "win_delta": -0.3,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_137_Flying Machine",
+    "source_type": "card",
+    "text": "卡牌统计信息。Flying Machine 在 Ultimate Champion 模式下，排名第 137。评分是 45。使用率是 1.0%，变化是 0.1%。胜率是 49.0%，变化是 -0.5%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 137,
+      "card_name": "Flying Machine",
+      "rating": 45,
+      "usage_rate": 1.0,
+      "usage_delta": 0.1,
+      "win_rate": 49.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_138_Clone",
+    "source_type": "card",
+    "text": "卡牌统计信息。Clone 在 Ultimate Champion 模式下，排名第 138。评分是 42。使用率是 1.0%，变化是 0.5%。胜率是 48.0%，变化是 -0.7%。净胜率是 48.0%。",
+    "metadata": {
+      "rank": 138,
+      "card_name": "Clone",
+      "rating": 42,
+      "usage_rate": 1.0,
+      "usage_delta": 0.5,
+      "win_rate": 48.0,
+      "win_delta": -0.7,
+      "clean_win_rate": 48.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_139_Baby Dragon",
+    "source_type": "card",
+    "text": "卡牌统计信息。Baby Dragon 在 Ultimate Champion 模式下，排名第 139。评分是 47。使用率是 1.0%，变化是 0.2%。胜率是 50.0%，变化是 0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 139,
+      "card_name": "Baby Dragon",
+      "rating": 47,
+      "usage_rate": 1.0,
+      "usage_delta": 0.2,
+      "win_rate": 50.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_140_Musketeer",
+    "source_type": "card",
+    "text": "卡牌统计信息。Musketeer 在 Ultimate Champion 模式下，排名第 140。评分是 45。使用率是 1.0%，变化是 -0.2%。胜率是 49.0%，变化是 -0.8%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 140,
+      "card_name": "Musketeer",
+      "rating": 45,
+      "usage_rate": 1.0,
+      "usage_delta": -0.2,
+      "win_rate": 49.0,
+      "win_delta": -0.8,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_141_Inferno Dragon",
+    "source_type": "card",
+    "text": "卡牌统计信息。Inferno Dragon 在 Ultimate Champion 模式下，排名第 141。评分是 44。使用率是 1.0%，变化是 0.1%。胜率是 49.0%，变化是 0.1%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 141,
+      "card_name": "Inferno Dragon",
+      "rating": 44,
+      "usage_rate": 1.0,
+      "usage_delta": 0.1,
+      "win_rate": 49.0,
+      "win_delta": 0.1,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_142_Suspicious Bush",
+    "source_type": "card",
+    "text": "卡牌统计信息。Suspicious Bush 在 Ultimate Champion 模式下，排名第 142。评分是 48。使用率是 1.0%，变化是 -5.5%。胜率是 50.0%，变化是 -0.9%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 142,
+      "card_name": "Suspicious Bush",
+      "rating": 48,
+      "usage_rate": 1.0,
+      "usage_delta": -5.5,
+      "win_rate": 50.0,
+      "win_delta": -0.9,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_143_Goblins",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblins 在 Ultimate Champion 模式下，排名第 143。评分是 43。使用率是 1.0%，变化是 -0.4%。胜率是 49.0%，变化是 -0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 143,
+      "card_name": "Goblins",
+      "rating": 43,
+      "usage_rate": 1.0,
+      "usage_delta": -0.4,
+      "win_rate": 49.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_144_Void",
+    "source_type": "card",
+    "text": "卡牌统计信息。Void 在 Ultimate Champion 模式下，排名第 144。评分是 47。使用率是 1.0%，变化是 0.2%。胜率是 50.0%，变化是 1.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 144,
+      "card_name": "Void",
+      "rating": 47,
+      "usage_rate": 1.0,
+      "usage_delta": 0.2,
+      "win_rate": 50.0,
+      "win_delta": 1.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_145_Giant",
+    "source_type": "card",
+    "text": "卡牌统计信息。Giant 在 Ultimate Champion 模式下，排名第 145。评分是 46。使用率是 1.0%，变化是 0.0%。胜率是 50.0%，变化是 0.3%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 145,
+      "card_name": "Giant",
+      "rating": 46,
+      "usage_rate": 1.0,
+      "usage_delta": 0.0,
+      "win_rate": 50.0,
+      "win_delta": 0.3,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_146_Goblin Drill",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Drill 在 Ultimate Champion 模式下，排名第 146。评分是 40。使用率是 1.0%，变化是 0.0%。胜率是 47.0%，变化是 1.0%。净胜率是 47.0%。",
+    "metadata": {
+      "rank": 146,
+      "card_name": "Goblin Drill",
+      "rating": 40,
+      "usage_rate": 1.0,
+      "usage_delta": 0.0,
+      "win_rate": 47.0,
+      "win_delta": 1.0,
+      "clean_win_rate": 47.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_147_Minion Horde",
+    "source_type": "card",
+    "text": "卡牌统计信息。Minion Horde 在 Ultimate Champion 模式下，排名第 147。评分是 46。使用率是 1.0%，变化是 0.0%。胜率是 50.0%，变化是 -0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 147,
+      "card_name": "Minion Horde",
+      "rating": 46,
+      "usage_rate": 1.0,
+      "usage_delta": 0.0,
+      "win_rate": 50.0,
+      "win_delta": -0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_148_Cannoneer",
+    "source_type": "card",
+    "text": "卡牌统计信息。Cannoneer 在 Ultimate Champion 模式下，排名第 148。评分是 45。使用率是 1.0%，变化是 0.1%。胜率是 49.0%，变化是 -1.0%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 148,
+      "card_name": "Cannoneer",
+      "rating": 45,
+      "usage_rate": 1.0,
+      "usage_delta": 0.1,
+      "win_rate": 49.0,
+      "win_delta": -1.0,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_149_Goblinstein",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblinstein 在 Ultimate Champion 模式下，排名第 149。评分是 45。使用率是 1.0%，变化是 0.3%。胜率是 50.0%，变化是 0.4%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 149,
+      "card_name": "Goblinstein",
+      "rating": 45,
+      "usage_rate": 1.0,
+      "usage_delta": 0.3,
+      "win_rate": 50.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_150_Royal Hogs",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Hogs 在 Ultimate Champion 模式下，排名第 150。评分是 47。使用率是 1.0%，变化是 -0.0%。胜率是 50.0%，变化是 -0.5%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 150,
+      "card_name": "Royal Hogs",
+      "rating": 47,
+      "usage_rate": 1.0,
+      "usage_delta": -0.0,
+      "win_rate": 50.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_151_Royal Recruits",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Recruits 在 Ultimate Champion 模式下，排名第 151。评分是 43。使用率是 1.0%，变化是 -0.2%。胜率是 49.0%，变化是 0.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 151,
+      "card_name": "Royal Recruits",
+      "rating": 43,
+      "usage_rate": 1.0,
+      "usage_delta": -0.2,
+      "win_rate": 49.0,
+      "win_delta": 0.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_152_Bomber Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Bomber Evolution 在 Ultimate Champion 模式下，排名第 152。评分是 45。使用率是 1.0%，变化是 0.1%。胜率是 49.0%，变化是 -0.8%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 152,
+      "card_name": "Bomber Evolution",
+      "rating": 45,
+      "usage_rate": 1.0,
+      "usage_delta": 0.1,
+      "win_rate": 49.0,
+      "win_delta": -0.8,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_153_Goblin Cage",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Cage 在 Ultimate Champion 模式下，排名第 153。评分是 43。使用率是 1.0%，变化是 0.1%。胜率是 49.0%，变化是 0.4%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 153,
+      "card_name": "Goblin Cage",
+      "rating": 43,
+      "usage_rate": 1.0,
+      "usage_delta": 0.1,
+      "win_rate": 49.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_154_Boss Bandit",
+    "source_type": "card",
+    "text": "卡牌统计信息。Boss Bandit 在 Ultimate Champion 模式下，排名第 154。评分是 45。使用率是 1.0%，变化是 0.2%。胜率是 49.0%，变化是 0.7%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 154,
+      "card_name": "Boss Bandit",
+      "rating": 45,
+      "usage_rate": 1.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": 0.7,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_155_Goblin Barrel",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Barrel 在 Ultimate Champion 模式下，排名第 155。评分是 44。使用率是 1.0%，变化是 0.2%。胜率是 49.0%，变化是 1.0%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 155,
+      "card_name": "Goblin Barrel",
+      "rating": 44,
+      "usage_rate": 1.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": 1.0,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_156_Mirror",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mirror 在 Ultimate Champion 模式下，排名第 156。评分是 40。使用率是 1.0%，变化是 0.0%。胜率是 48.0%，变化是 1.0%。净胜率是 48.0%。",
+    "metadata": {
+      "rank": 156,
+      "card_name": "Mirror",
+      "rating": 40,
+      "usage_rate": 1.0,
+      "usage_delta": 0.0,
+      "win_rate": 48.0,
+      "win_delta": 1.0,
+      "clean_win_rate": 48.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_157_Goblin Giant Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Giant Evolution 在 Ultimate Champion 模式下，排名第 157。评分是 44。使用率是 1.0%，变化是 -0.0%。胜率是 49.0%，变化是 -1.0%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 157,
+      "card_name": "Goblin Giant Evolution",
+      "rating": 44,
+      "usage_rate": 1.0,
+      "usage_delta": -0.0,
+      "win_rate": 49.0,
+      "win_delta": -1.0,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_158_Mega Knight",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mega Knight 在 Ultimate Champion 模式下，排名第 158。评分是 46。使用率是 1.0%，变化是 -0.1%。胜率是 50.0%，变化是 -0.0%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 158,
+      "card_name": "Mega Knight",
+      "rating": 46,
+      "usage_rate": 1.0,
+      "usage_delta": -0.1,
+      "win_rate": 50.0,
+      "win_delta": -0.0,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_159_Dart Goblin Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Dart Goblin Evolution 在 Ultimate Champion 模式下，排名第 159。评分是 43。使用率是 1.0%，变化是 0.2%。胜率是 49.0%，变化是 2.0%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 159,
+      "card_name": "Dart Goblin Evolution",
+      "rating": 43,
+      "usage_rate": 1.0,
+      "usage_delta": 0.2,
+      "win_rate": 49.0,
+      "win_delta": 2.0,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_160_Mega Minion",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mega Minion 在 Ultimate Champion 模式下，排名第 160。评分是 43。使用率是 1.0%，变化是 -0.0%。胜率是 49.0%，变化是 -1.2%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 160,
+      "card_name": "Mega Minion",
+      "rating": 43,
+      "usage_rate": 1.0,
+      "usage_delta": -0.0,
+      "win_rate": 49.0,
+      "win_delta": -1.2,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_161_Battle Ram",
+    "source_type": "card",
+    "text": "卡牌统计信息。Battle Ram 在 Ultimate Champion 模式下，排名第 161。评分是 44。使用率是 1.0%，变化是 -0.2%。胜率是 50.0%，变化是 0.2%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 161,
+      "card_name": "Battle Ram",
+      "rating": 44,
+      "usage_rate": 1.0,
+      "usage_delta": -0.2,
+      "win_rate": 50.0,
+      "win_delta": 0.2,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_162_Skeleton Barrel",
+    "source_type": "card",
+    "text": "卡牌统计信息。Skeleton Barrel 在 Ultimate Champion 模式下，排名第 162。评分是 36。使用率是 0.0%，变化是 -0.0%。胜率是 47.0%，变化是 -1.0%。净胜率是 47.0%。",
+    "metadata": {
+      "rank": 162,
+      "card_name": "Skeleton Barrel",
+      "rating": 36,
+      "usage_rate": 0.0,
+      "usage_delta": -0.0,
+      "win_rate": 47.0,
+      "win_delta": -1.0,
+      "clean_win_rate": 47.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_163_Ice Spirit Evolution",
+    "source_type": "card",
+    "text": "卡牌统计信息。Ice Spirit Evolution 在 Ultimate Champion 模式下，排名第 163。评分是 40。使用率是 0.0%，变化是 0.0%。胜率是 48.0%，变化是 2.4%。净胜率是 48.0%。",
+    "metadata": {
+      "rank": 163,
+      "card_name": "Ice Spirit Evolution",
+      "rating": 40,
+      "usage_rate": 0.0,
+      "usage_delta": 0.0,
+      "win_rate": 48.0,
+      "win_delta": 2.4,
+      "clean_win_rate": 48.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_164_Little Prince",
+    "source_type": "card",
+    "text": "卡牌统计信息。Little Prince 在 Ultimate Champion 模式下，排名第 164。评分是 37。使用率是 0.0%，变化是 0.2%。胜率是 47.0%，变化是 -1.6%。净胜率是 47.0%。",
+    "metadata": {
+      "rank": 164,
+      "card_name": "Little Prince",
+      "rating": 37,
+      "usage_rate": 0.0,
+      "usage_delta": 0.2,
+      "win_rate": 47.0,
+      "win_delta": -1.6,
+      "clean_win_rate": 47.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_165_Royal Giant",
+    "source_type": "card",
+    "text": "卡牌统计信息。Royal Giant 在 Ultimate Champion 模式下，排名第 165。评分是 47。使用率是 0.0%，变化是 0.1%。胜率是 51.0%，变化是 0.4%。净胜率是 51.0%。",
+    "metadata": {
+      "rank": 165,
+      "card_name": "Royal Giant",
+      "rating": 47,
+      "usage_rate": 0.0,
+      "usage_delta": 0.1,
+      "win_rate": 51.0,
+      "win_delta": 0.4,
+      "clean_win_rate": 51.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_166_Executioner",
+    "source_type": "card",
+    "text": "卡牌统计信息。Executioner 在 Ultimate Champion 模式下，排名第 166。评分是 36。使用率是 0.0%，变化是 0.0%。胜率是 47.0%，变化是 -3.3%。净胜率是 47.0%。",
+    "metadata": {
+      "rank": 166,
+      "card_name": "Executioner",
+      "rating": 36,
+      "usage_rate": 0.0,
+      "usage_delta": 0.0,
+      "win_rate": 47.0,
+      "win_delta": -3.3,
+      "clean_win_rate": 47.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_167_Magic Archer",
+    "source_type": "card",
+    "text": "卡牌统计信息。Magic Archer 在 Ultimate Champion 模式下，排名第 167。评分是 42。使用率是 0.0%，变化是 -0.0%。胜率是 50.0%，变化是 3.7%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 167,
+      "card_name": "Magic Archer",
+      "rating": 42,
+      "usage_rate": 0.0,
+      "usage_delta": -0.0,
+      "win_rate": 50.0,
+      "win_delta": 3.7,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_168_Witch",
+    "source_type": "card",
+    "text": "卡牌统计信息。Witch 在 Ultimate Champion 模式下，排名第 168。评分是 34。使用率是 0.0%，变化是 -0.0%。胜率是 47.0%，变化是 -2.6%。净胜率是 47.0%。",
+    "metadata": {
+      "rank": 168,
+      "card_name": "Witch",
+      "rating": 34,
+      "usage_rate": 0.0,
+      "usage_delta": -0.0,
+      "win_rate": 47.0,
+      "win_delta": -2.6,
+      "clean_win_rate": 47.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_169_Archers",
+    "source_type": "card",
+    "text": "卡牌统计信息。Archers 在 Ultimate Champion 模式下，排名第 169。评分是 30。使用率是 0.0%，变化是 -0.0%。胜率是 45.0%，变化是 -1.4%。净胜率是 45.0%。",
+    "metadata": {
+      "rank": 169,
+      "card_name": "Archers",
+      "rating": 30,
+      "usage_rate": 0.0,
+      "usage_delta": -0.0,
+      "win_rate": 45.0,
+      "win_delta": -1.4,
+      "clean_win_rate": 45.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_170_Electro Dragon",
+    "source_type": "card",
+    "text": "卡牌统计信息。Electro Dragon 在 Ultimate Champion 模式下，排名第 170。评分是 36。使用率是 0.0%，变化是 0.1%。胜率是 48.0%，变化是 3.2%。净胜率是 48.0%。",
+    "metadata": {
+      "rank": 170,
+      "card_name": "Electro Dragon",
+      "rating": 36,
+      "usage_rate": 0.0,
+      "usage_delta": 0.1,
+      "win_rate": 48.0,
+      "win_delta": 3.2,
+      "clean_win_rate": 48.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_171_Mortar",
+    "source_type": "card",
+    "text": "卡牌统计信息。Mortar 在 Ultimate Champion 模式下，排名第 171。评分是 37。使用率是 0.0%，变化是 -0.0%。胜率是 49.0%，变化是 1.3%。净胜率是 49.0%。",
+    "metadata": {
+      "rank": 171,
+      "card_name": "Mortar",
+      "rating": 37,
+      "usage_rate": 0.0,
+      "usage_delta": -0.0,
+      "win_rate": 49.0,
+      "win_delta": 1.3,
+      "clean_win_rate": 49.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_172_Barbarian Hut",
+    "source_type": "card",
+    "text": "卡牌统计信息。Barbarian Hut 在 Ultimate Champion 模式下，排名第 172。评分是 38。使用率是 0.0%，变化是 0.1%。胜率是 50.0%，变化是 -4.6%。净胜率是 50.0%。",
+    "metadata": {
+      "rank": 172,
+      "card_name": "Barbarian Hut",
+      "rating": 38,
+      "usage_rate": 0.0,
+      "usage_delta": 0.1,
+      "win_rate": 50.0,
+      "win_delta": -4.6,
+      "clean_win_rate": 50.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_173_Wizard",
+    "source_type": "card",
+    "text": "卡牌统计信息。Wizard 在 Ultimate Champion 模式下，排名第 173。评分是 32。使用率是 0.0%，变化是 0.0%。胜率是 47.0%，变化是 -0.5%。净胜率是 47.0%。",
+    "metadata": {
+      "rank": 173,
+      "card_name": "Wizard",
+      "rating": 32,
+      "usage_rate": 0.0,
+      "usage_delta": 0.0,
+      "win_rate": 47.0,
+      "win_delta": -0.5,
+      "clean_win_rate": 47.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_174_Goblin Machine",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Machine 在 Ultimate Champion 模式下，排名第 174。评分是 25。使用率是 0.0%，变化是 0.0%。胜率是 44.0%，变化是 -4.3%。净胜率是 44.0%。",
+    "metadata": {
+      "rank": 174,
+      "card_name": "Goblin Machine",
+      "rating": 25,
+      "usage_rate": 0.0,
+      "usage_delta": 0.0,
+      "win_rate": 44.0,
+      "win_delta": -4.3,
+      "clean_win_rate": 44.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_175_Rune Giant",
+    "source_type": "card",
+    "text": "卡牌统计信息。Rune Giant 在 Ultimate Champion 模式下，排名第 175。评分是 24。使用率是 0.0%，变化是 -0.2%。胜率是 45.0%，变化是 -1.6%。净胜率是 45.0%。",
+    "metadata": {
+      "rank": 175,
+      "card_name": "Rune Giant",
+      "rating": 24,
+      "usage_rate": 0.0,
+      "usage_delta": -0.2,
+      "win_rate": 45.0,
+      "win_delta": -1.6,
+      "clean_win_rate": 45.0,
+      "mode": "Ultimate Champion"
+    }
+  },
+  {
+    "doc_id": "card_176_Goblin Giant",
+    "source_type": "card",
+    "text": "卡牌统计信息。Goblin Giant 在 Ultimate Champion 模式下，排名第 176。评分是 20。使用率是 0.0%，变化是 -0.0%。胜率是 44.0%，变化是 0.8%。净胜率是 44.0%。",
+    "metadata": {
+      "rank": 176,
+      "card_name": "Goblin Giant",
+      "rating": 20,
+      "usage_rate": 0.0,
+      "usage_delta": -0.0,
+      "win_rate": 44.0,
+      "win_delta": 0.8,
+      "clean_win_rate": 44.0,
+      "mode": "Ultimate Champion"
+    }
+  }
+]
