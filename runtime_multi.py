@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import asyncio
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,18 +14,24 @@ from agentscope.agent import ReActAgent
 from agentscope.formatter import OpenAIChatFormatter
 from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
-from agentscope.model import OpenAIChatModel
+from agentscope.model import OpenAIChatModel, OpenAIResponseModel
 
 from app_config import (
     CARDS_META_FILE,
     RUNTIME_HOST,
     RUNTIME_PORT,
     SCHEDULE_FILE,
+    OPENAI_CLIENT_KWARGS,
     OPENAI_MODEL,
+    PARSER_REASONING_EFFORT,
+    OPENAI_REASONING_EFFORT,
+    OPENAI_WIRE_API,
+    PARSER_CALL_TIMEOUT_SECONDS,
     TOP_DECKS_FILE,
 )
 from hybrid_retriever import HybridRetriever, load_docs
-from query_answering import answer_query
+from model_gateway import generate_model_text
+from query_answering import AnswerResult, answer_query, read_trace
 from query_parser import (
     LOCAL_PARSE_CONFIDENCE_HIGH,
     LOCAL_PARSE_CONFIDENCE_LOW,
@@ -64,12 +72,25 @@ def get_user_text(request: ProcessRequest) -> str:
     return ""
 
 
-def build_chat_model(api_key: str) -> OpenAIChatModel:
-    return OpenAIChatModel(
-        model_name=OPENAI_MODEL,
-        api_key=api_key,
-        stream=False,
-    )
+def build_chat_model(api_key: str) -> OpenAIChatModel | OpenAIResponseModel:
+    """根据中转站协议创建模型；当前 Codex 中转站使用 Responses API。"""
+    common_kwargs = {
+        "model_name": OPENAI_MODEL,
+        "api_key": api_key,
+        "stream": False,
+        "client_kwargs": OPENAI_CLIENT_KWARGS,
+    }
+    if OPENAI_WIRE_API == "responses":
+        return OpenAIResponseModel(
+            **common_kwargs,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+        )
+    if OPENAI_WIRE_API == "chat_completions":
+        return OpenAIChatModel(
+            **common_kwargs,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+        )
+    raise ValueError(f"Unsupported OPENAI_WIRE_API: {OPENAI_WIRE_API}")
 
 
 def build_parser_agent(api_key: str) -> ReActAgent:
@@ -86,28 +107,21 @@ def build_parser_agent(api_key: str) -> ReActAgent:
 
 async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key: str | None) -> dict:
     local_parsed = fallback_parse_query(user_text, cards_meta_data)
-    local_intent = local_parsed.get("intent")
-    local_confidence = local_parsed.get("parse_confidence")
-    if local_intent != "reject" and local_confidence in {
-        LOCAL_PARSE_CONFIDENCE_HIGH,
-        LOCAL_PARSE_CONFIDENCE_MEDIUM,
-    }:
-        logger.info(
-            "using local parser result intent=%s confidence=%s",
-            local_intent,
-            local_confidence,
-        )
-        return local_parsed
-
     if not api_key:
         logger.warning("no api key available, using fallback parser result")
         return local_parsed
 
     try:
-        parser_agent = build_parser_agent(api_key)
-        parse_msg = Msg(name="user", role="user", content=user_text)
-        parse_result = await parser_agent(parse_msg)
-        parse_text = extract_text_content(parse_result)
+        parse_result = await asyncio.wait_for(
+            generate_model_text(
+                api_key=api_key,
+                instructions=PARSER_SYSTEM_PROMPT,
+                input_text=user_text,
+                reasoning_effort=PARSER_REASONING_EFFORT,
+            ),
+            timeout=PARSER_CALL_TIMEOUT_SECONDS,
+        )
+        parse_text = parse_result
         logger.debug("parser raw output=%s", parse_text)
 
         parsed = extract_json_block(parse_text)
@@ -127,8 +141,8 @@ async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key:
             normalized,
             build_parse_metadata(
                 parse_source="llm_parser",
-                parse_confidence=LOCAL_PARSE_CONFIDENCE_MEDIUM,
-                parse_reason="llm parser fallback used after local reject/low-confidence parse",
+                parse_confidence=LOCAL_PARSE_CONFIDENCE_HIGH,
+                parse_reason="gpt-5.5 structured parser output validated locally",
             ),
         )
     except Exception as exc:
@@ -145,6 +159,8 @@ async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key:
 
 def query_needs_rag(parsed: dict) -> bool:
     intent = parsed.get("intent")
+    if intent in {"meta_analysis_query", "match_preparation_query"}:
+        return True
     if intent == "deck_query":
         return parsed.get("rank") is None and parsed.get("top_n") is None
     if intent == "card_query":
@@ -172,7 +188,7 @@ def ensure_retriever(app: FastAPI) -> HybridRetriever | None:
         return None
 
 
-async def build_answer(user_text: str, app: FastAPI) -> str:
+async def build_answer(user_text: str, app: FastAPI) -> AnswerResult:
     cards_meta_data = app.state.cards_meta_data
     schedule_data = app.state.schedule_data
     top_decks_data = app.state.top_decks_data
@@ -183,9 +199,11 @@ async def build_answer(user_text: str, app: FastAPI) -> str:
 
     retriever = app.state.retriever
     if query_needs_rag(parsed):
-        retriever = ensure_retriever(app)
+        # HybridRetriever may perform blocking local HTTP calls while building embeddings.
+        # Keep that work off the event loop so progress SSE events remain responsive.
+        retriever = await asyncio.to_thread(ensure_retriever, app)
 
-    return await answer_query(
+    result = await answer_query(
         user_text=user_text,
         parsed=parsed,
         schedule_data=schedule_data,
@@ -193,11 +211,20 @@ async def build_answer(user_text: str, app: FastAPI) -> str:
         cards_meta_data=cards_meta_data,
         retriever=retriever,
         api_key=api_key or "",
+        include_metadata=True,
     )
+    assert isinstance(result, AnswerResult)
+    return result
 
 
 def sse_data(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def split_stream_chunks(text: str, chunk_size: int = 80):
+    """将最终文本分成稳定小块，保证不支持 token 流的模型也能渐进显示。"""
+    for start in range(0, len(text), chunk_size):
+        yield text[start : start + chunk_size]
 
 
 @asynccontextmanager
@@ -229,9 +256,8 @@ async def process(request: ProcessRequest):
     user_text = get_user_text(request)
     logger.info("request received text=%r", user_text)
 
-    answer_text = await build_answer(user_text, app)
-    response_id = "resp-local-1"
-    message_id = "msg-local-1"
+    response_id = f"resp-{uuid.uuid4().hex}"
+    message_id = f"msg-{uuid.uuid4().hex}"
 
     async def event_stream():
         yield sse_data(
@@ -253,13 +279,89 @@ async def process(request: ProcessRequest):
         )
         yield sse_data(
             {
-                "object": "content",
-                "type": "text",
+                "object": "progress",
                 "status": "in_progress",
-                "msg_id": message_id,
-                "text": answer_text,
+                "stage": "parse",
+                "label": "正在解析问题并选择执行路径...",
             }
         )
+
+        answer_task = asyncio.create_task(build_answer(user_text, app))
+        stages = [
+            ("route", "正在确定结构化查询或 RAG 路径..."),
+            ("retrieve", "正在检索本地知识库与证据来源..."),
+            ("synthesize", "正在调用模型生成可追溯回答..."),
+        ]
+        stage_index = 0
+        while not answer_task.done():
+            await asyncio.wait({answer_task}, timeout=0.7)
+            if answer_task.done():
+                break
+            stage, label = stages[min(stage_index, len(stages) - 1)]
+            yield sse_data(
+                {
+                    "object": "progress",
+                    "status": "in_progress",
+                    "stage": stage,
+                    "label": label,
+                }
+            )
+            stage_index += 1
+
+        try:
+            answer_result = answer_task.result()
+        except Exception as exc:
+            logger.exception("answer generation failed")
+            yield sse_data(
+                {
+                    "object": "error",
+                    "status": "failed",
+                    "message": "生成回答失败，请检查后端日志、模型配置和检索服务。",
+                }
+            )
+            yield sse_data(
+                {
+                    "object": "response",
+                    "id": response_id,
+                    "status": "failed",
+                }
+            )
+            return
+
+        trace_events = read_trace(answer_result.trace_id)
+        yield sse_data(
+            {
+                "object": "trace",
+                "status": "completed",
+                "trace_id": answer_result.trace_id,
+                "parsed": answer_result.parsed,
+                "plan": answer_result.plan,
+                "selected_skill": answer_result.selected_skill,
+                "mode": answer_result.mode,
+                "metadata": answer_result.metadata,
+                "events": trace_events,
+            }
+        )
+        yield sse_data(
+            {
+                "object": "progress",
+                "status": "in_progress",
+                "stage": "stream",
+                "label": "正在逐段输出回答...",
+            }
+        )
+        answer_text = answer_result.answer
+        for chunk in split_stream_chunks(answer_text):
+            yield sse_data(
+                {
+                    "object": "content",
+                    "type": "text",
+                    "status": "in_progress",
+                    "msg_id": message_id,
+                    "text": chunk,
+                }
+            )
+            await asyncio.sleep(0)
         yield sse_data(
             {
                 "object": "message",

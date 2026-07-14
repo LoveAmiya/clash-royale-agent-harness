@@ -42,8 +42,9 @@ def _install_fastapi_stub() -> None:
             super().__init__(detail)
 
     class StreamingResponse:
-        def __init__(self, *args, **kwargs):
-            self.args = args
+        def __init__(self, content, *args, **kwargs):
+            self.body_iterator = content
+            self.args = (content, *args)
             self.kwargs = kwargs
 
     class HTMLResponse(str):
@@ -118,11 +119,15 @@ def _install_agentscope_stub() -> None:
             self.args = args
             self.kwargs = kwargs
 
+    class OpenAIResponseModel(OpenAIChatModel):
+        pass
+
     agent_module.ReActAgent = ReActAgent
     formatter_module.OpenAIChatFormatter = OpenAIChatFormatter
     memory_module.InMemoryMemory = InMemoryMemory
     message_module.Msg = Msg
     model_module.OpenAIChatModel = OpenAIChatModel
+    model_module.OpenAIResponseModel = OpenAIResponseModel
 
     sys.modules["agentscope"] = agentscope_module
     sys.modules["agentscope.agent"] = agent_module

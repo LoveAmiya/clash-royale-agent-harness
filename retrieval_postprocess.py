@@ -114,6 +114,13 @@ def compress_doc(doc: Dict[str, Any]) -> str:
             f"净胜率：{meta.get('clean_win_rate')}%"
         )
 
+    if source_type == "strategy":
+        return (
+            f"通用战术原则：{meta.get('title')}；"
+            f"范围：{meta.get('scope')}；"
+            f"内容：{doc.get('text', '')}"
+        )
+
     return doc.get("text", "")
 
 
@@ -169,6 +176,9 @@ def build_context_and_refs(results: List[Dict[str, Any]]) -> Tuple[str, str]:
             f"text: {text}"
         )
 
-        refs.append(f"[{i}] {doc['source_type']} | {doc['doc_id']}")
+        source = doc.get("metadata", {}).get("source", "本地知识库")
+        source_url = doc.get("metadata", {}).get("source_url", "")
+        suffix = f" | {source_url}" if source_url else ""
+        refs.append(f"[{i}] {doc['source_type']} | {doc['doc_id']} | {source}{suffix}")
 
     return "\n\n".join(context_lines), "\n".join(refs)

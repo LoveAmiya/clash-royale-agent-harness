@@ -25,7 +25,9 @@ class SkillExecutor:
         ``inspect.isawaitable`` 让简单的同步查询 Skill 与 I/O 密集的 RAG Skill
         能通过同一套接口执行。
         """
-        trace_id = self.recorder.new_trace_id()
+        if context.metadata is None:
+            context.metadata = {}
+        trace_id = context.metadata.setdefault("trace_id", self.recorder.new_trace_id())
         intent = context.parsed.get("intent")
 
         self.recorder.record(
@@ -63,9 +65,11 @@ class SkillExecutor:
         if skill.name == "RAGEvidenceSkill":
             mode = "rag"
         elif skill.name == "EvidenceSynthesisSkill":
-            mode = "evidence_synthesis"
+            mode = "rag_synthesis"
         else:
             mode = "direct"
+        context.metadata["selected_skill"] = skill.name
+        context.metadata["mode"] = mode
         self.recorder.record(
             TraceEvent(
                 trace_id=trace_id,

@@ -39,7 +39,6 @@ def build_default_registry(
     from skills.card_skill import CardMetaSkill
     from skills.deck_skill import DeckRankingSkill
     from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
-    from skills.match_preparation_skill import MatchPreparationSkill
     from skills.rag_skill import RAGEvidenceSkill
     from skills.schedule_skill import ScheduleQuerySkill
     from skills.schedule_summary_skill import ScheduleSummarySkill
@@ -52,7 +51,6 @@ def build_default_registry(
             CardCompareSkill(),
             CardRankLookupSkill(),
             EvidenceSynthesisSkill(answer_builder=evidence_synthesis_builder),
-            MatchPreparationSkill(),
             CardMetaSkill(),
             RAGEvidenceSkill(
                 rag_answer_builder=rag_answer_builder,

@@ -9,8 +9,8 @@ import uuid
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app_config import BACKEND_URL, WEB_HOST, WEB_PORT
@@ -152,6 +152,37 @@ HTML_PAGE = """
       color: #2563eb;
       min-height: 20px;
     }
+    .trace-panel {
+      margin-top: 16px;
+      border-top: 1px solid #dbe3ef;
+      padding-top: 14px;
+    }
+    .trace-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #1f2937;
+    }
+    .trace-summary {
+      color: #2563eb;
+      font-weight: 400;
+    }
+    .trace-list {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+      font-family: Consolas, "Microsoft YaHei", monospace;
+      font-size: 12px;
+      color: #475569;
+    }
+    .trace-line {
+      border-left: 3px solid #93c5fd;
+      padding-left: 8px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
     code {
       background: #f3f4f6;
       padding: 2px 6px;
@@ -165,6 +196,14 @@ HTML_PAGE = """
     <div class="subtitle">网页版客户端。调用你本地运行的 <code>runtime_multi.py</code> 服务。</div>
 
     <div id="chatBox" class="chat-box"></div>
+
+    <section class="trace-panel" aria-live="polite">
+      <div class="trace-heading">
+        <span>执行记录</span>
+        <span id="traceSummary" class="trace-summary">等待请求</span>
+      </div>
+      <div id="traceList" class="trace-list"></div>
+    </section>
 
     <div class="composer">
       <textarea id="inputBox" placeholder="输入问题，例如：\n- 我们第五轮打谁\n- 使用率第三的卡牌是什么\n- 现在热门卡组有哪些"></textarea>
@@ -190,6 +229,8 @@ HTML_PAGE = """
     const sendBtn = document.getElementById("sendBtn");
     const clearBtn = document.getElementById("clearBtn");
     const statusEl = document.getElementById("status");
+    const traceSummary = document.getElementById("traceSummary");
+    const traceList = document.getElementById("traceList");
 
     let sessionId = localStorage.getItem("cr_agent_session_id");
     if (!sessionId) {
@@ -213,11 +254,68 @@ HTML_PAGE = """
       wrapper.appendChild(bubble);
       chatBox.appendChild(wrapper);
       chatBox.scrollTop = chatBox.scrollHeight;
+      return bubble;
     }
 
     function setLoading(loading, text = "") {
       sendBtn.disabled = loading;
       statusEl.textContent = text;
+    }
+
+    function addTraceLine(text) {
+      const line = document.createElement("div");
+      line.className = "trace-line";
+      line.textContent = text;
+      traceList.appendChild(line);
+    }
+
+    function renderTrace(trace) {
+      traceList.innerHTML = "";
+      const traceId = trace.trace_id || "未记录";
+      const parsed = trace.parsed || {};
+      traceSummary.textContent = `${traceId.slice(0, 18)}...`;
+      addTraceLine(`解析：${parsed.intent || "unknown"} | ${parsed.parse_source || "unknown"} | ${parsed.parse_confidence || "unknown"}`);
+      addTraceLine(`路由：${trace.selected_skill || "fallback"} | ${trace.mode || "unknown"}`);
+
+      const metadata = trace.metadata || {};
+      if (metadata.retrieval_mode) {
+        const documents = (metadata.retrieved_doc_ids || []).join(", ");
+        addTraceLine(`检索：${metadata.retrieval_mode} | 文档=${documents || "无"}`);
+      }
+
+      const steps = trace.plan && trace.plan.steps ? trace.plan.steps : [];
+      if (steps.length) {
+        addTraceLine(`计划：${steps.map(step => step.skill_name).join(" -> ")}`);
+      }
+
+      const events = trace.events || [];
+      const completed = events.find(event => event.state === "SUCCESS" || event.state === "FAILED");
+      if (completed) {
+        const outcome = completed.success ? "完成" : "失败";
+        addTraceLine(`执行：${outcome} | 耗时=${completed.latency_ms ?? "-"}ms`);
+      }
+    }
+
+    function handleSseEvent(event, agentBubble) {
+      if (event.object === "progress") {
+        setLoading(true, event.label || "正在处理...");
+        return;
+      }
+      if (event.object === "content" && event.type === "text") {
+        agentBubble.textContent += event.text || "";
+        chatBox.scrollTop = chatBox.scrollHeight;
+        return;
+      }
+      if (event.object === "trace") {
+        renderTrace(event);
+        return;
+      }
+      if (event.object === "error") {
+        throw new Error(event.message || "后端处理失败");
+      }
+      if (event.object === "response" && event.status === "completed") {
+        setLoading(false, "");
+      }
     }
 
     async function sendMessage() {
@@ -227,6 +325,9 @@ HTML_PAGE = """
       appendMessage("user", message);
       inputBox.value = "";
       setLoading(true, "正在请求后端...");
+      traceSummary.textContent = "执行中";
+      traceList.innerHTML = "";
+      const agentBubble = appendMessage("agent", "");
 
       try {
         const resp = await fetch("/chat", {
@@ -246,11 +347,39 @@ HTML_PAGE = """
           throw new Error(errText || "请求失败");
         }
 
-        const data = await resp.json();
-        appendMessage("agent", data.answer || "未获取到回答");
+        if (!resp.body) {
+          throw new Error("浏览器不支持流式响应");
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        let streamCompleted = false;
+
+        while (!streamCompleted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          let boundary;
+          while ((boundary = buffer.indexOf("\\n\\n")) >= 0) {
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const dataLine = frame.split("\\n").find(line => line.startsWith("data: "));
+            if (!dataLine) continue;
+
+            const event = JSON.parse(dataLine.slice(6));
+            handleSseEvent(event, agentBubble);
+            streamCompleted = event.object === "response" && (event.status === "completed" || event.status === "failed");
+          }
+        }
+
+        if (!agentBubble.textContent) {
+          agentBubble.textContent = "未获取到回答。";
+        }
         setLoading(false, "");
       } catch (err) {
-        appendMessage("agent", "请求失败：" + err.message);
+        agentBubble.textContent = "请求失败：" + err.message;
         setLoading(false, "请求失败");
       }
     }
@@ -269,6 +398,8 @@ HTML_PAGE = """
       sessionId = crypto.randomUUID();
       localStorage.setItem("cr_agent_session_id", sessionId);
       statusEl.textContent = "已清空本地会话并生成新 session_id";
+      traceSummary.textContent = "等待请求";
+      traceList.innerHTML = "";
     });
   </script>
 </body>
@@ -283,23 +414,8 @@ class ChatRequest(BaseModel):
     user_id: str | None = None
 
 
-def extract_final_answer(response_event: dict) -> str:
-    """从后端事件中取出面向用户的答案，不暴露内部 Trace。
-
-    后端可以附带路由、工具和检索诊断信息供排查；普通聊天气泡只展示最终回答。
-    """
-    output = response_event.get("output", [])
-    for item in output:
-        if item.get("object") == "message" and item.get("role") == "assistant":
-            parts = item.get("content") or []
-            texts = []
-            for part in parts:
-                if part.get("type") == "text":
-                    texts.append(part.get("text", ""))
-            final_text = "".join(texts).strip()
-            if final_text:
-                return final_text
-    return ""
+def sse_data(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -319,11 +435,7 @@ async def health():
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    """转发一次问题到后端，并保留请求 trace id。
-
-    在 HTTP 边界生成新 id，使 UI 转发失败和 Agent 执行失败能在日志中关联。
-    上游失败会转换为明确 HTTP 错误，UI 不会伪造一个看似正常的回答。
-    """
+    """透明代理后端 SSE，避免把流消费完后退化为普通 JSON。"""
     session_id = req.session_id or str(uuid.uuid4())
     user_id = req.user_id or "web-user-1"
 
@@ -343,70 +455,45 @@ async def chat(req: ChatRequest):
         ]
     }
 
-    completed_response = None
-
-    try:
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", BACKEND_URL, json=backend_payload) as resp:
-                if resp.status_code >= 400:
-                    error_body = await resp.aread()
-                    raise httpx.HTTPStatusError(
-                        f"后端返回异常状态码：{resp.status_code}",
-                        request=resp.request,
-                        response=resp,
-                    )
-
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    if not line.startswith("data: "):
-                        continue
-
-                    raw = line[6:].strip()
-                    if not raw:
-                        continue
-
-                    try:
-                        event = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-
-                    if event.get("object") == "response" and event.get("status") == "completed":
-                        completed_response = event
-
-        if not completed_response:
-            raise HTTPException(status_code=500, detail="后端未返回完整 response.completed 事件")
-
-        answer = extract_final_answer(completed_response)
-        if not answer:
-            raise HTTPException(status_code=500, detail="未能从后端响应中提取最终回答")
-
-        return {
-            "session_id": session_id,
-            "answer": answer
-        }
-
-    except httpx.ConnectError:
-        raise HTTPException(
-            status_code=502,
-            detail=f"无法连接到后端：{BACKEND_URL}，请先启动 py runtime_multi.py"
-        )
-    except httpx.HTTPStatusError as e:
-        backend_detail = None
+    async def proxy_stream():
         try:
-            payload = json.loads(e.response.content.decode("utf-8", errors="replace"))
-            backend_detail = payload.get("detail") if isinstance(payload, dict) else None
-        except Exception:
-            backend_detail = e.response.content.decode("utf-8", errors="replace").strip() or None
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("POST", BACKEND_URL, json=backend_payload) as resp:
+                    if resp.status_code >= 400:
+                        yield sse_data(
+                            {
+                                "object": "error",
+                                "status": "failed",
+                                "message": f"后端返回异常状态码：{resp.status_code}",
+                            }
+                        )
+                        return
 
-        if backend_detail:
-            raise HTTPException(
-                status_code=502,
-                detail=f"后端返回异常状态码：{e.response.status_code}，详情：{backend_detail}",
+                    async for line in resp.aiter_lines():
+                        if line.startswith("data: "):
+                            yield f"{line}\n\n"
+        except httpx.ConnectError:
+            yield sse_data(
+                {
+                    "object": "error",
+                    "status": "failed",
+                    "message": f"无法连接到后端：{BACKEND_URL}，请先启动后端。",
+                }
             )
-        raise HTTPException(status_code=502, detail=f"后端返回异常状态码：{e.response.status_code}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        except httpx.HTTPError as exc:
+            yield sse_data(
+                {
+                    "object": "error",
+                    "status": "failed",
+                    "message": f"转发后端流失败：{exc}",
+                }
+            )
+
+    return StreamingResponse(
+        proxy_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 if __name__ == "__main__":

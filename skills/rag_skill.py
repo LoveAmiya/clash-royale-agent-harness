@@ -43,4 +43,5 @@ class RAGEvidenceSkill(Skill):
             retriever=context.retriever,
             source_type=source_type,
             reviewer_model=self._reviewer_model_builder(context.api_key),
+            api_key=context.api_key,
         )

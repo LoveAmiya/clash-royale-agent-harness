@@ -11,7 +11,6 @@ from skills.base import SkillContext
 from skills.card_compare_skill import CardCompareSkill
 from skills.card_rank_lookup_skill import CardRankLookupSkill
 from skills.card_skill import CardMetaSkill
-from skills.match_preparation_skill import MatchPreparationSkill
 from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
 from skills.registry import build_default_registry
 from skills.schedule_summary_skill import ScheduleSummarySkill
@@ -183,43 +182,6 @@ class BusinessSkillTests(unittest.TestCase):
         parsed = fallback_parse_query("下一轮怎么准备？", self.card_data)
 
         self.assertEqual(parsed["intent"], "match_preparation_query")
-
-    def test_match_preparation_skill_can_handle_query(self):
-        parsed = fallback_parse_query("根据下一轮对手和热门卡组，给我备战建议", self.card_data)
-        skill = MatchPreparationSkill()
-
-        self.assertTrue(skill.can_handle(parsed))
-
-    def test_match_preparation_skill_returns_required_sections(self):
-        parsed = fallback_parse_query("下一场比赛有什么准备建议？", self.card_data)
-        skill = MatchPreparationSkill()
-
-        answer = skill.run(self.build_context(parsed))
-
-        self.assertIn("下一轮赛程信息", answer)
-        self.assertIn("热门卡组参考", answer)
-        self.assertIn("重点卡牌参考", answer)
-        self.assertIn("训练建议", answer)
-        self.assertIn("数据限制说明", answer)
-        self.assertIn("schedule.json", answer)
-        self.assertIn("top_decks.json", answer)
-        self.assertIn("cards_meta.json", answer)
-
-    def test_match_preparation_skill_returns_controlled_message_without_upcoming(self):
-        parsed = fallback_parse_query("下一轮怎么准备？", self.card_data)
-        skill = MatchPreparationSkill()
-        context = SkillContext(
-            user_text="test",
-            parsed=parsed,
-            schedule_data=[],
-            top_decks_data=[],
-            cards_meta_data=self.card_data,
-        )
-
-        answer = skill.run(context)
-
-        self.assertIn("没有 upcoming 比赛", answer)
-        self.assertIn("schedule.json", answer)
 
     def test_match_preparation_resolves_to_evidence_synthesis_skill(self):
         registry = build_default_registry()

@@ -119,6 +119,48 @@ class RAGEvidenceSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(rag_answer.await_args.kwargs["retriever"], retriever)
         self.assertEqual(rag_answer.await_args.kwargs["source_type"], "deck")
         self.assertEqual(rag_answer.await_args.kwargs["reviewer_model"], {"api_key": "test-key"})
+        self.assertEqual(rag_answer.await_args.kwargs["api_key"], "test-key")
+
+    async def test_model_sdk_failure_returns_grounded_fallback_instead_of_raising(self):
+        class StaticRetriever:
+            def hybrid_search(self, *args, **kwargs):
+                return [
+                    {
+                        "final_score": 1.0,
+                        "doc": {
+                            "doc_id": "deck_1",
+                            "source_type": "deck",
+                            "text": "测试卡组证据",
+                            "metadata": {
+                                "rank": 1,
+                                "deck_name": "Test Deck",
+                                "player_name": "Tester",
+                                "avg_elixir": 3.2,
+                                "trophies": 9000,
+                                "cards": ["Knight"],
+                                "source": "test fixture",
+                            },
+                        },
+                    }
+                ]
+
+        with patch.object(
+            query_answering,
+            "generate_model_text",
+            AsyncMock(side_effect=RuntimeError("Request timed out")),
+        ), patch.object(query_answering, "uses_responses_api", return_value=True):
+            answer = await query_answering.build_rag_answer(
+                user_text="当前环境以什么卡组为主？",
+                parsed={"intent": "deck_query"},
+                retriever=StaticRetriever(),
+                source_type="deck",
+                reviewer_model=object(),
+                api_key="test-key",
+            )
+
+        self.assertIn("模型调用失败", answer)
+        self.assertIn("[1] deck | deck_1", answer)
+        self.assertNotIn("Request timed out", answer)
 
 
 class StubSkill:

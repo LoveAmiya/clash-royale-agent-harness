@@ -13,6 +13,7 @@ from skills.meta_evidence import build_meta_evidence_pack
 from skills.registry import SkillRegistry
 from harness.executor import SkillExecutor
 from harness.trace import TraceRecorder
+from query_answering import build_snapshot_fallback_answer
 
 
 DATA_DIR = Path("data")
@@ -42,6 +43,17 @@ class MetaEvidenceTests(unittest.TestCase):
         self.assertIn("https://royaleapi.com/decks/leaderboard", sources)
         self.assertIn("https://royaleapi.com/cards/popular", sources)
 
+    def test_snapshot_fallback_exposes_facts_and_data_boundary(self):
+        answer = build_snapshot_fallback_answer(
+            self.deck_data,
+            self.card_data,
+        )
+
+        self.assertIn("Electro Dragon Evolution / Monk", answer)
+        self.assertIn("Tower Princess", answer)
+        self.assertIn("数据边界", answer)
+        self.assertIn("不是 LLM 的策略推演", answer)
+
 
 class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
     def build_context(self, intent: str, api_key: str = "test-key") -> SkillContext:
@@ -51,6 +63,7 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
             schedule_data=[{"round": 1, "status": "upcoming"}],
             top_decks_data=[{"rank": 1, "deck_name": "Deck A"}],
             cards_meta_data=[{"rank": 1, "card_name": "Card A", "usage_rate": 10}],
+            retriever=object(),
             api_key=api_key,
         )
 
@@ -89,4 +102,4 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(answer, "模型综合结论")
             last_event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
-            self.assertEqual(last_event["mode"], "evidence_synthesis")
+            self.assertEqual(last_event["mode"], "rag_synthesis")

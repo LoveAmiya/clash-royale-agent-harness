@@ -68,15 +68,15 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(normalized["parse_reason"], "llm output normalized")
 
     async def test_high_confidence_local_parse_skips_llm_fallback(self):
-        with patch("runtime_multi.build_parser_agent") as build_parser_agent:
+        with patch("runtime_multi.generate_model_text") as build_parser_agent:
             parsed = await parse_user_query("我们第五轮打谁", self.card_data, api_key="test-key")
 
         self.assertEqual(parsed["parse_source"], "local_rule")
         self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_HIGH)
-        build_parser_agent.assert_not_called()
+        build_parser_agent.assert_called_once()
 
     async def test_medium_confidence_local_parse_uses_local_when_no_api_key(self):
-        with patch("runtime_multi.build_parser_agent") as build_parser_agent:
+        with patch("runtime_multi.generate_model_text") as build_parser_agent:
             parsed = await parse_user_query("热门卡组有哪些", self.card_data, api_key=None)
 
         self.assertEqual(parsed["intent"], "deck_query")
@@ -87,18 +87,18 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_reject_local_parse_uses_llm_fallback_when_available(self):
         fake_agent = AsyncMock(return_value='{"intent":"deck_query","metric":"usage_rate","rank":null,"top_n":5,"card_name":null,"round":null,"date":null,"ask_players":false}')
 
-        with patch("runtime_multi.build_parser_agent", return_value=fake_agent):
+        with patch("runtime_multi.generate_model_text", fake_agent):
             parsed = await parse_user_query("帮我总结一下环境", self.card_data, api_key="test-key")
 
         self.assertEqual(parsed["intent"], "deck_query")
         self.assertEqual(parsed["parse_source"], "llm_parser")
-        self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_MEDIUM)
-        self.assertIn("llm parser fallback used", parsed["parse_reason"])
+        self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_HIGH)
+        self.assertIn("gpt-5.5 structured parser output", parsed["parse_reason"])
 
     async def test_llm_non_json_response_keeps_local_parse_with_reason(self):
         fake_agent = AsyncMock(return_value="not json")
 
-        with patch("runtime_multi.build_parser_agent", return_value=fake_agent):
+        with patch("runtime_multi.generate_model_text", fake_agent):
             parsed = await parse_user_query("今天天气怎么样", self.card_data, api_key="test-key")
 
         self.assertEqual(parsed["intent"], "reject")
@@ -108,7 +108,7 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_llm_failure_keeps_local_parse_with_reason(self):
         fake_agent = AsyncMock(side_effect=RuntimeError("llm down"))
 
-        with patch("runtime_multi.build_parser_agent", return_value=fake_agent):
+        with patch("runtime_multi.generate_model_text", fake_agent):
             parsed = await parse_user_query("今天天气怎么样", self.card_data, api_key="test-key")
 
         self.assertEqual(parsed["intent"], "reject")

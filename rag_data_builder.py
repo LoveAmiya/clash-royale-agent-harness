@@ -51,7 +51,8 @@ def build_schedule_docs(schedule_data: list[dict]) -> list[dict]:
                     "opponent_team": opponent_team,
                     "opponent_player": opponent_player,
                     "status": status,
-                    "note": note,
+                "note": note,
+                "source": "schedule.json",
                 },
             }
         )
@@ -97,7 +98,9 @@ def build_deck_docs(deck_data: list[dict]) -> list[dict]:
                     "avg_elixir": avg_elixir,
                     "battles": battles,
                     "trophies": trophies,
-                    "cards": cards,
+                "cards": cards,
+                "source": item.get("source", "top_decks.json"),
+                "source_url": item.get("source_url", ""),
                 },
             }
         )
@@ -143,12 +146,57 @@ def build_card_docs(card_data: list[dict]) -> list[dict]:
                     "win_rate": win_rate,
                     "win_delta": win_delta,
                     "clean_win_rate": clean_win_rate,
-                    "mode": mode,
+                "mode": mode,
+                "source": item.get("source", "cards_meta.json"),
+                "source_url": item.get("source_url", ""),
                 },
             }
         )
 
     return docs
+
+
+def build_strategy_docs() -> list[dict]:
+    """提供可检索的通用对局原则，不将其伪装成版本实时统计。"""
+    entries = [
+        (
+            "strategy_air_defense",
+            "空军防守与反制",
+            "面对空军训练假设时，卡组至少保留稳定对空单位和范围法术，避免两张关键对空牌同时被同一法术换掉。"
+            "防守成功后，再用存活单位配合低费单位进行反推进；不要在对手核心空军单位未交前过早投入全部对空资源。",
+        ),
+        (
+            "strategy_fast_cycle",
+            "速转体系应对",
+            "面对速转体系时，优先记录对手核心防守牌和小法术的轮转，不要用高费单位追逐每一次小进攻。"
+            "通过费用正交换和保留关键解牌，等待对手关键卡不在手中时再发起完整推进。",
+        ),
+        (
+            "strategy_heavy_push",
+            "重甲推进应对",
+            "面对重甲推进时，先确认主坦克和后排支援的位置，再分配建筑、单体高伤或拉扯单位处理主坦克，"
+            "范围伤害或法术处理后排。不要把所有防守单位堆在同一路，以免被范围法术获得高收益。",
+        ),
+        (
+            "strategy_bo3",
+            "Bo3 备战",
+            "Bo3 备战要让三套候选卡组覆盖不同节奏，并避免三套卡组共享同一种明显弱点。"
+            "首局优先使用熟练度最高且信息暴露较少的体系；后续对局根据已出现的核心卡和法术调整，不把训练假设当作对手情报。",
+        ),
+    ]
+    return [
+        {
+            "doc_id": doc_id,
+            "source_type": "strategy",
+            "text": f"通用战术手册。主题：{title}。{text}",
+            "metadata": {
+                "title": title,
+                "source": "项目内置通用战术手册",
+                "scope": "通用对局原则，不是版本实时统计或对手情报",
+            },
+        }
+        for doc_id, title, text in entries
+    ]
 
 
 def main():
@@ -160,6 +208,7 @@ def main():
     docs.extend(build_schedule_docs(schedule_data))
     docs.extend(build_deck_docs(deck_data))
     docs.extend(build_card_docs(card_data))
+    docs.extend(build_strategy_docs())
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(docs, f, ensure_ascii=False, indent=2)

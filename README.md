@@ -144,14 +144,22 @@ OPENAI_API_KEY=your_key_here
 RUNTIME_PORT=8091
 WEB_PORT=8080
 BACKEND_URL=http://127.0.0.1:8091/process
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5.5
+OPENAI_BASE_URL=https://crs.ruinique.com
+OPENAI_WIRE_API=responses
+OPENAI_REASONING_EFFORT=medium
+PARSER_REASONING_EFFORT=medium
+SYNTHESIS_REASONING_EFFORT=medium
 OLLAMA_EMBED_URL=http://localhost:11434/api/embed
 EMBED_MODEL=bge-m3:latest
+OLLAMA_EMBED_TIMEOUT_SECONDS=3
+PARSER_CALL_TIMEOUT_SECONDS=20
+MODEL_CALL_TIMEOUT_SECONDS=120
 ```
 
-For local runs, set `OPENAI_API_KEY` in the current PowerShell session before starting the backend. Do not put a real key in source code or commit it to Git. `OPENAI_MODEL` is optional and defaults to `gpt-4o-mini`.
+For local runs, set `OPENAI_API_KEY` in the current PowerShell session before starting the backend. Do not put a real key in source code or commit it to Git. The default runtime uses the configured OpenAI-compatible relay with the Responses API, `gpt-5.5`, and `medium` reasoning effort for parsing and final synthesis.
 
-Direct JSON-backed questions can run with local data only. Environment analysis and team-preparation questions use an LLM to synthesize a bounded evidence pack from local snapshots, then append source URLs and an explicit data-time boundary. Open-ended retrieval answers can be enabled with an LLM key and embedding service.
+Direct JSON-backed questions run from local data only. Environment analysis and team-preparation questions first retrieve evidence from the RAG corpus, then use an LLM to synthesize a bounded answer with source URLs and an explicit data-time boundary. If Ollama embeddings are unavailable, retrieval automatically degrades to BM25 after the configured short timeout. The browser consumes backend SSE directly and displays progress plus the final execution trace.
 
 ### Data Freshness and Sources
 
@@ -165,7 +173,8 @@ This project intentionally does not scrape RoyaleAPI from an LLM prompt or call 
 User Question
   -> Query Parser
   -> Skill Router
-  -> Local JSON Answer, Evidence Synthesis, or RAG Path
+  -> Local JSON Answer or RAG Retrieval
+  -> Evidence-grounded Model Synthesis
   -> Trace Harness
   -> API Response / Browser UI
 ```
@@ -311,14 +320,22 @@ docker run --rm -p 8091:8091 --env-file .env clash-royale-agent
 RUNTIME_PORT=8091
 WEB_PORT=8080
 BACKEND_URL=http://127.0.0.1:8091/process
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-5.5
+OPENAI_BASE_URL=https://crs.ruinique.com
+OPENAI_WIRE_API=responses
+OPENAI_REASONING_EFFORT=medium
+PARSER_REASONING_EFFORT=medium
+SYNTHESIS_REASONING_EFFORT=medium
 OLLAMA_EMBED_URL=http://localhost:11434/api/embed
 EMBED_MODEL=bge-m3:latest
+OLLAMA_EMBED_TIMEOUT_SECONDS=3
+PARSER_CALL_TIMEOUT_SECONDS=20
+MODEL_CALL_TIMEOUT_SECONDS=120
 ```
 
-本地运行前，请在当前 PowerShell 窗口设置 `OPENAI_API_KEY`，不要把真实 Key 写进源码或提交到 Git。`OPENAI_MODEL` 是可选配置，默认值为 `gpt-4o-mini`。
+本地运行前，请在当前 PowerShell 窗口设置 `OPENAI_API_KEY`，不要把真实 Key 写进源码或提交到 Git。默认运行时使用已配置的 OpenAI 兼容中转站、Responses API、`gpt-5.5`，解析与最终综合统一使用 `medium` 推理强度。
 
-直接基于 JSON 的查询可以只依赖本地数据运行。环境分析和战队备战类问题会由 LLM 对本地静态证据包做受限综合，并在答案末尾附来源链接和数据时效边界。开放式检索回答可以通过 LLM Key 和 embedding 服务启用。
+直接基于 JSON 的查询可以只依赖本地数据运行。环境分析和战队备战类问题会先从 RAG 语料检索证据，再由 LLM 生成受限综合回答，并在答案末尾附来源链接和数据时效边界。Ollama embedding 不可用时，检索会在短超时后自动降级为 BM25。浏览器会直接消费后端 SSE，显示处理中状态和最终执行 Trace。
 
 ### 数据时效与来源
 
@@ -332,7 +349,8 @@ EMBED_MODEL=bge-m3:latest
 User Question
   -> Query Parser
   -> Skill Router
-  -> Local JSON Answer, Evidence Synthesis, or RAG Path
+  -> Local JSON Answer or RAG Retrieval
+  -> Evidence-grounded Model Synthesis
   -> Trace Harness
   -> API Response / Browser UI
 ```

@@ -393,10 +393,15 @@ def is_meta_analysis_query(question: str) -> bool:
     q = question.lower()
     analysis_keywords = [
         "当前版本",
+        "当前环境",
         "整体环境",
         "环境是什么样",
         "环境怎么样",
         "meta环境",
+        "进攻风格",
+        "卡组构筑",
+        "构筑思路",
+        "卡组体系",
         "定位",
         "搭配",
         "主要怕什么",
@@ -779,6 +784,23 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
     if result["intent"] not in {"schedule_query", "schedule_summary_query", "deck_query", "card_query", "card_compare_query", "card_rank_lookup_query", "meta_analysis_query", "match_preparation_query", "reject"}:
         return fallback_parse_query(question, cards_meta_data)
 
+    # Model-provided Chinese aliases must become the same canonical keys used by JSON Skills.
+    if isinstance(result["card_name"], str):
+        result["card_name"] = (
+            resolve_card_name(result["card_name"], cards_meta_data)
+            or resolve_card_name(question, cards_meta_data)
+        )
+    if isinstance(result["card_names"], list):
+        canonical_names: list[str] = []
+        for raw_name in result["card_names"]:
+            canonical_name = resolve_card_name(str(raw_name), cards_meta_data)
+            if canonical_name and canonical_name not in canonical_names:
+                canonical_names.append(canonical_name)
+        for canonical_name in resolve_card_names(question, cards_meta_data):
+            if canonical_name not in canonical_names:
+                canonical_names.append(canonical_name)
+        result["card_names"] = canonical_names
+
     if result["metric"] not in {"usage_rate", "win_rate", "clean_win_rate", None}:
         result["metric"] = get_metric(question)
     if result["compare_metric"] not in {"usage_rate", "win_rate", "clean_win_rate", None}:
@@ -850,6 +872,9 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         result["card_names"] = None
         if not result["card_name"]:
             result["card_name"] = resolve_card_name(question, cards_meta_data)
+        if result["card_name"] and not is_card_ranking_query(question):
+            result["rank"] = None
+            result["top_n"] = None
         if result["metric"] is None:
             result["metric"] = get_metric(question)
 
@@ -872,7 +897,7 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         result["top_n"] = None
         result["round"] = None
         result["date"] = None
-        if not isinstance(result["card_names"], list):
+        if not isinstance(result["card_names"], list) or len(result["card_names"]) < 2:
             result["card_names"] = resolve_card_names(question, cards_meta_data)
         if result["compare_metric"] is None:
             result["compare_metric"] = get_metric(question)

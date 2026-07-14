@@ -14,7 +14,9 @@ class EvidenceSynthesisSkill(Skill):
 
     async def run(self, context: SkillContext) -> str:
         if not context.api_key:
-            return "此类环境和备战问题需要模型综合本地证据，请先设置 OPENAI_API_KEY 后重试。"
+            return "此类环境和备战问题需要 RAG 检索与模型综合，请先设置 OPENAI_API_KEY 后重试。"
+        if context.retriever is None:
+            return "开放分析所需的本地知识库尚未就绪，无法可靠生成策略建议。请检查日志中的检索初始化信息后重试。"
         if self._answer_builder is None:
             raise RuntimeError("EvidenceSynthesisSkill is not configured")
 
@@ -24,5 +26,7 @@ class EvidenceSynthesisSkill(Skill):
             schedule_data=context.schedule_data,
             top_decks_data=context.top_decks_data,
             cards_meta_data=context.cards_meta_data,
+            retriever=context.retriever,
             api_key=context.api_key,
+            metadata=context.metadata,
         )

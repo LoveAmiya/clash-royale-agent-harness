@@ -5,6 +5,7 @@ BM25 与稠密向量分数不在同一量纲，因此本实现先归一化各自
 """
 
 import json
+import logging
 import math
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -14,7 +15,7 @@ from rank_bm25 import BM25Okapi
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
-from app_config import EMBED_MODEL, OLLAMA_EMBED_URL, RAG_DOCS_FILE
+from app_config import EMBED_MODEL, OLLAMA_EMBED_TIMEOUT_SECONDS, OLLAMA_EMBED_URL, RAG_DOCS_FILE
 
 
 DATA_DIR = Path("data")
@@ -22,6 +23,7 @@ DOCS_FILE = RAG_DOCS_FILE
 
 COLLECTION_NAME = "cr_hybrid_rag"
 VECTOR_SIZE = 1024
+logger = logging.getLogger(__name__)
 
 
 class HybridRetriever:
@@ -29,13 +31,19 @@ class HybridRetriever:
     def __init__(self, docs: List[Dict[str, Any]]):
         """对同一批文档建立两套索引，使词法与语义召回使用相同语料。"""
         self.docs = docs
-        self.doc_id_to_doc = {}
+        self.doc_id_to_doc = {idx: doc for idx, doc in enumerate(docs)}
 
         self.tokenized_corpus = [self.tokenize(doc["text"]) for doc in docs]
         self.bm25 = BM25Okapi(self.tokenized_corpus)
 
         self.qdrant = QdrantClient(":memory:")
-        self._build_dense_index()
+        self.dense_available = False
+        try:
+            self._build_dense_index()
+            self.dense_available = True
+        except Exception as exc:
+            # Open-ended answers remain available through BM25 when local Ollama is not running.
+            logger.warning("dense retrieval disabled; using BM25 fallback: %s", exc)
 
     @staticmethod
     def tokenize(text: str) -> List[str]:
@@ -69,7 +77,7 @@ class HybridRetriever:
             "input": text,
         }
         try:
-            resp = requests.post(OLLAMA_EMBED_URL, json=payload, timeout=60)
+            resp = requests.post(OLLAMA_EMBED_URL, json=payload, timeout=OLLAMA_EMBED_TIMEOUT_SECONDS)
         except requests.RequestException as exc:
             raise RuntimeError(
                 f"无法连接到 Ollama embedding 服务：{OLLAMA_EMBED_URL}。"
@@ -101,7 +109,6 @@ class HybridRetriever:
 
         points = []
         for idx, doc in enumerate(self.docs):
-            self.doc_id_to_doc[idx] = doc
             try:
                 vector = self.embed_text(doc["text"])
             except Exception as exc:
@@ -155,6 +162,9 @@ class HybridRetriever:
 
     def dense_search(self, query: str, top_k: int = 10, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """返回向量索引中按余弦相似度排序的语义候选文档。"""
+        if not self.dense_available:
+            return []
+
         query_vector = self.embed_text(query)
 
         response = self.qdrant.query_points(
@@ -237,6 +247,7 @@ class HybridRetriever:
             merged[idx]["dense_score"] = dense_norm.get(idx, 0.0)
 
         final_results = []
+        retrieval_mode = "hybrid" if self.dense_available else "bm25_only"
         for idx, item in merged.items():
             final_score = alpha * item["bm25_score"] + (1 - alpha) * item["dense_score"]
             final_results.append(
@@ -245,6 +256,7 @@ class HybridRetriever:
                     "final_score": final_score,
                     "bm25_score": item["bm25_score"],
                     "dense_score": item["dense_score"],
+                    "retrieval_mode": retrieval_mode,
                     "doc": item["doc"],
                 }
             )
