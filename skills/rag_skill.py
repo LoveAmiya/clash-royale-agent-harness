@@ -31,8 +31,8 @@ class RAGEvidenceSkill(Skill):
 
         if not context.api_key:
             if source_type == "deck":
-                return "当前无法使用检索回答卡组开放问题，请先设置 SILICONFLOW_API_KEY 后重试。"
-            return "当前无法使用检索回答卡牌开放问题，请先设置 SILICONFLOW_API_KEY 后重试。"
+                return "当前无法使用检索回答卡组开放问题，请先设置 OPENAI_API_KEY 后重试。"
+            return "当前无法使用检索回答卡牌开放问题，请先设置 OPENAI_API_KEY 后重试。"
 
         if self._rag_answer_builder is None or self._reviewer_model_builder is None:
             raise RuntimeError("RAGEvidenceSkill is not configured")

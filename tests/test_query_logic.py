@@ -1,15 +1,17 @@
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from support import install_test_stubs
 
 install_test_stubs()
 
 import app_config
+import query_answering
 from fastapi import FastAPI
 from answer_builder import build_card_answer, build_deck_answer, build_schedule_answer
-from runtime_multi import lifespan, query_needs_rag
+from runtime_multi import build_chat_model, lifespan, query_needs_rag
 from query_parser import fallback_parse_query, normalize_parsed_query
 
 
@@ -50,6 +52,17 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(parsed["card_name"], "Fireball")
         self.assertEqual(parsed["metric"], "win_rate")
         self.assertIsNone(parsed["top_n"])
+
+    def test_meta_analysis_parses_baby_dragon_alias_and_qualitative_question(self):
+        parsed = fallback_parse_query("绿龙在当前环境里的定位是什么？适合搭配哪些核心卡，主要怕什么？", self.card_data)
+
+        self.assertEqual(parsed["intent"], "meta_analysis_query")
+        self.assertEqual(parsed["card_name"], "Baby Dragon")
+
+    def test_match_preparation_keeps_tactical_user_question(self):
+        parsed = fallback_parse_query("如果对手最近常用空军卡组，我们应该优先准备哪些防守和反制方案？", self.card_data)
+
+        self.assertEqual(parsed["intent"], "match_preparation_query")
 
     def test_card_query_parses_usage_rank_target(self):
         parsed = fallback_parse_query("使用率第三的卡牌是什么", self.card_data)
@@ -145,7 +158,27 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(app_config.RETRIEVAL_TOP_K_BM25, 10)
         self.assertEqual(app_config.RETRIEVAL_FINAL_TOP_K, 8)
         self.assertEqual(app_config.EMBED_MODEL, "bge-m3:latest")
-        self.assertEqual(app_config.SILICONFLOW_MODEL_NAME, "Qwen/Qwen3-8B")
+        self.assertTrue(app_config.OPENAI_MODEL)
+
+    def test_chat_model_uses_standard_openai_configuration(self):
+        with patch("runtime_multi.OpenAIChatModel") as model_class:
+            build_chat_model("test-key")
+
+        model_class.assert_called_once_with(
+            model_name=app_config.OPENAI_MODEL,
+            api_key="test-key",
+            stream=False,
+        )
+
+    def test_reviewer_model_uses_standard_openai_configuration(self):
+        with patch("query_answering.OpenAIChatModel") as model_class:
+            query_answering.build_reviewer_model("test-key")
+
+        model_class.assert_called_once_with(
+            model_name=app_config.OPENAI_MODEL,
+            api_key="test-key",
+            stream=False,
+        )
 
     def test_query_needs_rag_only_for_open_deck_and_card_queries(self):
         self.assertFalse(query_needs_rag({"intent": "schedule_query", "round": 2}))

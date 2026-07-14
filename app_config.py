@@ -8,8 +8,8 @@ TOP_DECKS_FILE = DATA_DIR / "top_decks.json"
 CARDS_META_FILE = DATA_DIR / "cards_meta.json"
 RAG_DOCS_FILE = DATA_DIR / "rag_documents.json"
 
-SILICONFLOW_MODEL_NAME = os.getenv("SILICONFLOW_MODEL_NAME", "Qwen/Qwen3-8B")
-SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
+# The API key is supplied by the process environment, never by source files.
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 RUNTIME_HOST = os.getenv("RUNTIME_HOST", "0.0.0.0")
 RUNTIME_PORT = int(os.getenv("RUNTIME_PORT", "8091"))

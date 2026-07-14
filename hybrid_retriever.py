@@ -1,3 +1,9 @@
+"""本地混合检索：词法 BM25 加语义向量相似度。
+
+BM25 与稠密向量分数不在同一量纲，因此本实现先归一化各自候选列表，再做可配置的
+加权融合。结果保留两路分数，便于调试和离线评测。
+"""
+
 import json
 import math
 from pathlib import Path
@@ -19,7 +25,9 @@ VECTOR_SIZE = 1024
 
 
 class HybridRetriever:
+    """构建内存中的 BM25/Qdrant 索引，并提供可解释的检索结果。"""
     def __init__(self, docs: List[Dict[str, Any]]):
+        """对同一批文档建立两套索引，使词法与语义召回使用相同语料。"""
         self.docs = docs
         self.doc_id_to_doc = {}
 
@@ -31,6 +39,7 @@ class HybridRetriever:
 
     @staticmethod
     def tokenize(text: str) -> List[str]:
+        """为 BM25 切分英文单词和单个中文字符。"""
         text = text.lower()
         english_tokens = []
         current = []
@@ -51,6 +60,10 @@ class HybridRetriever:
         return english_tokens + chinese_tokens
 
     def embed_text(self, text: str) -> List[float]:
+        """调用配置好的 Ollama embedding 服务，并校验返回契约。
+
+        在此校验向量长度，可以在模型与 Qdrant collection schema 不匹配时尽早失败。
+        """
         payload = {
             "model": EMBED_MODEL,
             "input": text,
@@ -77,6 +90,7 @@ class HybridRetriever:
         return vector
 
     def _build_dense_index(self):
+        """为当前文档语料创建可丢弃的本地 Qdrant collection。"""
         if self.qdrant.collection_exists(COLLECTION_NAME):
             self.qdrant.delete_collection(COLLECTION_NAME)
 
@@ -114,6 +128,7 @@ class HybridRetriever:
         self.qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
 
     def bm25_search(self, query: str, top_k: int = 10, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """返回按词频相关性排序的词法候选文档。"""
         tokenized_query = self.tokenize(query)
         scores = self.bm25.get_scores(tokenized_query)
 
@@ -139,6 +154,7 @@ class HybridRetriever:
         return results
 
     def dense_search(self, query: str, top_k: int = 10, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """返回向量索引中按余弦相似度排序的语义候选文档。"""
         query_vector = self.embed_text(query)
 
         response = self.qdrant.query_points(
@@ -172,6 +188,7 @@ class HybridRetriever:
 
     @staticmethod
     def normalize_scores(results: List[Dict[str, Any]]) -> Dict[int, float]:
+        """在跨检索器融合前，将一路检索分数映射到 0..1。"""
         if not results:
             return {}
 
@@ -196,6 +213,11 @@ class HybridRetriever:
         alpha: float = 0.5,
         source_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """以可审计的加权分数融合词法与稠密候选集。
+
+        ``alpha`` 控制词法贡献。只被一路召回的文档仍会保留，缺失一路记为 0 分；
+        这样既提升召回，也能解释它为什么排在当前位置。
+        """
         bm25_results = self.bm25_search(query, top_k=top_k_bm25, source_type=source_type)
         dense_results = self.dense_search(query, top_k=top_k_dense, source_type=source_type)
 

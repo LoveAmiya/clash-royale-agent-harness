@@ -140,15 +140,24 @@ The main configuration keys are documented in `.env.example`.
 Common values:
 
 ```text
+OPENAI_API_KEY=your_key_here
 RUNTIME_PORT=8091
 WEB_PORT=8080
 BACKEND_URL=http://127.0.0.1:8091/process
-SILICONFLOW_MODEL_NAME=Qwen/Qwen3-8B
+OPENAI_MODEL=gpt-4o-mini
 OLLAMA_EMBED_URL=http://localhost:11434/api/embed
 EMBED_MODEL=bge-m3:latest
 ```
 
-Direct JSON-backed questions can run with local data only. Open-ended retrieval answers can be enabled with an LLM key and embedding service.
+For local runs, set `OPENAI_API_KEY` in the current PowerShell session before starting the backend. Do not put a real key in source code or commit it to Git. `OPENAI_MODEL` is optional and defaults to `gpt-4o-mini`.
+
+Direct JSON-backed questions can run with local data only. Environment analysis and team-preparation questions use an LLM to synthesize a bounded evidence pack from local snapshots, then append source URLs and an explicit data-time boundary. Open-ended retrieval answers can be enabled with an LLM key and embedding service.
+
+### Data Freshness and Sources
+
+`top_decks.json` and `cards_meta.json` preserve the original RoyaleAPI page URLs with each record, but they are repository snapshots rather than live data. The agent must not claim that they are current-version or opponent-specific intelligence.
+
+This project intentionally does not scrape RoyaleAPI from an LLM prompt or call its retired public API: RoyaleAPI's own legacy documentation states that its [public API was sunset](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/getting_started.md), and its [legacy popular-decks endpoint is not implemented](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/endpoints/popular_decks.md). A future live-data adapter should use a maintained, documented and authorized provider with a deterministic ingestion job, not unrestricted model browsing.
 
 ### Workflow Overview
 
@@ -156,7 +165,7 @@ Direct JSON-backed questions can run with local data only. Open-ended retrieval 
 User Question
   -> Query Parser
   -> Skill Router
-  -> Local JSON Answer or RAG Path
+  -> Local JSON Answer, Evidence Synthesis, or RAG Path
   -> Trace Harness
   -> API Response / Browser UI
 ```
@@ -302,12 +311,20 @@ docker run --rm -p 8091:8091 --env-file .env clash-royale-agent
 RUNTIME_PORT=8091
 WEB_PORT=8080
 BACKEND_URL=http://127.0.0.1:8091/process
-SILICONFLOW_MODEL_NAME=Qwen/Qwen3-8B
+OPENAI_MODEL=gpt-4o-mini
 OLLAMA_EMBED_URL=http://localhost:11434/api/embed
 EMBED_MODEL=bge-m3:latest
 ```
 
-直接基于 JSON 的查询可以只依赖本地数据运行。开放式检索回答可以通过 LLM Key 和 embedding 服务启用。
+本地运行前，请在当前 PowerShell 窗口设置 `OPENAI_API_KEY`，不要把真实 Key 写进源码或提交到 Git。`OPENAI_MODEL` 是可选配置，默认值为 `gpt-4o-mini`。
+
+直接基于 JSON 的查询可以只依赖本地数据运行。环境分析和战队备战类问题会由 LLM 对本地静态证据包做受限综合，并在答案末尾附来源链接和数据时效边界。开放式检索回答可以通过 LLM Key 和 embedding 服务启用。
+
+### 数据时效与来源
+
+`top_decks.json` 与 `cards_meta.json` 会在每条记录中保留原始 RoyaleAPI 页面 URL，但它们是仓库快照，不是本次回答时实时获取的数据。Agent 不会把这些快照说成“当前版本实时结论”或“对手真实情报”。
+
+项目不会让 LLM 直接抓取 RoyaleAPI 页面，也不会调用已经停止维护的旧公开 API：RoyaleAPI 自己的旧版文档明确说明[公开 API 已停止服务](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/getting_started.md)，[旧版热门卡组接口也未实现](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/endpoints/popular_decks.md)。后续若接入实时数据，应选择仍在维护、文档完整且授权明确的数据提供方，并通过确定性的采集任务更新，而不是让模型无限制浏览网页。
 
 ### 工作流概览
 
@@ -315,7 +332,7 @@ EMBED_MODEL=bge-m3:latest
 User Question
   -> Query Parser
   -> Skill Router
-  -> Local JSON Answer or RAG Path
+  -> Local JSON Answer, Evidence Synthesis, or RAG Path
   -> Trace Harness
   -> API Response / Browser UI
 ```

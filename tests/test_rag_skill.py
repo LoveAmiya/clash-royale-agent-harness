@@ -93,7 +93,7 @@ class RAGEvidenceSkillTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             answer,
-            "当前无法使用检索回答卡牌开放问题，请先设置 SILICONFLOW_API_KEY 后重试。",
+            "当前无法使用检索回答卡牌开放问题，请先设置 OPENAI_API_KEY 后重试。",
         )
 
     async def test_reuses_existing_rag_callbacks_with_context_retriever_and_api_key(self):

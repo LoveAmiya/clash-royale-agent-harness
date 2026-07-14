@@ -12,6 +12,7 @@ from skills.card_compare_skill import CardCompareSkill
 from skills.card_rank_lookup_skill import CardRankLookupSkill
 from skills.card_skill import CardMetaSkill
 from skills.match_preparation_skill import MatchPreparationSkill
+from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
 from skills.registry import build_default_registry
 from skills.schedule_summary_skill import ScheduleSummarySkill
 
@@ -220,10 +221,10 @@ class BusinessSkillTests(unittest.TestCase):
         self.assertIn("没有 upcoming 比赛", answer)
         self.assertIn("schedule.json", answer)
 
-    def test_match_preparation_resolves_to_match_preparation_skill(self):
+    def test_match_preparation_resolves_to_evidence_synthesis_skill(self):
         registry = build_default_registry()
         parsed = fallback_parse_query("帮我推荐几套可练的卡组", self.card_data)
 
         selected_skill = registry.resolve(parsed)
 
-        self.assertIsInstance(selected_skill, MatchPreparationSkill)
+        self.assertIsInstance(selected_skill, EvidenceSynthesisSkill)

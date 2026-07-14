@@ -61,7 +61,7 @@ class PlannerTests(unittest.TestCase):
 
         self.assertEqual(
             skill_names,
-            ["ScheduleQuerySkill", "DeckRankingSkill", "CardMetaSkill", "MatchPreparationSkill"],
+            ["ScheduleQuerySkill", "DeckRankingSkill", "CardMetaSkill", "EvidenceSynthesisSkill"],
         )
 
     def test_card_query_does_not_generate_plan(self):

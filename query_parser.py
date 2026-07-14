@@ -1,8 +1,15 @@
+"""将自由表达的玩家问题转换为经过校验的路由字段。
+
+解析器优先使用兼容 LLM 的 JSON 契约，同时保留本地归一化和兜底规则作为确定性
+安全网。因此 Router 消费的是标准卡名、范围受限的排名和已知意图，而不是原始自然语言。
+"""
+
 import json
 import re
 from typing import Any
 
 
+# 路由前先归一化玩家昵称和中英文写法；标准 key 也是卡牌元数据和下游 Skill 使用的名称。
 CARD_ALIASES = {
     "Hog Rider": ["hog rider", "hog", "野猪骑士", "猪"],
     "Miner": ["miner", "矿工"],
@@ -32,6 +39,7 @@ CARD_ALIASES = {
     "Freeze": ["freeze", "冰冻"],
     "Executioner": ["executioner", "刽子手"],
     "Electro Wizard": ["electro wizard", "电法"],
+    "Baby Dragon": ["baby dragon", "绿龙", "青龙", "龙宝"],
 }
 
 
@@ -66,7 +74,7 @@ PARSER_SYSTEM_PROMPT = (
     "请把用户问题解析成 JSON，不要输出多余解释。\n\n"
     "输出格式固定为：\n"
     "{\n"
-    '  "intent": "schedule_query | schedule_summary_query | deck_query | card_query | card_compare_query | card_rank_lookup_query | match_preparation_query | reject",\n'
+    '  "intent": "schedule_query | schedule_summary_query | deck_query | card_query | card_compare_query | card_rank_lookup_query | meta_analysis_query | match_preparation_query | reject",\n'
     '  "metric": "usage_rate | win_rate | clean_win_rate | null",\n'
     '  "compare_metric": "usage_rate | win_rate | clean_win_rate | null",\n'
     '  "rank": 具体名次或 null,\n'
@@ -81,6 +89,7 @@ PARSER_SYSTEM_PROMPT = (
     "1. 问赛程、下一轮、谁上场、某轮打谁 -> schedule_query。\n"
     "1.1 问总结一下接下来的赛程、后面还有几场比赛、赛程压力怎么样 -> schedule_summary_query。\n"
     "1.2 问下一轮怎么准备、下一场比赛有什么准备建议、推荐可练卡组 -> match_preparation_query。\n"
+    "1.3 问当前环境、卡牌定位、搭配、克制关系、打法或反制方案 -> meta_analysis_query。\n"
     "2. 问热门卡组、卡组排行、某名次卡组 -> deck_query。\n"
     "3. 问单卡使用率/胜率，或问前几张高使用率卡牌、某名次卡牌 -> card_query。\n"
     "3.1 问两张卡哪个更高/更强/谁更高，解析为 card_compare_query，并给出 card_names。\n"
@@ -111,6 +120,10 @@ def extract_text_content(result: Any) -> str:
 
 
 def extract_json_block(text: str) -> dict | None:
+    """尽力从模型输出中提取一个 JSON 对象。
+
+    此处只做语法提取；后续归一化仍会在 Skill 接收结果前校验意图白名单和字段范围。
+    """
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return None
@@ -125,6 +138,7 @@ def extract_cn_number(text: str) -> int | None:
 
 
 def coerce_rank_value(value: Any, max_n: int = 30) -> int | None:
+    """将模型或用户提供的排名转换为安全的 1..max_n 整数边界。"""
     if isinstance(value, int):
         return max(1, min(value, max_n))
     if not isinstance(value, str):
@@ -277,6 +291,7 @@ def extract_top_n(question: str, default: int | None = None, max_n: int = 30) ->
 
 
 def resolve_card_name(text: str, cards_meta_data: list[dict]) -> str | None:
+    """将别名解析为卡牌 Skill 使用的数据集标准名称。"""
     q = normalize_text(text)
 
     for card_name, aliases in CARD_ALIASES.items():
@@ -371,6 +386,30 @@ def is_match_preparation_query(question: str) -> bool:
 
     return any(keyword in q for keyword in preparation_keywords) and any(
         keyword in q for keyword in match_domain_keywords
+    )
+
+
+def is_meta_analysis_query(question: str) -> bool:
+    q = question.lower()
+    analysis_keywords = [
+        "当前版本",
+        "整体环境",
+        "环境是什么样",
+        "环境怎么样",
+        "meta环境",
+        "定位",
+        "搭配",
+        "主要怕什么",
+        "克制",
+        "反制",
+        "速转",
+        "空军",
+        "重甲推进",
+        "打法",
+    ]
+    domain_keywords = ["卡组", "卡牌", "单卡", "meta", "环境", "绿龙", "青龙", "龙宝", "baby dragon"]
+    return any(keyword in q for keyword in analysis_keywords) and (
+        any(keyword in q for keyword in domain_keywords) or resolve_card_name(question, []) is not None
     )
 
 
@@ -498,6 +537,11 @@ def infer_local_parse_metadata(parsed: dict, question: str) -> dict:
             strong_signals += 2
             reasons.append("strict match preparation pattern matched")
 
+    elif intent == "meta_analysis_query":
+        if is_meta_analysis_query(question):
+            strong_signals += 2
+            reasons.append("strict meta analysis pattern matched")
+
     elif intent == "deck_query":
         if rank is not None and has_explicit_rank_signal(question):
             strong_signals += 1
@@ -586,11 +630,17 @@ def infer_local_parse_metadata(parsed: dict, question: str) -> dict:
 
 
 def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
+    """结构化模型输出失败时提供确定性的路由字段。
+
+    兜底逻辑刻意保守：保留可追溯的本地依据，不会把无法识别的问题伪装为合法 Skill 调用。
+    """
     intent = "reject"
     if is_schedule_summary_query(question):
         intent = "schedule_summary_query"
     elif is_match_preparation_query(question):
         intent = "match_preparation_query"
+    elif is_meta_analysis_query(question):
+        intent = "meta_analysis_query"
     elif is_card_compare_query(question, cards_meta_data):
         intent = "card_compare_query"
     elif is_card_rank_lookup_query(question, cards_meta_data):
@@ -640,6 +690,15 @@ def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
         metric = None
         compare_metric = None
         card_name = None
+        card_names = None
+        rank_target = None
+        top_n = None
+        round_no = None
+        target_date = None
+
+    if intent == "meta_analysis_query":
+        metric = None
+        compare_metric = None
         card_names = None
         rank_target = None
         top_n = None
@@ -697,6 +756,10 @@ def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
 
 
 def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[dict]) -> dict:
+    """在 Router/Skill 选择前校验并修复解析字段。
+
+    这是模型输出的可信边界：它会限制数值范围、标准化卡牌别名，并写入解析置信度元数据。
+    """
     result = {
         "intent": parsed.get("intent"),
         "metric": parsed.get("metric"),
@@ -713,7 +776,7 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         "parse_reason": parsed.get("parse_reason"),
     }
 
-    if result["intent"] not in {"schedule_query", "schedule_summary_query", "deck_query", "card_query", "card_compare_query", "card_rank_lookup_query", "match_preparation_query", "reject"}:
+    if result["intent"] not in {"schedule_query", "schedule_summary_query", "deck_query", "card_query", "card_compare_query", "card_rank_lookup_query", "meta_analysis_query", "match_preparation_query", "reject"}:
         return fallback_parse_query(question, cards_meta_data)
 
     if result["metric"] not in {"usage_rate", "win_rate", "clean_win_rate", None}:
@@ -765,6 +828,17 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         result["top_n"] = None
         result["round"] = None
         result["date"] = None
+
+    if result["intent"] == "meta_analysis_query":
+        result["metric"] = None
+        result["compare_metric"] = None
+        result["card_names"] = None
+        result["rank"] = None
+        result["top_n"] = None
+        result["round"] = None
+        result["date"] = None
+        if not result["card_name"]:
+            result["card_name"] = resolve_card_name(question, cards_meta_data)
 
     if result["intent"] == "deck_query":
         result["card_name"] = None

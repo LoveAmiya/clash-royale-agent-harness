@@ -19,8 +19,7 @@ from app_config import (
     RUNTIME_HOST,
     RUNTIME_PORT,
     SCHEDULE_FILE,
-    SILICONFLOW_BASE_URL,
-    SILICONFLOW_MODEL_NAME,
+    OPENAI_MODEL,
     TOP_DECKS_FILE,
 )
 from hybrid_retriever import HybridRetriever, load_docs
@@ -67,9 +66,8 @@ def get_user_text(request: ProcessRequest) -> str:
 
 def build_chat_model(api_key: str) -> OpenAIChatModel:
     return OpenAIChatModel(
-        model_name=SILICONFLOW_MODEL_NAME,
+        model_name=OPENAI_MODEL,
         api_key=api_key,
-        client_kwargs={"base_url": SILICONFLOW_BASE_URL},
         stream=False,
     )
 
@@ -178,7 +176,7 @@ async def build_answer(user_text: str, app: FastAPI) -> str:
     cards_meta_data = app.state.cards_meta_data
     schedule_data = app.state.schedule_data
     top_decks_data = app.state.top_decks_data
-    api_key = os.getenv("SILICONFLOW_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
 
     parsed = await parse_user_query(user_text, cards_meta_data, api_key)
     logger.info("request parsed intent=%s parsed=%s", parsed.get("intent"), parsed)

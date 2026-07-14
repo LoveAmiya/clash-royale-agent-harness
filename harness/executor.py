@@ -1,3 +1,5 @@
+"""执行已选择的 Skill，并记录完整的查询级 Trace。"""
+
 import inspect
 import time
 
@@ -8,11 +10,21 @@ from skills.registry import SkillRegistry
 
 
 class SkillExecutor:
+    """连接解析/路由结果与 Skill 执行过程，不隐藏失败。
+
+    每个请求都有 PENDING -> RUNNING -> SUCCESS/FAILED 的 Trace；当没有 Skill
+    可以安全处理解析意图时，进入 FALLBACK 终态。
+    """
     def __init__(self, registry: SkillRegistry, recorder: TraceRecorder | None = None):
         self.registry = registry
         self.recorder = recorder or TraceRecorder()
 
     async def execute(self, context: SkillContext):
+        """选择并运行 Skill，同时记录耗时和执行证据。
+
+        ``inspect.isawaitable`` 让简单的同步查询 Skill 与 I/O 密集的 RAG Skill
+        能通过同一套接口执行。
+        """
         trace_id = self.recorder.new_trace_id()
         intent = context.parsed.get("intent")
 
@@ -28,6 +40,7 @@ class SkillExecutor:
             )
         )
 
+        # 兼容旧的 resolve(parsed) 接口，同时优先使用能承载更多路由上下文的 select(context)。
         skill = self.registry.select(context) if hasattr(self.registry, "select") else self.registry.resolve(context.parsed)
 
         if skill is None:
@@ -46,7 +59,13 @@ class SkillExecutor:
             )
             return None
 
-        mode = "rag" if skill.name == "RAGEvidenceSkill" else "direct"
+        # 该标签是可观测性元数据，而不是路由策略；它让 UI 和评测能比较直接结构化回答与 RAG 回答。
+        if skill.name == "RAGEvidenceSkill":
+            mode = "rag"
+        elif skill.name == "EvidenceSynthesisSkill":
+            mode = "evidence_synthesis"
+        else:
+            mode = "direct"
         self.recorder.record(
             TraceEvent(
                 trace_id=trace_id,

@@ -2,4 +2,12 @@ $ErrorActionPreference = "Stop"
 
 Set-Location $PSScriptRoot
 
-python -m unittest discover -s tests
+# Prefer the project virtual environment over the system Python.
+$localPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+if (Test-Path $localPython) {
+    $pythonExe = $localPython
+} else {
+    $pythonExe = "python"
+}
+
+& $pythonExe -m unittest discover -s tests

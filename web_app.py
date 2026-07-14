@@ -1,3 +1,9 @@
+"""将用户问题转发给 Agent 后端的本地浏览器界面。
+
+本进程只负责展示，不直接导入路由或检索代码，因此 Web UI 可以独立于运行在
+``BACKEND_URL`` 的 Agent 服务启动、替换或排错。
+"""
+
 import json
 import uuid
 
@@ -271,12 +277,17 @@ HTML_PAGE = """
 
 
 class ChatRequest(BaseModel):
+    """浏览器聊天表单提交前经过校验的输入。"""
     message: str
     session_id: str | None = None
     user_id: str | None = None
 
 
 def extract_final_answer(response_event: dict) -> str:
+    """从后端事件中取出面向用户的答案，不暴露内部 Trace。
+
+    后端可以附带路由、工具和检索诊断信息供排查；普通聊天气泡只展示最终回答。
+    """
     output = response_event.get("output", [])
     for item in output:
         if item.get("object") == "message" and item.get("role") == "assistant":
@@ -293,11 +304,13 @@ def extract_final_answer(response_event: dict) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    """返回自包含的本地聊天页面。"""
     return HTML_PAGE
 
 
 @app.get("/health")
 async def health():
+    """为 UI 进程提供轻量级存活检查接口。"""
     return {
         "ok": True,
         "backend_url": BACKEND_URL,
@@ -306,6 +319,11 @@ async def health():
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
+    """转发一次问题到后端，并保留请求 trace id。
+
+    在 HTTP 边界生成新 id，使 UI 转发失败和 Agent 执行失败能在日志中关联。
+    上游失败会转换为明确 HTTP 错误，UI 不会伪造一个看似正常的回答。
+    """
     session_id = req.session_id or str(uuid.uuid4())
     user_id = req.user_id or "web-user-1"
 

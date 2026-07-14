@@ -5,11 +5,11 @@ from skills.base import SkillContext
 class RuleBasedPlanner:
     def build_plan(self, context: SkillContext) -> Plan | None:
         intent = context.parsed.get("intent")
-        if intent != "match_preparation_query":
+        if intent not in {"match_preparation_query", "meta_analysis_query"}:
             return None
 
         return Plan(
-            plan_type="rule_based_match_preparation",
+            plan_type="evidence_synthesis",
             trigger_intent=intent,
             steps=[
                 PlanStep(
@@ -29,8 +29,8 @@ class RuleBasedPlanner:
                 ),
                 PlanStep(
                     step_id="step_4",
-                    skill_name="MatchPreparationSkill",
-                    description="综合赛程、热门卡组和单卡 meta 生成备战建议",
+                    skill_name="EvidenceSynthesisSkill",
+                    description="基于可追溯快照证据调用模型生成环境分析或备战建议",
                 ),
             ],
         )
