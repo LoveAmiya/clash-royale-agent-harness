@@ -20,12 +20,33 @@ PARSER_REASONING_EFFORT = os.getenv("PARSER_REASONING_EFFORT", "medium").strip()
 SYNTHESIS_REASONING_EFFORT = os.getenv("SYNTHESIS_REASONING_EFFORT", "medium").strip().lower()
 OPENAI_CLIENT_KWARGS = {"base_url": OPENAI_BASE_URL}
 
-RUNTIME_HOST = os.getenv("RUNTIME_HOST", "0.0.0.0")
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, min(value, maximum))
+
+
+RUNTIME_HOST = os.getenv("RUNTIME_HOST", "127.0.0.1").strip()
 RUNTIME_PORT = int(os.getenv("RUNTIME_PORT", "8091"))
 
-WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
+WEB_HOST = os.getenv("WEB_HOST", "127.0.0.1").strip()
 WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8091/process")
+
+# Request limits are deliberately process-local. A reverse proxy remains the
+# production boundary for multi-worker or multi-instance deployments.
+MAX_REQUEST_BODY_BYTES = _bounded_int("MAX_REQUEST_BODY_BYTES", 65_536, 1_024, 1_048_576)
+MAX_QUERY_CHARS = _bounded_int("MAX_QUERY_CHARS", 8_000, 64, 100_000)
+PROCESS_MAX_CONCURRENT = _bounded_int("PROCESS_MAX_CONCURRENT", 8, 1, 128)
+PROCESS_RATE_LIMIT_PER_MINUTE = _bounded_int("PROCESS_RATE_LIMIT_PER_MINUTE", 30, 0, 10_000)
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+ALLOWED_ORIGINS = tuple(
+    origin.strip().rstrip("/")
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://127.0.0.1:8080,http://localhost:8080").split(",")
+    if origin.strip()
+)
 
 OLLAMA_EMBED_URL = os.getenv("OLLAMA_EMBED_URL", "http://localhost:11434/api/embed")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3:latest")
@@ -69,7 +90,7 @@ SUPERCELL_BATTLES_PER_PLAYER = max(1, min(int(os.getenv("SUPERCELL_BATTLES_PER_P
 # Sampling intentionally walks leaderboard rank order. A later rank must not
 # overtake an earlier one merely because its request returned faster.
 SUPERCELL_FETCH_CONCURRENCY = 1
-LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED = False
+LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED = os.getenv("LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 # Large samples intentionally trade freshness for controlled official API usage.
 SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND = max(0.1, float(os.getenv("SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND", "2")))
 SUPERCELL_HIGH_VOLUME_MAX_RETRIES = max(0, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_RETRIES", "0")), 5))

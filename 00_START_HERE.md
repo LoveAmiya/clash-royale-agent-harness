@@ -127,6 +127,10 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 Invoke-RestMethod http://127.0.0.1:8091/health
 ```
 
+生产探针区分存活与可回答状态：`/health` 只检查进程；`/ready` 会检查模型凭证、完整官方快照和 RAG 状态。严格模式首次采集期间 `/ready` 返回 `503`，RAG 预热或陈旧快照时返回 `200` 与 `status: degraded`。`/metrics` 提供 Prometheus 文本指标，`/snapshot/status` 还会显示最近请求数、失败数、限流数与 P95 回答耗时。
+
+默认仅监听 `127.0.0.1`。容器或反向代理部署才显式设置 `RUNTIME_HOST=0.0.0.0`；同时设置 `ALLOWED_ORIGINS`、请求长度/并发/每分钟限流环境变量。`/settings/live-sample` 默认关闭，若显式启用还必须提供 `X-Admin-Key`。
+
 ## 启动前端可视化
 
 打开第二个 PowerShell：

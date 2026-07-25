@@ -85,6 +85,12 @@ Health check:
 curl http://127.0.0.1:8091/health
 ```
 
+`/health` only confirms that the Python process is alive. Use `/ready` before
+routing strict live-data traffic; it reports `ready`, `degraded`, or
+`unavailable` based on the model credential, complete official snapshot, and RAG
+index. `/snapshot/status` exposes the active sample, while `/metrics` exports
+low-cardinality Prometheus-compatible runtime metrics.
+
 ### Run the Browser UI
 
 Open another PowerShell window:
@@ -129,6 +135,12 @@ comparisons, rank lookups, deck rankings, schedule queries, out-of-domain
 rejections, RAG routing, and multi-intent decomposition. Each invocation writes
 a new JSON report under `evaluation/reports/`; failure rows are retained and the
 script exits non-zero, so they cannot be hidden by a green unit-test run.
+
+GitHub Actions runs this deterministic gate and a container liveness check for
+pull requests and `main` pushes without external credentials. The separate
+manual `Live API Smoke` workflow must run on a protected self-hosted runner whose
+public IP is registered with Supercell; it can use repository secrets and upload
+its JSON reports as artifacts.
 
 To run only the Python tests:
 
@@ -193,7 +205,24 @@ EMBED_MODEL=bge-m3:latest
 OLLAMA_EMBED_TIMEOUT_SECONDS=10
 PARSER_CALL_TIMEOUT_SECONDS=45
 MODEL_CALL_TIMEOUT_SECONDS=120
+MAX_REQUEST_BODY_BYTES=65536
+MAX_QUERY_CHARS=8000
+PROCESS_MAX_CONCURRENT=8
+PROCESS_RATE_LIMIT_PER_MINUTE=30
+ALLOWED_ORIGINS=http://127.0.0.1:8080,http://localhost:8080
+ADMIN_API_KEY=
 ```
+
+The default hosts are loopback-only. Set `RUNTIME_HOST=0.0.0.0` deliberately for
+container or reverse-proxy deployment. A caller may send a bounded
+`X-Request-ID`; the runtime returns it in HTTP headers, SSE execution/content
+events, and the final Trace. The legacy live-sample settings endpoint remains
+disabled by default and also requires `X-Admin-Key` when explicitly enabled.
+
+Dependencies are maintained in `requirements.in` and compiled into
+`requirements.lock.txt`. Docker and CI install the lock file; regenerate it with
+`pip-compile --strip-extras --output-file requirements.lock.txt requirements.in`
+when intentionally changing direct dependencies.
 
 For local runs, set `OPENAI_API_KEY` in the current PowerShell session before starting the backend. Do not put a real key in source code or commit it to Git. The default runtime uses the configured OpenAI-compatible relay with the Responses API, `gpt-5.5`, and `medium` reasoning effort for parsing and final synthesis.
 

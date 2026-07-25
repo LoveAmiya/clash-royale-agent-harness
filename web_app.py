@@ -406,10 +406,14 @@ HTML_PAGE = """
       const leaderboard = snapshot.leaderboard || {};
       const metrics = snapshot.collection_metrics || {};
       const rag = snapshot.rag || {};
+      const runtime = snapshot.runtime || {};
       const scanRange = leaderboard.scanned_rank_end
         ? `${leaderboard.rank_start || 1}-${leaderboard.scanned_rank_end}`
         : "尚未完成";
       const values = [
+        ["服务请求", `${runtime.process_requests || 0} | 成功 ${runtime.successes || 0}`],
+        ["服务异常", `失败 ${runtime.failures || 0} | 限流 ${runtime.rate_limited || 0}`],
+        ["回答耗时 P95", runtime.sample_size ? `${runtime.process_p95_ms || 0} ms` : "暂无样本"],
         ["来源", snapshot.source || "Supercell Official API"],
         ["快照状态", snapshotStateLabel(snapshot.status)],
         ["有效对局", `${snapshot.sample_battles || 0}/${snapshot.target_battles || 20000}`],

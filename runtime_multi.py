@@ -9,8 +9,9 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agentscope.agent import ReActAgent
@@ -47,10 +48,17 @@ from app_config import (
     SUPERCELL_HIGH_VOLUME_MAX_RETRIES,
     SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS,
     LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED,
+    ADMIN_API_KEY,
+    ALLOWED_ORIGINS,
+    MAX_QUERY_CHARS,
+    MAX_REQUEST_BODY_BYTES,
+    PROCESS_MAX_CONCURRENT,
+    PROCESS_RATE_LIMIT_PER_MINUTE,
 )
 from hybrid_retriever import HybridRetriever, load_docs
 from model_gateway import generate_model_text
 from runtime_events import RuntimeEventEmitter
+from runtime_hardening import ProcessQuota, RuntimeMetrics, authorize_admin, normalize_request_id, redact_for_client
 from supercell_live import SupercellAPIClient
 from snapshot_store import (
     DAILY_REFRESH_INTERVAL,
@@ -160,7 +168,7 @@ async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key:
             timeout=PARSER_CALL_TIMEOUT_SECONDS,
         )
         parse_text = parse_result
-        logger.debug("parser raw output=%s", parse_text)
+        logger.debug("parser returned public text chars=%s", len(parse_text))
 
         parsed = extract_json_block(parse_text)
         if parsed is None:
@@ -335,6 +343,21 @@ def get_live_sample_settings(app: FastAPI, refresh_status: str = "ready") -> dic
     }
 
 
+def get_runtime_summary(app: FastAPI) -> dict:
+    metrics = getattr(app.state, "runtime_metrics", None)
+    if metrics is None:
+        return {
+            "process_requests": 0,
+            "successes": 0,
+            "failures": 0,
+            "cancelled": 0,
+            "rate_limited": 0,
+            "process_p95_ms": 0.0,
+            "sample_size": 0,
+        }
+    return metrics.public_summary()
+
+
 def get_live_snapshot_status(app: FastAPI) -> dict:
     """Return display-safe provenance for the currently published data snapshot."""
     snapshot = getattr(app.state, "live_snapshot", None)
@@ -360,6 +383,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
                 "failed_players": 0,
             },
             "collection_metrics": {},
+            "runtime": get_runtime_summary(app),
             "rag": {
                 "status": "not_required" if not SUPERCELL_LIVE_DATA_ENABLED else getattr(app.state, "rag_status", "not_ready"),
                 "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
@@ -397,6 +421,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             "failed_players": snapshot.get("failed_players", 0),
         },
         "collection_metrics": snapshot.get("collection_metrics", {}),
+        "runtime": get_runtime_summary(app),
         "rag": {
             "status": getattr(app.state, "rag_status", "not_ready"),
             "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
@@ -410,6 +435,64 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             "rag_documents": "official_daily_snapshot",
         },
         "error": getattr(app.state, "live_error", None),
+    }
+
+
+def get_readiness_status(
+    app: FastAPI,
+    *,
+    external_api_required: bool | None = None,
+    model_api_configured: bool | None = None,
+) -> dict:
+    """Return an operational readiness contract without exposing credentials.
+
+    Liveness answers whether the Python process is alive. Readiness answers
+    whether the configured strict data contract can serve a useful request.
+    RAG preheating is reported as degraded because structured answers may still
+    work while open-ended evidence answers are temporarily unavailable.
+    """
+    strict = EXTERNAL_API_REQUIRED if external_api_required is None else bool(external_api_required)
+    model_configured = bool(os.getenv("OPENAI_API_KEY")) if model_api_configured is None else bool(model_api_configured)
+    snapshot = getattr(app.state, "live_snapshot", None)
+    snapshot_usable = is_complete_daily_snapshot(snapshot)
+    snapshot_status = getattr(app.state, "live_refresh_status", "missing")
+    rag_status = getattr(app.state, "rag_status", "not_required")
+    initialized = bool(getattr(app.state, "initialized", False))
+    blockers: list[str] = []
+    if not initialized:
+        blockers.append("runtime_initializing")
+    if strict and not model_configured:
+        blockers.append("model_api_unconfigured")
+    if strict and not snapshot_usable:
+        blockers.append("official_snapshot_unavailable")
+
+    if blockers:
+        status = "unavailable"
+        http_status = 503
+    elif rag_status not in {"ready", "bm25_only", "not_required"} or snapshot_status == "stale":
+        status = "degraded"
+        http_status = 200
+    else:
+        status = "ready"
+        http_status = 200
+
+    return {
+        "status": status,
+        "http_status": http_status,
+        "initialized": initialized,
+        "model_api_configured": model_configured,
+        "external_api_required": strict,
+        "snapshot_status": snapshot_status,
+        "snapshot_usable": snapshot_usable,
+        "snapshot_id": snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None,
+        "rag_status": rag_status,
+        "rag_snapshot_id": getattr(app.state, "rag_snapshot_id", None),
+        "snapshot_rag_aligned": bool(
+            isinstance(snapshot, dict)
+            and snapshot.get("snapshot_id")
+            and snapshot.get("snapshot_id") == getattr(app.state, "rag_snapshot_id", None)
+        ),
+        "blockers": blockers,
     }
 
 
@@ -605,7 +688,11 @@ def build_external_api_unavailable_result(parsed: dict, message: str, live_metad
         plan=None,
         selected_skill=None,
         mode="unavailable",
-        metadata={"external_api_required": True, "live_data": live_metadata},
+        metadata={
+            "external_api_required": True,
+            "live_data": live_metadata,
+            "model_stream": "unavailable",
+        },
     )
 
 
@@ -640,6 +727,7 @@ async def build_answer(
     user_text: str,
     app: FastAPI,
     event_sink: RuntimeEventEmitter | None = None,
+    request_id: str | None = None,
 ) -> AnswerResult:
     # Bootstrap cards are a parser-only compatibility catalog. They identify
     # card names/aliases before the first official snapshot exists, but strict
@@ -673,7 +761,13 @@ async def build_answer(
         )
 
     parsed = await parse_user_query(user_text, bootstrap_cards_meta_data, api_key)
-    logger.info("request parsed intent=%s parsed=%s", parsed.get("intent"), parsed)
+    logger.info(
+        "request parsed request_id=%s intent=%s source=%s subqueries=%s",
+        request_id,
+        parsed.get("intent"),
+        parsed.get("parse_source"),
+        len(parsed.get("subqueries", [])) if isinstance(parsed.get("subqueries"), list) else 0,
+    )
     if event_sink is not None:
         await event_sink.execution(
             step_id="parse",
@@ -812,6 +906,7 @@ async def build_answer(
         api_key=api_key or "",
         include_metadata=True,
         runtime_metadata={
+            "request_id": request_id,
             "rag_status": rag_metadata["status"],
             "rag_snapshot_id": rag_metadata["snapshot_id"],
             "data_context": data_context,
@@ -820,10 +915,16 @@ async def build_answer(
         stream_content=parsed.get("intent") != "multi_intent",
     )
     assert isinstance(result, AnswerResult)
+    # Direct deterministic Skills do not invoke text generation. Keep the
+    # stream contract explicit rather than leaving a caller to infer it from a
+    # missing field; RAG Skills overwrite this with streaming/fallback_chunked.
+    result.metadata.setdefault("model_stream", "unavailable")
     result.metadata["live_data"] = live_metadata
     result.metadata["parser_api"] = parser_api
     result.metadata["rag"] = rag_metadata
     result.metadata["data_context"] = data_context
+    if request_id:
+        result.metadata["request_id"] = request_id
     if event_sink is not None and event_sink.content_count == 0:
         await emit_semantic_content(event_sink, result.answer)
     return result
@@ -895,6 +996,12 @@ async def emit_semantic_content(event_sink: RuntimeEventEmitter, text: str) -> N
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.initialized = False
+    app.state.runtime_metrics = RuntimeMetrics()
+    app.state.process_quota = ProcessQuota(
+        max_concurrent=PROCESS_MAX_CONCURRENT,
+        requests_per_minute=PROCESS_RATE_LIMIT_PER_MINUTE,
+    )
     app.state.schedule_data = load_json_file(SCHEDULE_FILE)
     app.state.bootstrap_top_decks_data = load_json_file(TOP_DECKS_FILE)
     app.state.bootstrap_cards_meta_data = load_json_file(CARDS_META_FILE)
@@ -937,6 +1044,7 @@ async def lifespan(app: FastAPI):
         app.state.live_refresh_task = asyncio.create_task(refresh_live_snapshot_loop(app))
     elif EXTERNAL_API_REQUIRED:
         app.state.live_refresh_status = "unavailable"
+    app.state.initialized = True
     try:
         yield
     finally:
@@ -957,6 +1065,57 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ClashRoyaleMatchCoordinator", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(ALLOWED_ORIGINS),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT"],
+    allow_headers=["Content-Type", "X-Request-ID", "X-Admin-Key"],
+)
+
+
+@app.middleware("http")
+async def runtime_protection_middleware(request: Request, call_next):
+    """Attach correlation/security headers and reject oversized bodies early."""
+    request_id = normalize_request_id(request.headers.get("X-Request-ID"))
+    request.state.request_id = request_id
+    metrics = getattr(app.state, "runtime_metrics", None)
+    started_at = time.perf_counter()
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                response = JSONResponse(
+                    status_code=413,
+                    content={"error": "request_body_too_large", "request_id": request_id},
+                )
+                response.headers["X-Request-ID"] = request_id
+                if metrics is not None:
+                    metrics.record_http(route=request.url.path, status_code=413, duration_seconds=time.perf_counter() - started_at)
+                return response
+        except ValueError:
+            response = JSONResponse(
+                status_code=400,
+                content={"error": "invalid_content_length", "request_id": request_id},
+            )
+            response.headers["X-Request-ID"] = request_id
+            if metrics is not None:
+                metrics.record_http(route=request.url.path, status_code=400, duration_seconds=time.perf_counter() - started_at)
+            return response
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        if metrics is not None:
+            metrics.record_http(route=request.url.path, status_code=500, duration_seconds=time.perf_counter() - started_at)
+        raise
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    if metrics is not None:
+        metrics.record_http(route=request.url.path, status_code=response.status_code, duration_seconds=time.perf_counter() - started_at)
+    return response
 
 
 @app.get("/health")
@@ -972,6 +1131,28 @@ async def health():
     }
 
 
+@app.get("/ready")
+async def ready():
+    readiness = get_readiness_status(app)
+    payload = {key: value for key, value in readiness.items() if key != "http_status"}
+    return JSONResponse(status_code=readiness["http_status"], content=payload)
+
+
+@app.get("/metrics")
+async def metrics():
+    snapshot_status = getattr(app.state, "live_refresh_status", "missing")
+    rag_status = getattr(app.state, "rag_status", "not_required")
+    snapshot = getattr(app.state, "live_snapshot", None)
+    snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
+    metrics_registry = getattr(app.state, "runtime_metrics", None) or RuntimeMetrics()
+    body = metrics_registry.render_prometheus(
+        snapshot_status=snapshot_status,
+        rag_status=rag_status,
+        snapshot_aligned=bool(snapshot_id and snapshot_id == getattr(app.state, "rag_snapshot_id", None)),
+    )
+    return PlainTextResponse(body, media_type="text/plain; version=0.0.4")
+
+
 @app.get("/settings/live-sample")
 async def get_live_sample_settings_endpoint():
     return get_live_sample_settings(app)
@@ -983,32 +1164,79 @@ async def get_snapshot_status_endpoint():
 
 
 @app.put("/settings/live-sample")
-async def update_live_sample_settings(request: LiveSampleSettingsRequest):
+async def update_live_sample_settings(request: LiveSampleSettingsRequest, x_admin_key: str | None = Header(default=None)):
     if not LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED:
         raise HTTPException(status_code=403, detail="live sample target updates are restricted to administrators")
+    if not authorize_admin(ADMIN_API_KEY, x_admin_key):
+        raise HTTPException(status_code=401 if ADMIN_API_KEY else 403, detail="administrator credentials required")
     settings = configure_live_sample_target(app, request.target_battles)
     asyncio.create_task(refresh_live_snapshot_once(app))
     return settings
 
 
 @app.post("/process")
-async def process(request: ProcessRequest):
-    user_text = get_user_text(request)
-    logger.info("request received text=%r", user_text)
+async def process(request: Request, payload: ProcessRequest | None = None):
+    # Unit tests and local harnesses historically called this endpoint function
+    # directly with ProcessRequest. Keep that narrow compatibility path while
+    # FastAPI continues to inject Request plus a validated JSON payload.
+    request_object = request if isinstance(request, Request) else None
+    if payload is None:
+        payload = request
+    user_text = get_user_text(payload)
+    if not user_text:
+        raise HTTPException(status_code=422, detail="a non-empty user question is required")
+    if len(user_text) > MAX_QUERY_CHARS:
+        raise HTTPException(status_code=413, detail=f"user question exceeds {MAX_QUERY_CHARS} characters")
+
+    incoming_request_id = request_object.headers.get("X-Request-ID") if request_object is not None else None
+    request_id = (
+        getattr(request_object.state, "request_id", normalize_request_id(incoming_request_id))
+        if request_object is not None
+        else normalize_request_id(None)
+    )
+    client_id = request_object.client.host if request_object is not None and request_object.client is not None else "local-test"
+    metrics = getattr(app.state, "runtime_metrics", None)
+    if metrics is None:
+        metrics = RuntimeMetrics()
+        app.state.runtime_metrics = metrics
+    quota = getattr(app.state, "process_quota", None)
+    if quota is None:
+        quota = ProcessQuota(max_concurrent=PROCESS_MAX_CONCURRENT, requests_per_minute=PROCESS_RATE_LIMIT_PER_MINUTE)
+        app.state.process_quota = quota
+    decision = await quota.try_acquire(client_id)
+    if not decision.allowed:
+        metrics.record_process(outcome="rate_limited", total_seconds=0.0)
+        raise HTTPException(
+            status_code=429,
+            detail="process request rate or concurrency limit exceeded",
+            headers={"Retry-After": str(decision.retry_after_seconds or 1)},
+        )
+
+    logger.info("request received request_id=%s client=%s query_chars=%s", request_id, client_id, len(user_text))
 
     response_id = f"resp-{uuid.uuid4().hex}"
     message_id = f"msg-{uuid.uuid4().hex}"
+    started_at = time.perf_counter()
+    first_execution_at: float | None = None
+    first_content_at: float | None = None
+    answer_result: AnswerResult | None = None
+    outcome = "failure"
+    answer_task_holder: list[asyncio.Task] = []
 
-    async def event_stream():
-        yield sse_data(
+    def encode(event: dict) -> str:
+        return sse_data({"request_id": request_id, **event})
+
+    async def _event_stream():
+        nonlocal first_execution_at, first_content_at, answer_result
+        yield encode(
             {
                 "object": "response",
                 "id": response_id,
                 "status": "in_progress",
-                "session_id": request.session_id,
+                "session_id": payload.session_id,
             }
         )
-        yield sse_data(
+        yield encode(
             {
                 "object": "message",
                 "id": message_id,
@@ -1017,7 +1245,7 @@ async def process(request: ProcessRequest):
                 "status": "in_progress",
             }
         )
-        yield sse_data(
+        yield encode(
             {
                 "object": "progress",
                 "status": "in_progress",
@@ -1026,8 +1254,9 @@ async def process(request: ProcessRequest):
             }
         )
 
-        event_sink = RuntimeEventEmitter()
-        answer_task = asyncio.create_task(build_answer(user_text, app, event_sink=event_sink))
+        event_sink = RuntimeEventEmitter(request_id=request_id)
+        answer_task = asyncio.create_task(build_answer(user_text, app, event_sink=event_sink, request_id=request_id))
+        answer_task_holder.append(answer_task)
         stages = [
             ("route", "正在确定结构化查询或 RAG 路径..."),
             ("retrieve", "正在检索本地知识库与证据来源..."),
@@ -1037,12 +1266,16 @@ async def process(request: ProcessRequest):
         while not answer_task.done() or not event_sink.empty():
             try:
                 event = await asyncio.wait_for(event_sink.next_event(), timeout=0.7)
-                yield sse_data(event)
+                if event.get("object") == "execution" and first_execution_at is None:
+                    first_execution_at = time.perf_counter()
+                if event.get("object") == "content" and first_content_at is None:
+                    first_content_at = time.perf_counter()
+                yield encode(event)
             except asyncio.TimeoutError:
                 if answer_task.done():
                     continue
                 stage, label = stages[min(stage_index, len(stages) - 1)]
-                yield sse_data(
+                yield encode(
                     {
                         "object": "progress",
                         "status": "in_progress",
@@ -1056,14 +1289,14 @@ async def process(request: ProcessRequest):
             answer_result = answer_task.result()
         except Exception as exc:
             logger.exception("answer generation failed")
-            yield sse_data(
+            yield encode(
                 {
                     "object": "error",
                     "status": "failed",
                     "message": "生成回答失败，请检查后端日志、模型配置和检索服务。",
                 }
             )
-            yield sse_data(
+            yield encode(
                 {
                     "object": "response",
                     "id": response_id,
@@ -1072,9 +1305,10 @@ async def process(request: ProcessRequest):
             )
             return
 
+        answer_result.metadata["request_id"] = request_id
         answer_text = answer_result.answer
         if event_sink.content_count == 0:
-            yield sse_data(
+            yield encode(
                 {
                     "object": "progress",
                     "status": "in_progress",
@@ -1084,7 +1318,9 @@ async def process(request: ProcessRequest):
             )
             chunks = list(split_stream_chunks(answer_text))
             for index, chunk in enumerate(chunks):
-                yield sse_data(
+                if first_content_at is None:
+                    first_content_at = time.perf_counter()
+                yield encode(
                     {
                         "object": "content",
                         "type": "text",
@@ -1097,7 +1333,7 @@ async def process(request: ProcessRequest):
                 if index < len(chunks) - 1:
                     await asyncio.sleep(SEMANTIC_CONTENT_INTERVAL_SECONDS)
         trace_events = read_trace(answer_result.trace_id)
-        yield sse_data(
+        yield encode(
             {
                 "object": "trace",
                 "status": "completed",
@@ -1106,12 +1342,12 @@ async def process(request: ProcessRequest):
                 "plan": answer_result.plan,
                 "selected_skill": answer_result.selected_skill,
                 "mode": answer_result.mode,
-                "metadata": answer_result.metadata,
-                "sub_results": answer_result.sub_results,
-                "events": trace_events,
+                "metadata": redact_for_client(answer_result.metadata),
+                "sub_results": redact_for_client(answer_result.sub_results),
+                "events": redact_for_client(trace_events),
             }
         )
-        yield sse_data(
+        yield encode(
             {
                 "object": "message",
                 "id": message_id,
@@ -1126,7 +1362,7 @@ async def process(request: ProcessRequest):
                 ],
             }
         )
-        yield sse_data(
+        yield encode(
             {
                 "object": "response",
                 "id": response_id,
@@ -1147,12 +1383,45 @@ async def process(request: ProcessRequest):
             }
         )
 
+    async def event_stream():
+        nonlocal outcome
+        completed = False
+        try:
+            async for event in _event_stream():
+                yield event
+            completed = True
+            if answer_result is not None:
+                outcome = "success"
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        finally:
+            unfinished_tasks = [task for task in answer_task_holder if not task.done()]
+            if not completed:
+                outcome = "cancelled"
+            for task in unfinished_tasks:
+                task.cancel()
+            if answer_result is not None:
+                live_metadata = answer_result.metadata.get("live_data", {})
+                if isinstance(live_metadata, dict):
+                    metrics.record_snapshot_collection(live_metadata.get("collection_metrics"))
+                metrics.record_model_stream(answer_result.metadata.get("model_stream"))
+            finished_at = time.perf_counter()
+            metrics.record_process(
+                outcome=outcome,
+                total_seconds=finished_at - started_at,
+                first_execution_seconds=(first_execution_at - started_at) if first_execution_at else None,
+                first_content_seconds=(first_content_at - started_at) if first_content_at else None,
+            )
+            quota.release()
+
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Request-ID": request_id,
         },
     )
 

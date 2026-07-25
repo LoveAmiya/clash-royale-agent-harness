@@ -1,0 +1,12 @@
+# Direct runtime dependencies. Transitive versions are generated in
+# requirements.lock.txt with pip-compile.
+agentscope==1.0.21
+agentscope-runtime==1.1.6.post2
+fastapi==0.139.0
+uvicorn==0.51.0
+fakeredis==2.36.2
+openai==2.45.0
+httpx==0.28.1
+requests==2.34.2
+rank-bm25==0.2.2
+qdrant-client==1.18.0

@@ -1,0 +1,71 @@
+name: Live API Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_dense_retrieval_benchmark:
+        description: Run the optional dense retrieval benchmark on the approved runner
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    # This runner must have an IP registered with Supercell and an Ollama
+    # embedding service when the optional benchmark is selected.
+    runs-on: [self-hosted, supercell-api]
+    environment: live-api-smoke
+    timeout-minutes: 45
+    env:
+      EXTERNAL_API_REQUIRED: "true"
+      SUPERCELL_LIVE_DATA_ENABLED: "true"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SUPERCELL_API_TOKEN: ${{ secrets.SUPERCELL_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --requirement requirements.lock.txt
+      - name: Start backend
+        shell: bash
+        run: |
+          nohup python runtime_multi.py > backend.log 2>&1 &
+          echo $! > backend.pid
+      - name: Wait for backend
+        shell: bash
+        run: |
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8091/health; then exit 0; fi
+            sleep 2
+          done
+          cat backend.log || true
+          exit 1
+      - run: python evaluation/run_live_api_smoke.py --report evaluation/reports/live-api-smoke.json
+      - if: ${{ inputs.run_dense_retrieval_benchmark }}
+        run: python evaluation/retrieval_benchmark.py --report evaluation/reports/retrieval-benchmark.json
+      - name: Upload smoke reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-api-reports
+          path: evaluation/reports/
+          if-no-files-found: warn
+      - name: Upload backend log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-api-backend-log
+          path: backend.log
+          if-no-files-found: ignore
+      - name: Stop backend
+        if: always()
+        shell: bash
+        run: |
+          if [ -f backend.pid ]; then kill "$(cat backend.pid)" || true; fi
