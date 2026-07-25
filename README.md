@@ -15,6 +15,7 @@ The system combines rule-based query parsing, skill routing, local JSON groundin
 - FastAPI backend
 - Browser chat interface
 - Structured query parsing with optional LLM fallback
+- Multi-intent decomposition with per-subquery execution and partial results
 - Skill registry and skill routing
 - Grounded answers from local schedule, deck, and card JSON data
 - Optional RAG path for open-ended preparation questions
@@ -105,6 +106,7 @@ Example questions:
 - 使用率第三的卡牌是什么？
 - 现在热门卡组有哪些？
 - 帮我根据下一轮对手做备战建议。
+- 雷电巨人的使用率、胜率，还有当前环境主流卡组。
 
 ### API Usage
 
@@ -120,10 +122,46 @@ curl -X POST http://127.0.0.1:8091/process `
 .\run_tests.ps1
 ```
 
-Or:
+This is the default quality gate. It runs the complete unit/integration suite,
+then the static 348-case deterministic evaluation corpus. The corpus covers
+English card metrics, Chinese aliases, multiple requested metrics, card
+comparisons, rank lookups, deck rankings, schedule queries, out-of-domain
+rejections, RAG routing, and multi-intent decomposition. Each invocation writes
+a new JSON report under `evaluation/reports/`; failure rows are retained and the
+script exits non-zero, so they cannot be hidden by a green unit-test run.
+
+To run only the Python tests:
 
 ```powershell
 python -m unittest discover -s tests
+```
+
+To inspect or reproduce the deterministic evaluation report directly:
+
+```powershell
+python -m evaluation.run_eval
+python -m evaluation.run_eval --report evaluation/reports/manual-evaluation.json
+```
+
+When the local embedding service is available, run the snapshot RAG retrieval
+benchmark separately. It builds silver-label cases from the active official
+snapshot's card, deck, archetype, pair, counter, and matchup evidence; it
+refuses to label a BM25-only run as hybrid retrieval.
+
+```powershell
+python evaluation/retrieval_benchmark.py --report evaluation/reports/retrieval-benchmark.json
+```
+
+The optional live smoke test is a separate external-system gate. It requires a
+running strict backend, a valid model API key, and a valid Supercell API token;
+it verifies the model parser, official snapshot provenance, multi-intent
+orchestration, RAG synthesis, SSE execution events, and final trace rather than
+substituting repository fixtures.
+
+```powershell
+$env:RUN_LIVE_API_SMOKE = "true"
+$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
+.\run_tests.ps1
 ```
 
 ### Docker
@@ -152,18 +190,35 @@ PARSER_REASONING_EFFORT=medium
 SYNTHESIS_REASONING_EFFORT=medium
 OLLAMA_EMBED_URL=http://localhost:11434/api/embed
 EMBED_MODEL=bge-m3:latest
-OLLAMA_EMBED_TIMEOUT_SECONDS=3
-PARSER_CALL_TIMEOUT_SECONDS=20
+OLLAMA_EMBED_TIMEOUT_SECONDS=10
+PARSER_CALL_TIMEOUT_SECONDS=45
 MODEL_CALL_TIMEOUT_SECONDS=120
 ```
 
 For local runs, set `OPENAI_API_KEY` in the current PowerShell session before starting the backend. Do not put a real key in source code or commit it to Git. The default runtime uses the configured OpenAI-compatible relay with the Responses API, `gpt-5.5`, and `medium` reasoning effort for parsing and final synthesis.
 
-Direct JSON-backed questions run from local data only. Environment analysis and team-preparation questions first retrieve evidence from the RAG corpus, then use an LLM to synthesize a bounded answer with source URLs and an explicit data-time boundary. If Ollama embeddings are unavailable, retrieval automatically degrades to BM25 after the configured short timeout. The browser consumes backend SSE directly and displays progress plus the final execution trace.
+In strict production mode, card, deck, matchup, and environment answers all use the last complete official Supercell daily snapshot. The snapshot contains exactly 20,000 unique battle-log records, normalized raw battles, card/deck aggregates, and sampled deck matchups. Environment analysis retrieves documents generated from that same snapshot, then uses an LLM to synthesize a bounded answer with a snapshot ID, sample size, and collection time. The local Qdrant index is persistent and is reused after restart when the snapshot ID is unchanged.
+
+The RAG corpus is not one raw document per battle. It derives high-information evidence documents for card profiles, exact deck profiles, heuristic archetypes, card-pair observations, observed card-versus-card counter evidence, and deck matchups. On startup and after a new snapshot is published, indexing is preheated in the background. Requests only use an activated retriever matching the active snapshot; the UI reports `ready`, `bm25_only`, `building`, `not_ready`, or `failed` rather than charging the first user request with embedding work.
+
+### Daily Official Snapshot
+
+Set `SUPERCELL_API_TOKEN` to enable the official Clash Royale API adapter. The production target is fixed at 20,000 unique battles, collected from rank 1 upward through paginated leaderboard results with a maximum candidate pool of 3,000 players. The collector stops as soon as it reaches the target. A partial, timed-out, or rate-limited collection is rejected; the last complete official snapshot remains available and is marked stale while a replacement is unavailable. The browser UI exposes this provenance, candidate pool, actual scanned rank range, sample size, collection time, and duplicate count without triggering a refresh. The model parser remains the first request step. In strict external mode, no repository fixture is represented as live data.
+
+```text
+SUPERCELL_API_TOKEN=your_official_token
+SUPERCELL_LIVE_DATA_ENABLED=true
+```
 
 ### Data Freshness and Sources
 
-`top_decks.json` and `cards_meta.json` preserve the original RoyaleAPI page URLs with each record, but they are repository snapshots rather than live data. The agent must not claim that they are current-version or opponent-specific intelligence.
+`official_daily_snapshot.json` is the canonical data source. After a complete collection it regenerates `top_decks.json`, `cards_meta.json`, and `rag_documents.json` atomically. The runtime loads only a complete snapshot and checks its age on every restart; it does not answer production data questions from the old repository fixtures.
+
+`schedule.json` is intentionally separate and remains available for schedule-only
+questions while the first game-data snapshot is collecting. In strict mode,
+`cards_meta.json` is retained only as a parser catalog for card names and aliases;
+it is never passed to card, deck, matchup, or RAG answer Skills. The snapshot
+status endpoint exposes this split through `data_sources`.
 
 This project intentionally does not scrape RoyaleAPI from an LLM prompt or call its retired public API: RoyaleAPI's own legacy documentation states that its [public API was sunset](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/getting_started.md), and its [legacy popular-decks endpoint is not implemented](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/endpoints/popular_decks.md). A future live-data adapter should use a maintained, documented and authorized provider with a deterministic ingestion job, not unrestricted model browsing.
 
@@ -171,10 +226,10 @@ This project intentionally does not scrape RoyaleAPI from an LLM prompt or call 
 
 ```text
 User Question
-  -> Query Parser
-  -> Skill Router
-  -> Local JSON Answer or RAG Retrieval
-  -> Evidence-grounded Model Synthesis
+  -> Query Parser (one intent or subqueries[])
+  -> Per-subquery Skill Router
+  -> Official Daily Snapshot JSON and/or Snapshot RAG Retrieval
+  -> Deterministic section aggregation
   -> Trace Harness
   -> API Response / Browser UI
 ```
@@ -328,8 +383,8 @@ PARSER_REASONING_EFFORT=medium
 SYNTHESIS_REASONING_EFFORT=medium
 OLLAMA_EMBED_URL=http://localhost:11434/api/embed
 EMBED_MODEL=bge-m3:latest
-OLLAMA_EMBED_TIMEOUT_SECONDS=3
-PARSER_CALL_TIMEOUT_SECONDS=20
+OLLAMA_EMBED_TIMEOUT_SECONDS=10
+PARSER_CALL_TIMEOUT_SECONDS=45
 MODEL_CALL_TIMEOUT_SECONDS=120
 ```
 

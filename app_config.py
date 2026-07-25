@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 
@@ -28,8 +29,14 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8091/process")
 
 OLLAMA_EMBED_URL = os.getenv("OLLAMA_EMBED_URL", "http://localhost:11434/api/embed")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3:latest")
-OLLAMA_EMBED_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_EMBED_TIMEOUT_SECONDS", "3"))
-PARSER_CALL_TIMEOUT_SECONDS = float(os.getenv("PARSER_CALL_TIMEOUT_SECONDS", "20"))
+# bge-m3 can take several seconds to load after an Ollama restart.  Ten seconds
+# prevents a healthy cold-starting embedding service from permanently disabling
+# dense retrieval for the lifetime of the backend process.
+OLLAMA_EMBED_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_EMBED_TIMEOUT_SECONDS", "10"))
+# Batch snapshot evidence during background preheating. This is deliberately
+# bounded: a failed batch can fall back to BM25 without thousands of requests.
+EMBED_BATCH_SIZE = max(1, min(int(os.getenv("EMBED_BATCH_SIZE", "32")), 128))
+PARSER_CALL_TIMEOUT_SECONDS = float(os.getenv("PARSER_CALL_TIMEOUT_SECONDS", "45"))
 # A bounded timeout keeps slow relay calls from leaving an SSE request pending forever.
 MODEL_CALL_TIMEOUT_SECONDS = float(os.getenv("MODEL_CALL_TIMEOUT_SECONDS", "120"))
 
@@ -40,3 +47,44 @@ RETRIEVAL_ALPHA = float(os.getenv("RETRIEVAL_ALPHA", "0.5"))
 RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "4"))
 COMPRESS_MAX_ITEMS = int(os.getenv("COMPRESS_MAX_ITEMS", "4"))
 COMPRESS_CHAR_BUDGET = int(os.getenv("COMPRESS_CHAR_BUDGET", "1200"))
+
+# Official live data is opt-in because Supercell API credentials are IP-restricted.
+SUPERCELL_API_TOKEN = os.getenv("SUPERCELL_API_TOKEN", "").strip()
+SUPERCELL_LIVE_DATA_ENABLED = os.getenv("SUPERCELL_LIVE_DATA_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+# Enabled by the production PowerShell launcher. Unit tests and offline work can
+# opt out explicitly, but a live run must never silently report JSON snapshots
+# as official Supercell data.
+EXTERNAL_API_REQUIRED = os.getenv("EXTERNAL_API_REQUIRED", "false").strip().lower() in {"1", "true", "yes"}
+# A leaderboard request may require multiple official API calls. Five seconds is
+# too aggressive on ordinary residential networks and causes avoidable strict-mode failures.
+SUPERCELL_API_TIMEOUT_SECONDS = float(os.getenv("SUPERCELL_API_TIMEOUT_SECONDS", "15"))
+SUPERCELL_CACHE_TTL_SECONDS = 86400
+# Production uses one complete daily official sample. The public API exposes
+# player battle logs rather than global card statistics, so every answer is
+# bound to this fixed, labelled sample instead of a user-selected sample size.
+SUPERCELL_MAX_TARGET_BATTLES = 20000
+SUPERCELL_TARGET_BATTLES = SUPERCELL_MAX_TARGET_BATTLES
+SUPERCELL_LEADERBOARD_PLAYERS = max(1, min(int(os.getenv("SUPERCELL_LEADERBOARD_PLAYERS", "3000")), 3000))
+SUPERCELL_BATTLES_PER_PLAYER = max(1, min(int(os.getenv("SUPERCELL_BATTLES_PER_PLAYER", "25")), 25))
+# Sampling intentionally walks leaderboard rank order. A later rank must not
+# overtake an earlier one merely because its request returned faster.
+SUPERCELL_FETCH_CONCURRENCY = 1
+LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED = False
+# Large samples intentionally trade freshness for controlled official API usage.
+SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND = max(0.1, float(os.getenv("SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND", "2")))
+SUPERCELL_HIGH_VOLUME_MAX_RETRIES = max(0, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_RETRIES", "0")), 5))
+SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = max(60, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS", "1800")), 3600))
+
+
+def _parse_supercell_player_tags(value: str) -> tuple[str, ...]:
+    tags = []
+    for item in value.split(","):
+        tag = item.strip().upper()
+        if re.fullmatch(r"#[0289PYLQGRJCUV]{3,15}", tag) and tag not in tags:
+            tags.append(tag)
+    return tuple(tags[:25])
+
+
+# Used only if both official global ranking sources return no players. This is
+# administrator configuration, never populated from a user request.
+SUPERCELL_FALLBACK_PLAYER_TAGS = _parse_supercell_player_tags(os.getenv("SUPERCELL_FALLBACK_PLAYER_TAGS", ""))

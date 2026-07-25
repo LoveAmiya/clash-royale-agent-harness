@@ -1,3 +1,12 @@
+def build_card_source_reference(card: dict, index: int = 1) -> str:
+    if card.get("source") == "Supercell API live sample":
+        return (
+            f"[{index}] Supercell API live sample | rank={card.get('rank')} | {card.get('card_name')} "
+            f"| sample_battles={card.get('sample_battles', 0)}"
+        )
+    return f"[{index}] cards_meta.json | rank={card.get('rank')} | {card.get('card_name')} | source={card.get('source')}"
+
+
 def get_next_round_matches(schedule_data: list[dict]) -> list[dict]:
     upcoming = [x for x in schedule_data if str(x.get("status", "")).lower() == "upcoming"]
     if not upcoming:
@@ -66,9 +75,46 @@ def build_schedule_answer(parsed: dict, schedule_data: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def build_deck_answer(parsed: dict, top_decks_data: list[dict]) -> str:
+def build_deck_answer(
+    parsed: dict,
+    top_decks_data: list[dict],
+    card_deck_stats: dict[str, list[dict]] | None = None,
+) -> str:
     rank_target = parsed.get("rank")
     top_n = parsed.get("top_n") or 10
+    card_name = parsed.get("card_name")
+
+    if card_name:
+        card_deck_stats = card_deck_stats or {}
+        variants = next(
+            (
+                decks
+                for known_card, decks in card_deck_stats.items()
+                if known_card.lower() == str(card_name).lower()
+            ),
+            [],
+        )
+        selected = variants[:top_n]
+        if not selected:
+            return (
+                f"在当前 Supercell 官方 {next((item.get('sample_battles') for item in top_decks_data if item.get('sample_battles')), '未知')} 场快照中，"
+                f"未观察到包含 **{card_name}** 的完整卡组。"
+            )
+
+        lines = [f"当前快照中包含 **{card_name}** 的高频完整卡组前 {len(selected)} 套如下：\n"]
+        refs = []
+        for index, deck in enumerate(selected, start=1):
+            lines.append(
+                f"{index}. **{deck.get('deck_name')}**\n"
+                f"   样本场次：{deck.get('battles')} | 样本胜率：{deck.get('sample_win_rate')}%\n"
+            )
+            refs.append(
+                f"[{index}] Supercell API live sample | {card_name} deck variant | sample_battles={deck.get('sample_battles')}"
+            )
+        lines.append("数据边界：按完整八卡组合聚合，统计来自同一份官方排行榜战斗日志快照。")
+        lines.append("参考来源：")
+        lines.extend(refs)
+        return "\n".join(lines)
 
     sorted_decks = sorted(top_decks_data, key=lambda x: int(x.get("rank", 999999)))
 
@@ -134,8 +180,52 @@ def build_single_card_answer(card: dict) -> str:
         f"- 胜率变化：{card.get('win_delta', 0)}%\n"
         f"- 净胜率（CWR）：{card.get('clean_win_rate')}%\n\n"
         f"参考来源：\n"
-        f"[1] cards_meta.json | rank={card.get('rank')} | {card.get('card_name')} | source={card.get('source')}"
+        f"{build_card_source_reference(card)}"
     )
+
+
+def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
+    if card.get("source") == "Supercell API live sample":
+        labels = {
+            "usage_rate": "\u4f7f\u7528\u7387",
+            "win_rate": "\u80dc\u7387",
+            "clean_win_rate": "\u51c0\u80dc\u7387\uff08CWR\uff09",
+        }
+        lines = [f"**{card.get('card_name')}** \u7684\u8bf7\u6c42\u6307\u6807\uff1a"]
+        for metric in metrics:
+            if metric in labels:
+                lines.append(f"- {labels[metric]}\uff1a{card.get(metric)}%")
+        if card.get("appearance_count") is not None:
+            lines.append(f"- \u6837\u672c\u51fa\u573a\uff1a{card.get('appearance_count')} \u6b21")
+        lines.extend(
+            [
+                "",
+                "\u6570\u636e\u8fb9\u754c\uff1a\u4ee5\u4e0a\u4e3a Supercell \u5b98\u65b9\u5168\u7403\u6392\u884c\u699c\u73a9\u5bb6\u8fd1\u671f\u6218\u6597\u8bb0\u5f55\u7684\u6709\u9650\u6837\u672c"
+                f"\uff08{card.get('sample_battles', 0)} \u573a\uff0c\u6293\u53d6\u4e8e {card.get('fetched_at', '\u672a\u77e5')}\uff09\uff0cnot global meta.",
+                "\u53c2\u8003\u6765\u6e90\uff1a",
+                f"[1] Supercell API live sample | {card.get('card_name')}",
+            ]
+        )
+        return "\n".join(lines)
+
+    labels = {
+        "usage_rate": "使用率",
+        "win_rate": "胜率",
+        "clean_win_rate": "净胜率（CWR）",
+    }
+    lines = [f"**{card.get('card_name')}** 在 **{card.get('mode', '当前模式')}** 下的请求指标："]
+    for metric in metrics:
+        if metric in labels:
+            lines.append(f"- {labels[metric]}：{card.get(metric)}%")
+    lines.extend(
+        [
+            "",
+            "数据边界：以上为仓库内的静态快照，不代表实时版本环境。",
+            "参考来源：",
+            build_card_source_reference(card),
+        ]
+    )
+    return "\n".join(lines)
 
 
 def build_card_ranking_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
@@ -143,8 +233,11 @@ def build_card_ranking_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
     rank_target = parsed.get("rank")
     top_n = parsed.get("top_n") or 10
 
+    ranking_cards = [card for card in cards_meta_data if not card.get("_fallback_only")]
+    if not ranking_cards:
+        ranking_cards = cards_meta_data
     sorted_cards = sorted(
-        cards_meta_data,
+        ranking_cards,
         key=lambda x: (-float(x.get(metric, 0)), int(x.get("rank", 999999))),
     )
 
@@ -168,7 +261,7 @@ def build_card_ranking_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
             f"- 胜率：{c.get('win_rate')}%\n"
             f"- 净胜率（CWR）：{c.get('clean_win_rate')}%\n\n"
             f"参考来源：\n"
-            f"[1] cards_meta.json | rank={c.get('rank')} | {c.get('card_name')} | source={c.get('source')}"
+            f"{build_card_source_reference(c)}"
         )
 
     selected = sorted_cards[:top_n]
@@ -180,9 +273,7 @@ def build_card_ranking_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
             f"{i}. **{c.get('card_name')}**\n"
             f"   全局排名：{c.get('rank')} | 评分：{c.get('rating')} | 使用率：{c.get('usage_rate')}% | 胜率：{c.get('win_rate')}% | 净胜率：{c.get('clean_win_rate')}%\n"
         )
-        refs.append(
-            f"[{i}] cards_meta.json | rank={c.get('rank')} | {c.get('card_name')} | source={c.get('source')}"
-        )
+        refs.append(build_card_source_reference(c, i))
 
     lines.append("参考来源：")
     lines.extend(refs)
@@ -198,7 +289,23 @@ def build_card_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
                 target = item
                 break
         if target:
+            metrics = parsed.get("metrics")
+            if isinstance(metrics, list) and metrics:
+                return build_named_card_metrics_answer(target, metrics)
             return build_single_card_answer(target)
+
+        sample_card = next((item for item in cards_meta_data if item.get("source")), {})
+        source = str(sample_card.get("source", ""))
+        if source == "Supercell API live sample":
+            sample_battles = sample_card.get("sample_battles")
+            target_battles = sample_card.get("target_battles") or sample_battles
+            observed = f"0/{sample_battles}" if sample_battles else "0/unknown"
+            target_label = f"，目标 {target_battles} 场" if target_battles else ""
+            return (
+                f"当前 Supercell API 实时样本中 **{card_name}** 的观测为 {observed}{target_label}，因此无法计算其使用率或胜率。"
+                "该样本是有限战斗日志，不代表全局环境。"
+            )
+        return f"当前卡牌快照中未找到 **{card_name}**，因此无法给出其使用率或胜率。"
 
     return build_card_ranking_answer(parsed, cards_meta_data)
 

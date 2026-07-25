@@ -32,6 +32,8 @@ tmp/
 temp/
 runs/
 outputs/
+data/daily_snapshot_qdrant/
+data/official_daily_snapshot.json
 
 .vscode/
 .idea/

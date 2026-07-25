@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from support import install_test_stubs
 
@@ -13,7 +14,9 @@ from skills.meta_evidence import build_meta_evidence_pack
 from skills.registry import SkillRegistry
 from harness.executor import SkillExecutor
 from harness.trace import TraceRecorder
+import query_answering
 from query_answering import build_snapshot_fallback_answer
+from runtime_events import RuntimeEventEmitter
 
 
 DATA_DIR = Path("data")
@@ -37,11 +40,10 @@ class MetaEvidenceTests(unittest.TestCase):
             self.card_data,
         )
 
-        self.assertIn("Electro Dragon Evolution / Monk", evidence)
+        self.assertIn(self.deck_data[0]["deck_name"], evidence)
         self.assertIn("Fireball", evidence)
-        self.assertIn("静态快照", evidence)
-        self.assertIn("https://royaleapi.com/decks/leaderboard", sources)
-        self.assertIn("https://royaleapi.com/cards/popular", sources)
+        self.assertIn("Supercell API live sample", evidence)
+        self.assertIn("Supercell API live sample", sources)
 
     def test_snapshot_fallback_exposes_facts_and_data_boundary(self):
         answer = build_snapshot_fallback_answer(
@@ -49,10 +51,22 @@ class MetaEvidenceTests(unittest.TestCase):
             self.card_data,
         )
 
-        self.assertIn("Electro Dragon Evolution / Monk", answer)
-        self.assertIn("Tower Princess", answer)
+        self.assertIn(self.deck_data[0]["deck_name"], answer)
+        self.assertIn(self.card_data[0]["card_name"], answer)
         self.assertIn("数据边界", answer)
         self.assertIn("不是 LLM 的策略推演", answer)
+    def test_evidence_pack_labels_supercell_records_as_live_sources(self):
+        evidence, sources = build_meta_evidence_pack(
+            [],
+            [{"rank": 1, "deck_name": "Live Deck", "source": "Supercell API live sample"}],
+            [{"rank": 1, "card_name": "Zap", "usage_rate": 10, "source": "Supercell API live sample"}],
+        )
+
+        self.assertIn("Supercell API live sample", evidence)
+        self.assertNotIn("repository static snapshot", evidence)
+        self.assertIn("Supercell API live sample", sources)
+        self.assertNotIn("top_decks.json", sources)
+        self.assertNotIn("cards_meta.json", sources)
 
 
 class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
@@ -103,3 +117,202 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(answer, "模型综合结论")
             last_event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual(last_event["mode"], "rag_synthesis")
+
+    async def test_strict_mode_does_not_replace_failed_rag_model_call_with_snapshot_answer(self):
+        class StaticRetriever:
+            def hybrid_search(self, *args, **kwargs):
+                return [
+                    {
+                        "final_score": 1.0,
+                        "retrieval_mode": "bm25_only",
+                        "doc": {
+                            "doc_id": "strategy_fixture",
+                            "source_type": "strategy",
+                            "text": "Use reliable air defense and maintain spell cycle discipline.",
+                            "metadata": {"title": "Fixture", "scope": "test", "source": "fixture"},
+                        },
+                    }
+                ]
+
+        metadata = {}
+        with patch.object(query_answering, "EXTERNAL_API_REQUIRED", True, create=True), patch.object(
+            query_answering, "uses_responses_api", return_value=True
+        ), patch.object(
+            query_answering, "generate_model_text", AsyncMock(side_effect=RuntimeError("model unavailable"))
+        ):
+            with self.assertRaisesRegex(RuntimeError, "RAG model API call failed"):
+                await query_answering.build_evidence_synthesis_answer(
+                    user_text="Analyze the current environment.",
+                    parsed={"intent": "meta_analysis_query"},
+                    schedule_data=[],
+                    top_decks_data=[{"rank": 1, "deck_name": "Deck A"}],
+                    cards_meta_data=[{"rank": 1, "card_name": "Zap", "usage_rate": 10}],
+                    retriever=StaticRetriever(),
+                    api_key="test-key",
+                    metadata=metadata,
+                )
+        self.assertEqual(metadata["model_generation"], "unavailable")
+
+    async def test_strict_mode_retrieves_only_active_snapshot_documents(self):
+        class RecordingRetriever:
+            def __init__(self):
+                self.kwargs = None
+
+            def hybrid_search(self, **kwargs):
+                self.kwargs = kwargs
+                return [
+                    {
+                        "final_score": 1.0,
+                        "retrieval_mode": "hybrid",
+                        "doc": {
+                            "doc_id": "snapshot_fixture",
+                            "source_type": "snapshot",
+                            "text": "Official daily snapshot evidence.",
+                            "metadata": {"snapshot_id": "fixture", "source": "Supercell API live sample"},
+                        },
+                    }
+                ]
+
+        retriever = RecordingRetriever()
+        with patch.object(query_answering, "EXTERNAL_API_REQUIRED", True, create=True), patch.object(
+            query_answering, "uses_responses_api", return_value=True
+        ), patch.object(query_answering, "generate_model_text", AsyncMock(return_value="Grounded answer")):
+            await query_answering.build_evidence_synthesis_answer(
+                user_text="Analyze the current environment.",
+                parsed={"intent": "meta_analysis_query"},
+                schedule_data=[],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=retriever,
+                api_key="test-key",
+                metadata={},
+            )
+
+        self.assertIsNone(retriever.kwargs["source_type"])
+
+    async def test_streaming_evidence_synthesis_accumulates_public_model_deltas(self):
+        class StaticRetriever:
+            def hybrid_search(self, **_kwargs):
+                return [
+                    {
+                        "final_score": 1.0,
+                        "retrieval_mode": "hybrid",
+                        "doc": {
+                            "doc_id": "snapshot_fixture",
+                            "source_type": "snapshot",
+                            "text": "Official snapshot evidence.",
+                            "metadata": {"snapshot_id": "fixture", "source": "Supercell API live sample"},
+                        },
+                    }
+                ]
+
+        async def model_stream(**_kwargs):
+            yield "第一段结论。"
+            yield "第二段结论。"
+
+        emitter = RuntimeEventEmitter()
+        metadata = {}
+        with patch.object(query_answering, "uses_responses_api", return_value=True), patch.object(
+            query_answering, "generate_model_text_stream", model_stream
+        ):
+            answer = await query_answering.build_evidence_synthesis_answer(
+                user_text="分析当前环境。",
+                parsed={"intent": "meta_analysis_query"},
+                schedule_data=[],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=StaticRetriever(),
+                api_key="test-key",
+                metadata=metadata,
+                event_sink=emitter,
+                stream_content=True,
+            )
+
+        events = []
+        while not emitter.empty():
+            events.append(await emitter.next_event())
+        streamed_text = "".join(event["text"] for event in events if event["object"] == "content")
+
+        self.assertIn("第一段结论。第二段结论。", answer)
+        self.assertEqual(streamed_text, answer)
+        self.assertEqual(metadata["model_stream"], "streaming")
+
+    async def test_evidence_synthesis_marks_completed_result_fallback_when_stream_is_unavailable(self):
+        class StaticRetriever:
+            def hybrid_search(self, **_kwargs):
+                return [
+                    {
+                        "final_score": 1.0,
+                        "retrieval_mode": "hybrid",
+                        "doc": {
+                            "doc_id": "snapshot_fixture",
+                            "source_type": "snapshot",
+                            "text": "Official snapshot evidence.",
+                            "metadata": {"snapshot_id": "fixture", "source": "Supercell API live sample"},
+                        },
+                    }
+                ]
+
+        async def unavailable_stream(**_kwargs):
+            raise RuntimeError("stream is not supported")
+            yield "unreachable"
+
+        emitter = RuntimeEventEmitter()
+        metadata = {}
+        with patch.object(query_answering, "uses_responses_api", return_value=True), patch.object(
+            query_answering, "generate_model_text_stream", unavailable_stream
+        ), patch.object(query_answering, "generate_model_text", AsyncMock(return_value="完成后返回的结论。")):
+            answer = await query_answering.build_evidence_synthesis_answer(
+                user_text="分析当前环境。",
+                parsed={"intent": "meta_analysis_query"},
+                schedule_data=[],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=StaticRetriever(),
+                api_key="test-key",
+                metadata=metadata,
+                event_sink=emitter,
+                stream_content=True,
+            )
+
+        events = []
+        while not emitter.empty():
+            events.append(await emitter.next_event())
+        streamed_text = "".join(event["text"] for event in events if event["object"] == "content")
+        execution_details = [event.get("detail", "") for event in events if event["object"] == "execution"]
+
+        self.assertEqual(metadata["model_stream"], "fallback_chunked")
+        self.assertEqual(streamed_text, answer)
+        self.assertIn("完成后返回的结论。", answer)
+        self.assertTrue(any("分段" in detail for detail in execution_details))
+
+    async def test_meta_analysis_excludes_local_schedule_from_model_evidence(self):
+        class StaticRetriever:
+            def hybrid_search(self, **kwargs):
+                return [
+                    {
+                        "final_score": 1.0,
+                        "retrieval_mode": "hybrid",
+                        "doc": {
+                            "doc_id": "strategy_fixture",
+                            "source_type": "strategy",
+                            "text": "Use reliable air defense.",
+                            "metadata": {"title": "Fixture", "scope": "test", "source": "fixture"},
+                        },
+                    }
+                ]
+
+        with patch.object(query_answering, "uses_responses_api", return_value=True), patch.object(
+            query_answering, "generate_model_text", AsyncMock(return_value="Grounded answer")
+        ):
+            answer = await query_answering.build_evidence_synthesis_answer(
+                user_text="Analyze the current environment.",
+                parsed={"intent": "meta_analysis_query"},
+                schedule_data=[{"round": 1, "status": "upcoming", "opponent_team": "Private Team"}],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=StaticRetriever(),
+                api_key="test-key",
+            )
+
+        self.assertNotIn("schedule.json", answer)

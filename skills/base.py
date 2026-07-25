@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -10,9 +10,12 @@ class SkillContext:
     schedule_data: list[dict]
     top_decks_data: list[dict]
     cards_meta_data: list[dict]
+    card_deck_stats: dict[str, list[dict]] = field(default_factory=dict)
     retriever: Any | None = None
     api_key: str = ""
     metadata: dict | None = None
+    event_sink: Any | None = None
+    stream_content: bool = True
 
 
 class Skill(ABC):

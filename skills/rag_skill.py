@@ -11,7 +11,11 @@ class RAGEvidenceSkill(Skill):
     def can_handle(self, parsed: dict) -> bool:
         intent = parsed.get("intent")
         if intent == "deck_query":
-            return parsed.get("rank") is None and parsed.get("top_n") is None
+            return (
+                parsed.get("card_name") is None
+                and parsed.get("rank") is None
+                and parsed.get("top_n") is None
+            )
         if intent == "card_query":
             return (
                 parsed.get("card_name") is None
@@ -44,4 +48,7 @@ class RAGEvidenceSkill(Skill):
             source_type=source_type,
             reviewer_model=self._reviewer_model_builder(context.api_key),
             api_key=context.api_key,
+            metadata=context.metadata,
+            event_sink=context.event_sink,
+            stream_content=context.stream_content,
         )

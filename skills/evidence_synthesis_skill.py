@@ -16,6 +16,13 @@ class EvidenceSynthesisSkill(Skill):
         if not context.api_key:
             return "此类环境和备战问题需要 RAG 检索与模型综合，请先设置 OPENAI_API_KEY 后重试。"
         if context.retriever is None:
+            rag_status = (context.metadata or {}).get("rag_status")
+            if rag_status == "building":
+                return "RAG 索引正在后台预热；当前不会使用未完成的向量索引生成开放结论，请稍后重试。"
+            if rag_status == "failed":
+                return "当前快照的 RAG 索引构建失败，系统不会使用旧快照或无证据内容生成开放结论。"
+            if rag_status == "not_ready":
+                return "当前快照的 RAG 索引尚未准备完成，暂时无法可靠生成开放分析。"
             return "开放分析所需的本地知识库尚未就绪，无法可靠生成策略建议。请检查日志中的检索初始化信息后重试。"
         if self._answer_builder is None:
             raise RuntimeError("EvidenceSynthesisSkill is not configured")
@@ -29,4 +36,6 @@ class EvidenceSynthesisSkill(Skill):
             retriever=context.retriever,
             api_key=context.api_key,
             metadata=context.metadata,
+            event_sink=context.event_sink,
+            stream_content=context.stream_content,
         )

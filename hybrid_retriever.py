@@ -5,6 +5,7 @@ BM25 与稠密向量分数不在同一量纲，因此本实现先归一化各自
 """
 
 import json
+import hashlib
 import logging
 import math
 from pathlib import Path
@@ -15,7 +16,7 @@ from rank_bm25 import BM25Okapi
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
-from app_config import EMBED_MODEL, OLLAMA_EMBED_TIMEOUT_SECONDS, OLLAMA_EMBED_URL, RAG_DOCS_FILE
+from app_config import EMBED_BATCH_SIZE, EMBED_MODEL, OLLAMA_EMBED_TIMEOUT_SECONDS, OLLAMA_EMBED_URL, RAG_DOCS_FILE
 
 
 DATA_DIR = Path("data")
@@ -27,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 class HybridRetriever:
-    """构建内存中的 BM25/Qdrant 索引，并提供可解释的检索结果。"""
-    def __init__(self, docs: List[Dict[str, Any]]):
+    """Build BM25 plus a snapshot-versioned local Qdrant index."""
+    def __init__(self, docs: List[Dict[str, Any]], *, index_path: Path | None = None):
         """对同一批文档建立两套索引，使词法与语义召回使用相同语料。"""
         self.docs = docs
         self.doc_id_to_doc = {idx: doc for idx, doc in enumerate(docs)}
@@ -36,14 +37,61 @@ class HybridRetriever:
         self.tokenized_corpus = [self.tokenize(doc["text"]) for doc in docs]
         self.bm25 = BM25Okapi(self.tokenized_corpus)
 
-        self.qdrant = QdrantClient(":memory:")
+        self.snapshot_id = self._snapshot_id_from_docs(docs)
+        self.index_path = index_path if index_path is not None else (
+            DATA_DIR / "daily_snapshot_qdrant" / self.snapshot_id if self.snapshot_id else None
+        )
+        self.collection_name = COLLECTION_NAME
+        self.manifest_path = self.index_path / "manifest.json" if self.index_path else None
+        self.docs_fingerprint = hashlib.sha256(
+            json.dumps(docs, ensure_ascii=True, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        self.qdrant = QdrantClient(path=str(self.index_path)) if self.index_path else QdrantClient(":memory:")
         self.dense_available = False
         try:
-            self._build_dense_index()
+            if not self._can_reuse_persisted_index():
+                self._build_dense_index()
+                self._write_index_manifest()
             self.dense_available = True
         except Exception as exc:
             # Open-ended answers remain available through BM25 when local Ollama is not running.
             logger.warning("dense retrieval disabled; using BM25 fallback: %s", exc)
+
+    @staticmethod
+    def _snapshot_id_from_docs(docs: List[Dict[str, Any]]) -> str | None:
+        ids = {
+            str(doc.get("metadata", {}).get("snapshot_id", "")).strip()
+            for doc in docs
+            if isinstance(doc, dict)
+        }
+        return ids.pop() if len(ids) == 1 and ids and ids != {""} else None
+
+    def _can_reuse_persisted_index(self) -> bool:
+        if self.manifest_path is None or not self.manifest_path.exists():
+            return False
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        return (
+            manifest.get("snapshot_id") == self.snapshot_id
+            and manifest.get("docs_fingerprint") == self.docs_fingerprint
+            and self.qdrant.collection_exists(self.collection_name)
+        )
+
+    def _write_index_manifest(self) -> None:
+        if self.manifest_path is None:
+            return
+        self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.manifest_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(
+                {"snapshot_id": self.snapshot_id, "docs_fingerprint": self.docs_fingerprint},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(self.manifest_path)
 
     @staticmethod
     def tokenize(text: str) -> List[str]:
@@ -68,13 +116,22 @@ class HybridRetriever:
         return english_tokens + chinese_tokens
 
     def embed_text(self, text: str) -> List[float]:
-        """调用配置好的 Ollama embedding 服务，并校验返回契约。
+        """Embed one query while sharing the batch-response validation path."""
+        return self.embed_texts([text])[0]
 
-        在此校验向量长度，可以在模型与 Qdrant collection schema 不匹配时尽早失败。
+    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        """Embed a bounded batch of documents with one Ollama request.
+
+        Snapshot preheating can create more than a thousand evidence documents.
+        Calling Ollama per document makes a healthy index appear stalled, so the
+        ingestion path batches documents while query-time retrieval still embeds
+        the single user query through :meth:`embed_text`.
         """
+        if not texts:
+            return []
         payload = {
             "model": EMBED_MODEL,
-            "input": text,
+            "input": texts,
         }
         try:
             resp = requests.post(OLLAMA_EMBED_URL, json=payload, timeout=OLLAMA_EMBED_TIMEOUT_SECONDS)
@@ -88,51 +145,52 @@ class HybridRetriever:
         data = resp.json()
 
         embeddings = data.get("embeddings")
-        if not embeddings or not isinstance(embeddings, list):
+        if not embeddings or not isinstance(embeddings, list) or len(embeddings) != len(texts):
             raise ValueError("Ollama embedding 返回格式异常。")
 
-        vector = embeddings[0]
-        if len(vector) != VECTOR_SIZE:
-            raise ValueError(f"向量维度异常，期望 {VECTOR_SIZE}，实际 {len(vector)}。")
+        for vector in embeddings:
+            if not isinstance(vector, list) or len(vector) != VECTOR_SIZE:
+                actual_size = len(vector) if isinstance(vector, list) else "invalid"
+                raise ValueError(f"向量维度异常，期望 {VECTOR_SIZE}，实际 {actual_size}。")
 
-        return vector
+        return embeddings
 
     def _build_dense_index(self):
         """为当前文档语料创建可丢弃的本地 Qdrant collection。"""
-        if self.qdrant.collection_exists(COLLECTION_NAME):
-            self.qdrant.delete_collection(COLLECTION_NAME)
+        if self.qdrant.collection_exists(self.collection_name):
+            self.qdrant.delete_collection(self.collection_name)
 
         self.qdrant.create_collection(
-            collection_name=COLLECTION_NAME,
+            collection_name=self.collection_name,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
 
-        points = []
-        for idx, doc in enumerate(self.docs):
+        for start in range(0, len(self.docs), EMBED_BATCH_SIZE):
+            batch_docs = self.docs[start : start + EMBED_BATCH_SIZE]
             try:
-                vector = self.embed_text(doc["text"])
+                vectors = self.embed_texts([doc["text"] for doc in batch_docs])
             except Exception as exc:
                 raise RuntimeError(
-                    f"构建向量索引失败，文档 doc_id={doc.get('doc_id')}。"
+                    f"构建向量索引失败，文档 doc_id={batch_docs[0].get('doc_id')}。"
                     "请检查 Ollama 服务、embedding 模型和网络连通性。"
                 ) from exc
 
-            payload = {
-                "doc_id": doc["doc_id"],
-                "source_type": doc["source_type"],
-                "text": doc["text"],
-                "metadata": doc["metadata"],
-            }
-
-            points.append(
-                PointStruct(
-                    id=idx,
-                    vector=vector,
-                    payload=payload,
+            points = []
+            for offset, (doc, vector) in enumerate(zip(batch_docs, vectors, strict=True)):
+                payload = {
+                    "doc_id": doc["doc_id"],
+                    "source_type": doc["source_type"],
+                    "text": doc["text"],
+                    "metadata": doc["metadata"],
+                }
+                points.append(
+                    PointStruct(
+                        id=start + offset,
+                        vector=vector,
+                        payload=payload,
+                    )
                 )
-            )
-
-        self.qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
+            self.qdrant.upsert(collection_name=self.collection_name, points=points)
 
     def bm25_search(self, query: str, top_k: int = 10, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """返回按词频相关性排序的词法候选文档。"""
@@ -168,7 +226,7 @@ class HybridRetriever:
         query_vector = self.embed_text(query)
 
         response = self.qdrant.query_points(
-            collection_name=COLLECTION_NAME,
+            collection_name=self.collection_name,
             query=query_vector,
             limit=max(top_k * 3, 20),
             with_payload=True,

@@ -88,6 +88,34 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(parsed["rank"], 3)
         self.assertIsNone(parsed["top_n"])
 
+    def test_english_deck_ranking_parses_top_n(self):
+        parsed = fallback_parse_query("top 3 deck ranking", self.card_data)
+        self.assertEqual(parsed["intent"], "deck_query")
+        self.assertEqual(parsed["top_n"], 3)
+
+    def test_english_card_ranking_position_routes_to_rank_lookup(self):
+        parsed = fallback_parse_query("The Log ranking position", self.card_data)
+        self.assertEqual(parsed["intent"], "card_rank_lookup_query")
+        self.assertEqual(parsed["card_name"], "The Log")
+
+    def test_english_card_comparison_preserves_requested_win_rate(self):
+        parsed = fallback_parse_query("Fireball vs Poison win rate", self.card_data)
+
+        self.assertEqual(parsed["intent"], "card_compare_query")
+        self.assertEqual(parsed["card_names"], ["Fireball", "Poison"])
+        self.assertEqual(parsed["compare_metric"], "win_rate")
+
+    def test_short_english_card_aliases_do_not_match_inside_unrelated_words(self):
+        for question in [
+            "tell me a joke about programming",
+            "summarize a chemistry paper",
+            "what is the price of bitcoin",
+        ]:
+            with self.subTest(question=question):
+                parsed = fallback_parse_query(question, self.card_data)
+                self.assertEqual(parsed["intent"], "reject")
+                self.assertIsNone(parsed["card_name"])
+
     def test_normalize_parsed_query_casts_rank(self):
         parsed = {
             "intent": "card_query",
@@ -208,7 +236,7 @@ class QueryLogicTests(unittest.TestCase):
             self.card_data,
         )
         self.assertIn("Fireball", answer)
-        self.assertIn("cards_meta.json", answer)
+        self.assertIn("Supercell API live sample", answer)
 
     def test_build_card_answer_returns_single_ranked_card(self):
         answer = build_card_answer(
@@ -223,9 +251,14 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(app_config.RETRIEVAL_TOP_K_BM25, 10)
         self.assertEqual(app_config.RETRIEVAL_FINAL_TOP_K, 8)
         self.assertEqual(app_config.EMBED_MODEL, "bge-m3:latest")
-        self.assertEqual(app_config.OLLAMA_EMBED_TIMEOUT_SECONDS, 3.0)
-        self.assertEqual(app_config.PARSER_CALL_TIMEOUT_SECONDS, 20.0)
+        self.assertEqual(app_config.OLLAMA_EMBED_TIMEOUT_SECONDS, 10.0)
+        self.assertEqual(app_config.EMBED_BATCH_SIZE, 32)
+        self.assertEqual(app_config.PARSER_CALL_TIMEOUT_SECONDS, 45.0)
         self.assertEqual(app_config.MODEL_CALL_TIMEOUT_SECONDS, 120.0)
+        self.assertEqual(app_config.SUPERCELL_TARGET_BATTLES, 20000)
+        self.assertEqual(app_config.SUPERCELL_MAX_TARGET_BATTLES, 20000)
+        self.assertEqual(app_config.SUPERCELL_LEADERBOARD_PLAYERS, 3000)
+        self.assertEqual(app_config.SUPERCELL_FETCH_CONCURRENCY, 1)
         self.assertTrue(app_config.OPENAI_MODEL)
 
     def test_chat_model_uses_responses_configuration(self):
@@ -255,6 +288,11 @@ class QueryLogicTests(unittest.TestCase):
     def test_query_needs_rag_only_for_open_deck_and_card_queries(self):
         self.assertFalse(query_needs_rag({"intent": "schedule_query", "round": 2}))
         self.assertFalse(query_needs_rag({"intent": "deck_query", "rank": 1, "top_n": None}))
+        self.assertFalse(
+            query_needs_rag(
+                {"intent": "deck_query", "card_name": "Electro Giant", "rank": None, "top_n": None}
+            )
+        )
         self.assertFalse(query_needs_rag({"intent": "card_query", "card_name": "Fireball"}))
         self.assertTrue(
             query_needs_rag(
@@ -300,8 +338,12 @@ class RuntimeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async with lifespan(app):
             self.assertEqual(len(app.state.schedule_data), 11)
             self.assertEqual(len(app.state.top_decks_data), 30)
-            self.assertEqual(len(app.state.cards_meta_data), 176)
-            self.assertIsNone(app.state.retriever)
+            self.assertTrue(app.state.cards_meta_data)
+            if app.state.live_snapshot is not None:
+                self.assertEqual(app.state.cards_meta_data, app.state.live_snapshot["cards_meta"])
+                self.assertEqual(app.state.top_decks_data, app.state.live_snapshot["top_decks"])
+            else:
+                self.assertEqual(app.state.cards_meta_data, app.state.bootstrap_cards_meta_data)
 
 
 if __name__ == "__main__":

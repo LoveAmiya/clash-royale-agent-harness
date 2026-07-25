@@ -3,7 +3,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from support import install_test_stubs
 
@@ -12,7 +12,8 @@ install_test_stubs()
 from harness.trace import TraceEvent, TraceRecorder
 from hybrid_retriever import HybridRetriever
 from rag_data_builder import build_strategy_docs
-from runtime_multi import query_needs_rag, split_stream_chunks
+from runtime_events import RuntimeEventEmitter
+from runtime_multi import emit_semantic_content, query_needs_rag, split_answer_semantic_chunks, split_stream_chunks
 from query_answering import AnswerResult
 from skills.base import SkillContext
 from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
@@ -31,6 +32,32 @@ class OpenAnalysisRoutingTests(unittest.TestCase):
         self.assertEqual("".join(chunks), answer)
         self.assertTrue(all(len(chunk) <= 10 for chunk in chunks))
 
+    def test_semantic_chunks_keep_structured_answer_sections_together(self):
+        answer = "## 卡牌数据：Electro Giant\n- 使用率：4.0%\n- 胜率：64.4%\n\n数据边界：官方样本\n\n参考来源：\n[1] Supercell API"
+
+        chunks = list(split_answer_semantic_chunks(answer))
+
+        self.assertEqual("".join(chunks), answer)
+        self.assertEqual(len(chunks), 4)
+        self.assertEqual(chunks[0], "## 卡牌数据：Electro Giant\n")
+        self.assertIn("使用率：4.0%", chunks[1])
+        self.assertTrue(chunks[2].startswith("数据边界"))
+
+
+class SemanticContentPacingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_deterministic_sections_are_spaced_without_changing_text(self):
+        emitter = RuntimeEventEmitter()
+        answer = "标题\n- 指标\n\n数据边界：样本\n\n参考来源：\n[1] 官方"
+
+        with patch("runtime_multi.asyncio.sleep", AsyncMock()) as sleep:
+            await emit_semantic_content(emitter, answer)
+
+        events = []
+        while not emitter.empty():
+            events.append(await emitter.next_event())
+        self.assertEqual("".join(event["text"] for event in events), answer)
+        self.assertEqual(sleep.await_count, len(events) - 1)
+
 
 class TraceReadTests(unittest.TestCase):
     def test_trace_recorder_reads_only_requested_trace(self):
@@ -46,6 +73,82 @@ class TraceReadTests(unittest.TestCase):
 
 
 class RetrievalFallbackTests(unittest.TestCase):
+    def test_snapshot_index_is_reused_without_reembedding_after_restart(self):
+        class FakeQdrant:
+            collections_by_path = {}
+
+            def __init__(self, *args, **kwargs):
+                path = kwargs.get("path") or (args[0] if args else ":memory:")
+                self.collections = self.collections_by_path.setdefault(str(path), set())
+
+            def collection_exists(self, name):
+                return name in self.collections
+
+            def delete_collection(self, name):
+                self.collections.discard(name)
+
+            def create_collection(self, collection_name, vectors_config):
+                self.collections.add(collection_name)
+
+            def upsert(self, collection_name, points):
+                return None
+
+        docs = [
+            {
+                "doc_id": "snapshot-1:overview",
+                "source_type": "snapshot",
+                "text": "Official daily snapshot",
+                "metadata": {"snapshot_id": "snapshot-1", "source": "Supercell API live sample"},
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir, patch("hybrid_retriever.QdrantClient", FakeQdrant), patch.object(
+            HybridRetriever, "embed_texts", return_value=[[0.0] * 1024]
+        ) as embed:
+            first = HybridRetriever(docs, index_path=Path(temp_dir))
+            second = HybridRetriever(docs, index_path=Path(temp_dir))
+
+        self.assertTrue(first.dense_available)
+        self.assertTrue(second.dense_available)
+        self.assertEqual(embed.call_count, 1)
+
+    def test_dense_index_batches_embeddings_and_qdrant_upserts(self):
+        class FakeQdrant:
+            def __init__(self, *args, **kwargs):
+                self.collections = set()
+                self.upserts = []
+
+            def collection_exists(self, name):
+                return name in self.collections
+
+            def delete_collection(self, name):
+                self.collections.discard(name)
+
+            def create_collection(self, collection_name, vectors_config):
+                self.collections.add(collection_name)
+
+            def upsert(self, collection_name, points):
+                self.upserts.append(list(points))
+
+        docs = [
+            {
+                "doc_id": f"snapshot-1:{index}",
+                "source_type": "card_profile",
+                "text": f"Official evidence {index}",
+                "metadata": {"snapshot_id": "snapshot-1"},
+            }
+            for index in range(5)
+        ]
+        embed = Mock(side_effect=lambda texts: [[float(index)] * 1024 for index, _ in enumerate(texts)])
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch("hybrid_retriever.QdrantClient", FakeQdrant), patch(
+            "hybrid_retriever.EMBED_BATCH_SIZE", 2
+        ), patch.object(HybridRetriever, "embed_texts", embed):
+            retriever = HybridRetriever(docs, index_path=Path(temp_dir))
+
+        self.assertTrue(retriever.dense_available)
+        self.assertEqual([call.args[0] for call in embed.call_args_list], [[doc["text"] for doc in docs[:2]], [doc["text"] for doc in docs[2:4]], [docs[4]["text"]]])
+        self.assertEqual([len(points) for points in retriever.qdrant.upserts], [2, 2, 1])
+
     def test_hybrid_retriever_degrades_to_bm25_when_dense_index_fails(self):
         docs = [
             {
@@ -107,7 +210,20 @@ class ProcessSSETests(unittest.IsolatedAsyncioTestCase):
             input=[{"role": "user", "content": [{"type": "text", "text": "测试"}]}]
         )
 
-        with patch.object(runtime_multi, "build_answer", AsyncMock(return_value=result)), patch.object(
+        async def build_with_events(*_args, event_sink=None, **_kwargs):
+            self.assertIsNotNone(event_sink)
+            await event_sink.execution(
+                step_id="parse",
+                phase="parse",
+                status="running",
+                title="正在解析问题",
+                detail="调用模型解析结构化意图",
+            )
+            await event_sink.content("先到达的正文", delta=True)
+            await event_sink.content("，第二个正文块", delta=True)
+            return result
+
+        with patch.object(runtime_multi, "build_answer", side_effect=build_with_events), patch.object(
             runtime_multi,
             "read_trace",
             return_value=[{"state": "SUCCESS", "latency_ms": 12, "success": True}],
@@ -122,11 +238,42 @@ class ProcessSSETests(unittest.IsolatedAsyncioTestCase):
         content_events = [event for event in events if event["object"] == "content"]
 
         self.assertIn("progress", objects)
+        self.assertIn("execution", objects)
         self.assertIn("trace", objects)
         self.assertGreater(len(content_events), 1)
-        self.assertLess(objects.index("progress"), objects.index("content"))
+        self.assertLess(objects.index("execution"), objects.index("content"))
+        self.assertLess(objects.index("content"), objects.index("trace"))
 
-    async def test_open_query_initializes_retriever_off_the_event_loop(self):
+    async def test_process_sends_fallback_content_before_trace_when_no_skill_emits_content(self):
+        import runtime_multi
+
+        result = AnswerResult(
+            answer="结构化结果已经完成。\n\n数据边界：官方快照。",
+            trace_id="trace-fallback",
+            parsed={"intent": "card_query", "parse_source": "llm_parser"},
+            plan={"steps": []},
+            selected_skill="CardMetaSkill",
+            mode="direct",
+            metadata={},
+        )
+        request = runtime_multi.ProcessRequest(
+            input=[{"role": "user", "content": [{"type": "text", "text": "测试"}]}]
+        )
+
+        with patch.object(runtime_multi, "build_answer", AsyncMock(return_value=result)), patch.object(
+            runtime_multi, "read_trace", return_value=[]
+        ):
+            response = await runtime_multi.process(request)
+            payload = ""
+            async for chunk in response.body_iterator:
+                payload += chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+
+        events = [json.loads(frame[6:]) for frame in payload.split("\n\n") if frame.startswith("data: ")]
+        objects = [event["object"] for event in events]
+        self.assertIn("content", objects)
+        self.assertLess(objects.index("content"), objects.index("trace"))
+
+    async def test_open_query_never_initializes_retriever_on_the_request_path(self):
         import runtime_multi
 
         app = types.SimpleNamespace(
@@ -159,4 +306,4 @@ class ProcessSSETests(unittest.IsolatedAsyncioTestCase):
             answer = await runtime_multi.build_answer("开放问题", app)
 
         self.assertIs(answer, result)
-        to_thread.assert_awaited_once_with(runtime_multi.ensure_retriever, app)
+        to_thread.assert_not_awaited()

@@ -35,6 +35,12 @@ def _install_fastapi_stub() -> None:
 
             return decorator
 
+        def put(self, *args, **kwargs):
+            def decorator(func):
+                return func
+
+            return decorator
+
     class HTTPException(Exception):
         def __init__(self, status_code: int, detail=None):
             self.status_code = status_code

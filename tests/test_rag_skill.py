@@ -232,6 +232,17 @@ class AnswerQueryRAGRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(rag_answer.await_args.kwargs["retriever"], retriever)
         self.assertEqual(rag_answer.await_args.kwargs["source_type"], "deck")
 
+    async def test_card_filtered_deck_query_is_not_routed_to_rag(self):
+        rag_skill = RAGEvidenceSkill(
+            rag_answer_builder=AsyncMock(return_value="rag:deck"),
+            reviewer_model_builder=lambda api_key: {"api_key": api_key},
+        )
+        self.assertFalse(
+            rag_skill.can_handle(
+                {"intent": "deck_query", "card_name": "Electro Giant", "rank": None, "top_n": None}
+            )
+        )
+
     async def test_answer_query_routes_open_ended_card_query_through_rag_skill(self):
         rag_answer = AsyncMock(return_value="rag:card")
         rag_skill = RAGEvidenceSkill(

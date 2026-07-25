@@ -59,6 +59,36 @@ class SkillImplementationTests(unittest.TestCase):
 
         self.assertEqual(answer, build_deck_answer(parsed, self.deck_data))
 
+    def test_deck_ranking_skill_uses_card_filtered_snapshot_decks(self):
+        parsed = {"intent": "deck_query", "card_name": "Electro Giant", "rank": None, "top_n": None}
+        card_deck_stats = {
+            "Electro Giant": [
+                {
+                    "deck_name": "Electro Giant / Lightning / Tornado",
+                    "cards": ["Electro Giant", "Lightning", "Tornado"],
+                    "battles": 42,
+                    "sample_win_rate": 57.1,
+                    "sample_battles": 20_000,
+                    "source": "Supercell API live sample",
+                }
+            ]
+        }
+        skill = DeckRankingSkill()
+        context = SkillContext(
+            user_text="雷电巨人卡组有哪些",
+            parsed=parsed,
+            schedule_data=self.schedule_data,
+            top_decks_data=self.deck_data,
+            cards_meta_data=self.card_data,
+            card_deck_stats=card_deck_stats,
+        )
+
+        answer = skill.run(context)
+
+        self.assertTrue(skill.can_handle(parsed))
+        self.assertIn("Electro Giant / Lightning / Tornado", answer)
+        self.assertIn("42", answer)
+
     def test_card_meta_skill_matches_existing_builder(self):
         parsed = {"intent": "card_query", "card_name": "Fireball", "rank": None, "top_n": None, "metric": "win_rate"}
         skill = CardMetaSkill()

@@ -9,7 +9,7 @@ import uuid
 
 import httpx
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -17,6 +17,8 @@ from app_config import BACKEND_URL, WEB_HOST, WEB_PORT
 
 
 app = FastAPI(title="CR Agent Web UI")
+LIVE_SAMPLE_SETTINGS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/settings/live-sample"
+SNAPSHOT_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/snapshot/status"
 
 
 HTML_PAGE = """
@@ -47,6 +49,50 @@ HTML_PAGE = """
     .subtitle {
       color: #666;
       margin-bottom: 20px;
+    }
+    .snapshot-panel {
+      margin-bottom: 16px;
+      border: 1px solid #dbe3ef;
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px 16px;
+    }
+    .snapshot-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .snapshot-title {
+      color: #1f2937;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .snapshot-state {
+      color: #2563eb;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .snapshot-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px 16px;
+    }
+    .snapshot-item { min-width: 0; }
+    .snapshot-label {
+      color: #64748b;
+      font-size: 12px;
+      margin-bottom: 3px;
+    }
+    .snapshot-value {
+      color: #111827;
+      font-size: 13px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 720px) {
+      .snapshot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     .chat-box {
       background: #fff;
@@ -119,6 +165,27 @@ HTML_PAGE = """
       flex-direction: column;
       gap: 10px;
     }
+    .sample-control {
+      display: grid;
+      gap: 4px;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #sampleTarget {
+      width: 100%;
+      min-height: 40px;
+      padding: 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      color: #111827;
+      font: inherit;
+    }
+    #sampleTarget:disabled {
+      background: #f3f4f6;
+      color: #94a3b8;
+    }
     button {
       border: none;
       border-radius: 12px;
@@ -177,6 +244,19 @@ HTML_PAGE = """
       font-size: 12px;
       color: #475569;
     }
+    .trace-panel details > summary {
+      cursor: pointer;
+      list-style: none;
+    }
+    .trace-panel details > summary::-webkit-details-marker { display: none; }
+    .debug-trace {
+      margin-top: 12px;
+      color: #64748b;
+      font-family: Consolas, "Microsoft YaHei", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     .trace-line {
       border-left: 3px solid #93c5fd;
       padding-left: 8px;
@@ -195,20 +275,46 @@ HTML_PAGE = """
     <div class="title">皇室战争战队赛统筹 Agent</div>
     <div class="subtitle">网页版客户端。调用你本地运行的 <code>runtime_multi.py</code> 服务。</div>
 
+    <section class="snapshot-panel" aria-live="polite" aria-label="官方数据快照状态">
+      <div class="snapshot-header">
+        <span class="snapshot-title">当前数据快照</span>
+        <span id="snapshotState" class="snapshot-state">正在读取</span>
+      </div>
+      <div id="snapshotGrid" class="snapshot-grid"></div>
+    </section>
+
     <div id="chatBox" class="chat-box"></div>
 
     <section class="trace-panel" aria-live="polite">
-      <div class="trace-heading">
-        <span>执行记录</span>
+      <details id="executionPanel" open>
+      <summary class="trace-heading">
+        <span>执行说明</span>
         <span id="traceSummary" class="trace-summary">等待请求</span>
-      </div>
+      </summary>
       <div id="traceList" class="trace-list"></div>
+      </details>
+      <details class="debug-trace">
+        <summary>调试详情</summary>
+        <pre id="debugTrace"></pre>
+      </details>
     </section>
 
     <div class="composer">
       <textarea id="inputBox" placeholder="输入问题，例如：\n- 我们第五轮打谁\n- 使用率第三的卡牌是什么\n- 现在热门卡组有哪些"></textarea>
 
       <div class="actions">
+        <label id="sampleControl" class="sample-control" for="sampleTarget">
+          实时样本
+          <select id="sampleTarget" aria-label="Supercell 实时采样场次">
+            <option value="200">200 场</option>
+            <option value="400" selected>400 场</option>
+            <option value="1000">1000 场</option>
+            <option value="2000">2000 场</option>
+            <option value="5000">5000 场</option>
+            <option value="10000">10000 场</option>
+            <option value="20000">20000 场</option>
+          </select>
+        </label>
         <button id="sendBtn">发送</button>
         <button id="clearBtn" type="button">清空记录</button>
       </div>
@@ -228,9 +334,15 @@ HTML_PAGE = """
     const inputBox = document.getElementById("inputBox");
     const sendBtn = document.getElementById("sendBtn");
     const clearBtn = document.getElementById("clearBtn");
+    const sampleTarget = document.getElementById("sampleTarget");
+    const sampleControl = document.getElementById("sampleControl");
     const statusEl = document.getElementById("status");
     const traceSummary = document.getElementById("traceSummary");
     const traceList = document.getElementById("traceList");
+    const executionPanel = document.getElementById("executionPanel");
+    const debugTrace = document.getElementById("debugTrace");
+    const snapshotState = document.getElementById("snapshotState");
+    const snapshotGrid = document.getElementById("snapshotGrid");
 
     let sessionId = localStorage.getItem("cr_agent_session_id");
     if (!sessionId) {
@@ -259,7 +371,136 @@ HTML_PAGE = """
 
     function setLoading(loading, text = "") {
       sendBtn.disabled = loading;
+      sampleTarget.disabled = loading;
       statusEl.textContent = text;
+    }
+
+    function formatSnapshotTime(value) {
+      if (!value) return "未生成";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { hour12: false });
+    }
+
+    function snapshotStateLabel(status) {
+      return {
+        ready: "可用",
+        refreshing: "正在更新",
+        stale: "使用上次成功快照",
+        cooldown: "冷却中",
+        unavailable: "未就绪"
+      }[status] || status || "未知";
+    }
+
+    function ragStateLabel(status) {
+      return {
+        not_required: "不需要 RAG",
+        not_ready: "等待预热",
+        building: "后台构建中",
+        ready: "向量检索可用",
+        bm25_only: "BM25 降级可用",
+        failed: "构建失败"
+      }[status] || status || "未知";
+    }
+
+    function renderSnapshotStatus(snapshot) {
+      const leaderboard = snapshot.leaderboard || {};
+      const metrics = snapshot.collection_metrics || {};
+      const rag = snapshot.rag || {};
+      const scanRange = leaderboard.scanned_rank_end
+        ? `${leaderboard.rank_start || 1}-${leaderboard.scanned_rank_end}`
+        : "尚未完成";
+      const values = [
+        ["来源", snapshot.source || "Supercell Official API"],
+        ["快照状态", snapshotStateLabel(snapshot.status)],
+        ["有效对局", `${snapshot.sample_battles || 0}/${snapshot.target_battles || 20000}`],
+        ["采集时间", formatSnapshotTime(snapshot.fetched_at)],
+        ["候选排行榜", `前 ${leaderboard.candidate_limit || "-"} 名`],
+        ["实际扫描排名", scanRange],
+        ["有效玩家", `${leaderboard.sampled_players || 0} 人`],
+        ["跳过重复", `${metrics.duplicates_skipped || 0} 条`],
+        ["RAG 索引", ragStateLabel(rag.status)],
+        ["RAG 证据文档", `${Object.values(rag.document_counts || {}).reduce((total, value) => total + Number(value || 0), 0)} 篇`]
+      ];
+      snapshotState.textContent = snapshotStateLabel(snapshot.status);
+      snapshotGrid.innerHTML = "";
+      values.forEach(([label, value]) => {
+        const item = document.createElement("div");
+        item.className = "snapshot-item";
+        const labelEl = document.createElement("div");
+        labelEl.className = "snapshot-label";
+        labelEl.textContent = label;
+        const valueEl = document.createElement("div");
+        valueEl.className = "snapshot-value";
+        valueEl.textContent = value;
+        item.appendChild(labelEl);
+        item.appendChild(valueEl);
+        snapshotGrid.appendChild(item);
+      });
+    }
+
+    async function loadSnapshotStatus() {
+      try {
+        const resp = await fetch("/snapshot/status");
+        if (!resp.ok) throw new Error("snapshot status request failed");
+        renderSnapshotStatus(await resp.json());
+      } catch (_) {
+        snapshotState.textContent = "无法连接后端";
+        snapshotGrid.innerHTML = "";
+      }
+    }
+
+    async function loadLiveSampleSettings() {
+      const resp = await fetch("/settings/live-sample");
+      if (!resp.ok) throw new Error("无法读取实时采样设置");
+      const settings = await resp.json();
+      sampleControl.hidden = !settings.can_update_target;
+      const value = String(settings.target_battles);
+      if ([...sampleTarget.options].some(option => option.value === value)) {
+        sampleTarget.value = value;
+      }
+    }
+
+    async function updateLiveSampleSettings() {
+      const targetBattles = Number(sampleTarget.value);
+      sampleTarget.disabled = true;
+      statusEl.textContent = `已切换为 ${targetBattles} 场，正在刷新官方样本...`;
+      try {
+        const resp = await fetch("/settings/live-sample", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target_battles: targetBattles })
+        });
+        if (!resp.ok) throw new Error((await resp.text()) || "更新实时采样设置失败");
+        const settings = await resp.json();
+        statusEl.textContent = `实时样本目标已更新为 ${settings.target_battles} 场，正在从 Supercell API 刷新。`;
+      } catch (err) {
+        statusEl.textContent = `实时样本设置失败：${err.message}`;
+        await loadLiveSampleSettings().catch(() => {});
+      } finally {
+        sampleTarget.disabled = false;
+      }
+    }
+
+    const executionLines = new Map();
+
+    function resetExecution() {
+      executionLines.clear();
+      traceList.innerHTML = "";
+      debugTrace.textContent = "";
+      executionPanel.open = true;
+    }
+
+    function renderExecution(event) {
+      const stepId = event.step_id || `${event.phase || "runtime"}.${event.timestamp || Date.now()}`;
+      let line = executionLines.get(stepId);
+      if (!line) {
+        line = document.createElement("div");
+        line.className = "trace-line";
+        traceList.appendChild(line);
+        executionLines.set(stepId, line);
+      }
+      const elapsed = Number.isFinite(event.elapsed_ms) ? ` | 耗时=${event.elapsed_ms}ms` : "";
+      line.textContent = `${event.title || event.phase || "处理中"}：${event.detail || ""}${elapsed}`;
     }
 
     function addTraceLine(text) {
@@ -269,23 +510,60 @@ HTML_PAGE = """
       traceList.appendChild(line);
     }
 
-    function renderTrace(trace) {
-      traceList.innerHTML = "";
+    function renderTraceLegacy(trace) {
       const traceId = trace.trace_id || "未记录";
       const parsed = trace.parsed || {};
       traceSummary.textContent = `${traceId.slice(0, 18)}...`;
+      renderExecution({
+        step_id: "request.complete",
+        phase: "complete",
+        status: "completed",
+        title: "请求已完成",
+        detail: `${trace.selected_skill || "fallback"} | ${trace.mode || "unknown"}`
+      });
+      debugTrace.textContent = JSON.stringify(trace, null, 2);
+      return;
       addTraceLine(`解析：${parsed.intent || "unknown"} | ${parsed.parse_source || "unknown"} | ${parsed.parse_confidence || "unknown"}`);
       addTraceLine(`路由：${trace.selected_skill || "fallback"} | ${trace.mode || "unknown"}`);
 
       const metadata = trace.metadata || {};
+      if (metadata.live_data) {
+        const live = metadata.live_data;
+        const target = live.target_battles ? `/${live.target_battles}` : "";
+        const players = live.sampled_players ? ` | 玩家=${live.sampled_players}` : "";
+        const failed = live.failed_players ? ` | 失败=${live.failed_players}` : "";
+        const freshness = live.freshness ? ` | ${live.freshness}` : "";
+        addTraceLine(`实时数据：${live.status}${live.sample_battles ? ` | 样本对局=${live.sample_battles}${target}` : ""}${players}${failed}${freshness}`);
+        const collection = live.collection_metrics || {};
+        if (collection.request_count) {
+          addTraceLine(`采集：请求=${collection.request_count} | 429=${collection.rate_limited || 0} | 重试=${collection.retried_requests || 0} | 缓存=${collection.cache_hits || 0} | 耗时=${collection.collection_duration_seconds ?? "-"}s`);
+        }
+      }
+      const subResults = trace.sub_results || metadata.sub_results || [];
+      if (subResults.length) {
+        addTraceLine(`多意图：${subResults.length} 个子问题`);
+        subResults.forEach((result) => {
+          const docs = (result.metadata?.retrieved_doc_ids || []).join(", ");
+          const latency = Number.isFinite(result.latency_ms) ? ` | 耗时=${result.latency_ms}ms` : "";
+          addTraceLine(`${result.id}：${result.title || result.parsed?.intent || "unknown"} | ${result.selected_skill || "fallback"} | ${result.status || "unknown"}${latency}${docs ? ` | 文档=${docs}` : ""}`);
+        });
+      }
       if (metadata.retrieval_mode) {
         const documents = (metadata.retrieved_doc_ids || []).join(", ");
         addTraceLine(`检索：${metadata.retrieval_mode} | 文档=${documents || "无"}`);
+      }
+      if (metadata.rag) {
+        addTraceLine(`RAG 索引：${metadata.rag.status || "unknown"} | 快照=${metadata.rag.snapshot_id || "无"}`);
       }
 
       const steps = trace.plan && trace.plan.steps ? trace.plan.steps : [];
       if (steps.length) {
         addTraceLine(`计划：${steps.map(step => step.skill_name).join(" -> ")}`);
+      }
+
+      if (Number.isFinite(metadata.total_latency_ms)) {
+        addTraceLine(`总耗时=${metadata.total_latency_ms}ms`);
+        return;
       }
 
       const events = trace.events || [];
@@ -296,9 +574,26 @@ HTML_PAGE = """
       }
     }
 
+    function renderTrace(trace) {
+      const traceId = trace.trace_id || "未记录";
+      traceSummary.textContent = `${traceId.slice(0, 18)}...`;
+      renderExecution({
+        step_id: "request.complete",
+        phase: "complete",
+        status: "completed",
+        title: "请求已完成",
+        detail: `${trace.selected_skill || "fallback"} | ${trace.mode || "unknown"}`
+      });
+      debugTrace.textContent = JSON.stringify(trace, null, 2);
+    }
+
     function handleSseEvent(event, agentBubble) {
       if (event.object === "progress") {
         setLoading(true, event.label || "正在处理...");
+        return;
+      }
+      if (event.object === "execution") {
+        renderExecution(event);
         return;
       }
       if (event.object === "content" && event.type === "text") {
@@ -315,6 +610,7 @@ HTML_PAGE = """
       }
       if (event.object === "response" && event.status === "completed") {
         setLoading(false, "");
+        loadSnapshotStatus();
       }
     }
 
@@ -326,7 +622,7 @@ HTML_PAGE = """
       inputBox.value = "";
       setLoading(true, "正在请求后端...");
       traceSummary.textContent = "执行中";
-      traceList.innerHTML = "";
+      resetExecution();
       const agentBubble = appendMessage("agent", "");
 
       try {
@@ -385,6 +681,11 @@ HTML_PAGE = """
     }
 
     sendBtn.addEventListener("click", sendMessage);
+    sampleTarget.addEventListener("change", updateLiveSampleSettings);
+    loadLiveSampleSettings().catch(() => {
+      statusEl.textContent = "暂时无法读取实时采样设置。";
+    });
+    loadSnapshotStatus();
 
     inputBox.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -399,7 +700,7 @@ HTML_PAGE = """
       localStorage.setItem("cr_agent_session_id", sessionId);
       statusEl.textContent = "已清空本地会话并生成新 session_id";
       traceSummary.textContent = "等待请求";
-      traceList.innerHTML = "";
+      resetExecution();
     });
   </script>
 </body>
@@ -412,6 +713,10 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     user_id: str | None = None
+
+
+class LiveSampleSettingsRequest(BaseModel):
+    target_battles: int
 
 
 def sse_data(payload: dict) -> str:
@@ -431,6 +736,53 @@ async def health():
         "ok": True,
         "backend_url": BACKEND_URL,
     }
+
+
+async def proxy_live_sample_settings(method: str, payload: dict | None = None) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.request(method, LIVE_SAMPLE_SETTINGS_URL, json=payload)
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail="无法连接后端实时采样设置服务") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="后端实时采样设置请求失败") from exc
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"detail": "后端返回了无效的设置响应"}
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=body.get("detail", "更新实时采样设置失败"))
+    return body
+
+
+@app.get("/settings/live-sample")
+async def get_live_sample_settings():
+    return await proxy_live_sample_settings("GET")
+
+
+@app.put("/settings/live-sample")
+async def update_live_sample_settings(request: LiveSampleSettingsRequest):
+    return await proxy_live_sample_settings("PUT", {"target_battles": request.target_battles})
+
+
+@app.get("/snapshot/status")
+async def get_snapshot_status():
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(SNAPSHOT_STATUS_URL)
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail="backend snapshot status service is unavailable") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="backend snapshot status request failed") from exc
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"detail": "backend returned an invalid snapshot status response"}
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=body.get("detail", "snapshot status request failed"))
+    return body
 
 
 @app.post("/chat")

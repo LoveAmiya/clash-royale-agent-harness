@@ -26,6 +26,10 @@ def _source_url(items: list[dict], fallback: str) -> str:
     return fallback
 
 
+def _uses_supercell_live_sample(items: list[dict]) -> bool:
+    return any(str(item.get("source", "")).strip() == "Supercell API live sample" for item in items)
+
+
 def build_meta_evidence_pack(
     schedule_data: list[dict],
     top_decks_data: list[dict],
@@ -40,10 +44,15 @@ def build_meta_evidence_pack(
     并被提示词限制为不能杜撰本地快照中不存在的统计结论。
     """
     ranked_decks = sorted(top_decks_data, key=lambda item: _as_int(item.get("rank")))[:deck_limit]
+    evidence_cards = [card for card in cards_meta_data if not card.get("_fallback_only")]
+    if not evidence_cards:
+        evidence_cards = cards_meta_data
     popular_cards = sorted(
-        cards_meta_data,
+        evidence_cards,
         key=lambda item: (-_as_float(item.get("usage_rate")), _as_int(item.get("rank"))),
     )[:card_limit]
+    uses_live_deck_sample = _uses_supercell_live_sample(ranked_decks)
+    uses_live_card_sample = _uses_supercell_live_sample(popular_cards)
     upcoming = sorted(
         [item for item in schedule_data if str(item.get("status", "")).lower() == "upcoming"],
         key=lambda item: (str(item.get("match_date", "")), _as_int(item.get("round"))),
@@ -80,7 +89,12 @@ def build_meta_evidence_pack(
 
     evidence = "\n".join(
         [
-            "数据时效边界：以下是仓库内保存的静态快照，不是本次回答时实时抓取的游戏数据；快照未记录采集时间。",
+            (
+                "Data freshness boundary: Supercell API live sample; deck and card evidence is a bounded battle-log sample "
+                "collected for this request. It is not a global or full-season leaderboard."
+                if uses_live_deck_sample or uses_live_card_sample
+                else "数据时效边界：这是仓库内保存的静态快照（repository static snapshots），不是实时游戏数据。"
+            ),
             "热门卡组样本：",
             "\n".join(deck_lines) or "- 当前没有卡组样本。",
             "样本内高频组件：",
@@ -91,11 +105,18 @@ def build_meta_evidence_pack(
             "\n".join(schedule_lines) or "- 当前没有 upcoming 赛程。",
         ]
     )
-    sources = "\n".join(
-        [
-            "[1] top_decks.json | 静态快照 | " + _source_url(ranked_decks, "https://royaleapi.com/decks/leaderboard"),
-            "[2] cards_meta.json | 静态快照 | " + _source_url(popular_cards, "https://royaleapi.com/cards/popular"),
-            "[3] schedule.json | 本地赛程快照",
-        ]
+    deck_source = (
+        "[1] Supercell API live sample | bounded battle-log deck sample"
+        if uses_live_deck_sample
+        else "[1] top_decks.json | 静态快照 | " + _source_url(ranked_decks, "https://royaleapi.com/decks/leaderboard")
     )
+    card_source = (
+        "[2] Supercell API live sample | bounded battle-log card sample"
+        if uses_live_card_sample
+        else "[2] cards_meta.json | 静态快照 | " + _source_url(popular_cards, "https://royaleapi.com/cards/popular")
+    )
+    sources_list = [deck_source, card_source]
+    if schedule_data:
+        sources_list.append("[3] schedule.json | 本地赛程快照")
+    sources = "\n".join(sources_list)
     return evidence, sources

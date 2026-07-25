@@ -3,6 +3,7 @@ import unittest
 from evaluation.metrics import (
     answer_contains_accuracy,
     failure_rate,
+    multi_subquery_accuracy,
     parser_field_accuracy,
     parser_intent_accuracy,
     skill_routing_accuracy,
@@ -72,3 +73,19 @@ class EvalMetricsTests(unittest.TestCase):
         self.assertEqual(summary["total_cases"], 3)
         self.assertEqual(summary["skipped_cases"], 1)
         self.assertEqual(summary["parser_intent_accuracy"], 0.5)
+
+    def test_multi_subquery_accuracy(self):
+        results = [
+            {
+                "expected_subqueries": [{"intent": "card_query"}],
+                "parsed_subqueries": [{"intent": "card_query"}],
+                "skipped": False,
+            },
+            {
+                "expected_subqueries": [{"intent": "meta_analysis_query"}],
+                "parsed_subqueries": [{"intent": "deck_query"}],
+                "skipped": False,
+            },
+        ]
+
+        self.assertEqual(multi_subquery_accuracy(results), 0.5)

@@ -55,15 +55,52 @@ def failure_rate(results: list[dict]) -> float:
     return failed / len(comparable)
 
 
+def case_success_rate(results: list[dict]) -> float:
+    comparable = [item for item in results if not item.get("skipped")]
+    if not comparable:
+        return 0.0
+    passed = sum(1 for item in comparable if item.get("success"))
+    return passed / len(comparable)
+
+
+def category_summary(results: list[dict]) -> dict[str, dict[str, int]]:
+    summary: dict[str, dict[str, int]] = {}
+    for item in results:
+        category = item.get("category", "uncategorized")
+        bucket = summary.setdefault(category, {"total": 0, "passed": 0, "failed": 0, "skipped": 0})
+        bucket["total"] += 1
+        if item.get("skipped"):
+            bucket["skipped"] += 1
+        elif item.get("success"):
+            bucket["passed"] += 1
+        else:
+            bucket["failed"] += 1
+    return summary
+
+
+def multi_subquery_accuracy(results: list[dict]) -> float:
+    comparable = [item for item in results if item.get("expected_subqueries") and not item.get("skipped")]
+    if not comparable:
+        return 0.0
+    matched = sum(item.get("expected_subqueries") == item.get("parsed_subqueries") for item in comparable)
+    return matched / len(comparable)
+
+
 def summarize_results(results: list[dict]) -> dict:
     total = len(results)
     skipped = sum(1 for item in results if item.get("skipped"))
+    failed = sum(1 for item in results if not item.get("skipped") and not item.get("success"))
     return {
         "total_cases": total,
         "skipped_cases": skipped,
+        "passed_cases": total - skipped - failed,
+        "failed_cases": failed,
         "parser_intent_accuracy": parser_intent_accuracy(results),
         "parser_field_accuracy": parser_field_accuracy(results),
         "skill_routing_accuracy": skill_routing_accuracy(results),
         "answer_contains_accuracy": answer_contains_accuracy(results),
+        "case_success_rate": case_success_rate(results),
         "failure_rate": failure_rate(results),
+        "multi_subquery_accuracy": multi_subquery_accuracy(results),
+        "categories": category_summary(results),
     }

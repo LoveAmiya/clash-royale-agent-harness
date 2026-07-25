@@ -42,7 +42,7 @@ class BusinessSkillTests(unittest.TestCase):
         parsed = fallback_parse_query("火球和毒药哪个胜率高", self.card_data)
 
         self.assertEqual(parsed["intent"], "card_compare_query")
-        self.assertEqual(parsed["card_names"], ["Poison", "Fireball"])
+        self.assertEqual(parsed["card_names"], ["Fireball", "Poison"])
 
     def test_compare_metric_is_win_rate(self):
         parsed = fallback_parse_query("火球和毒药哪个胜率高", self.card_data)

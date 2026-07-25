@@ -15,6 +15,7 @@ class TraceEvent:
     selected_skill: str | None
     intent: str | None
     mode: str | None
+    subquery_id: str | None = None
     metadata: dict | None = None
     latency_ms: int | None = None
     success: bool | None = None

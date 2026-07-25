@@ -67,6 +67,29 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(normalized["parse_confidence"], LOCAL_PARSE_CONFIDENCE_MEDIUM)
         self.assertEqual(normalized["parse_reason"], "llm output normalized")
 
+    def test_deck_query_preserves_named_card_and_infers_a_list_size(self):
+        normalized = normalize_parsed_query(
+            {
+                "intent": "deck_query",
+                "metric": None,
+                "rank": None,
+                "top_n": None,
+                "card_name": "雷电巨人",
+                "card_names": None,
+                "round": None,
+                "date": None,
+                "ask_players": False,
+                "parse_source": "llm_parser",
+                "parse_confidence": LOCAL_PARSE_CONFIDENCE_HIGH,
+                "parse_reason": "llm output",
+            },
+            "雷电巨人卡组有哪些",
+            self.card_data,
+        )
+
+        self.assertEqual(normalized["card_name"], "Electro Giant")
+        self.assertEqual(normalized["top_n"], 5)
+
     async def test_high_confidence_local_parse_skips_llm_fallback(self):
         with patch("runtime_multi.generate_model_text") as build_parser_agent:
             parsed = await parse_user_query("我们第五轮打谁", self.card_data, api_key="test-key")
@@ -94,6 +117,15 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["parse_source"], "llm_parser")
         self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_HIGH)
         self.assertIn("gpt-5.5 structured parser output", parsed["parse_reason"])
+
+    async def test_llm_reject_keeps_high_confidence_local_card_alias_parse(self):
+        with patch("runtime_multi.generate_model_text", AsyncMock(return_value='{"intent":"reject"}')):
+            parsed = await parse_user_query("\u8fdb\u5316\u8d85\u9a91\u7684\u80dc\u7387\u662f\u591a\u5c11\uff1f", self.card_data, api_key="test-key")
+
+        self.assertEqual(parsed["intent"], "card_query")
+        self.assertEqual(parsed["card_name"], "Mega Knight Evolution")
+        self.assertEqual(parsed["parse_source"], "local_rule")
+        self.assertIn("rejected a high-confidence", parsed["parse_reason"])
 
     async def test_llm_non_json_response_keeps_local_parse_with_reason(self):
         fake_agent = AsyncMock(return_value="not json")

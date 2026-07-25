@@ -1,5 +1,59 @@
 # 皇室战争 Agent 启动手册
 
+## Daily Official Snapshot Mode (Current)
+
+Production data answers use one complete official Supercell snapshot per day.
+The target is fixed at 20,000 unique battle-log records. Collection starts at
+global leaderboard rank 1, follows ranking cursors in order through a candidate
+pool of up to 3,000 players, and stops as soon as the target is reached. A
+collection that times out, is rate limited, or returns fewer than 20,000 battles
+is discarded and never replaces the last published snapshot.
+
+The web UI has a persistent Current Data Snapshot panel. It shows the official
+source, current snapshot status, usable-battle count, collection timestamp,
+candidate leaderboard range, actual rank range scanned, usable player count,
+and deduplicated battle-log records. Loading this panel only reads the published
+snapshot; it never starts an API refresh.
+
+RAG is preheated in the background after a complete snapshot is restored or
+published. User requests never build embeddings. The panel also shows the RAG
+state: `ready` (dense plus BM25), `bm25_only` (same-snapshot lexical fallback),
+`building`, `not_ready`, or `failed`. The RAG corpus is derived from the 20,000
+raw battles as card/deck profiles, heuristic archetypes, card pairs, observed
+counter evidence, and deck matchups. Raw battles are retained for aggregation
+and audit, not embedded one document per battle. Preheating sends these derived
+documents to Ollama in bounded batches (`EMBED_BATCH_SIZE`, default `32`) and
+writes matching batches to Qdrant.
+
+After a successful collection the backend atomically updates these files:
+
+- `data/official_daily_snapshot.json`: canonical raw/aggregated official data.
+- `data/cards_meta.json` and `data/top_decks.json`: structured query datasets.
+- `card_deck_stats` inside `data/official_daily_snapshot.json`: per-card top exact deck variants, derived from all 20,000 raw battles. Queries such as "Electro Giant decks" use this index instead of searching only the global top-30 decks.
+- `data/rag_documents.json`: RAG evidence generated from the same snapshot.
+- `data/daily_snapshot_qdrant/`: persistent local vector index keyed by `snapshot_id`.
+
+`schedule.json` remains a separately maintained local schedule source. In strict
+mode, `cards_meta.json`, `top_decks.json`, and `rag_documents.json` are derived
+compatibility artifacts only: card/deck/RAG answer Skills receive data only from
+the complete `official_daily_snapshot.json`. `cards_meta.json` may still be read
+as a parser-only card-name and alias catalog before the first snapshot exists.
+
+On restart, the backend loads the last complete snapshot immediately. It only
+collects and vectorizes again when that snapshot is at least 24 hours old. A
+cold start with no published snapshot must finish the official collection before
+answering data or RAG questions. The refresh has a 30-minute maximum runtime;
+it normally stops earlier once 20,000 unique records have been collected. Configure only the
+credentials and port, then start normally:
+
+```powershell
+cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
+$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
+$env:EXTERNAL_API_REQUIRED = "true"
+$env:RUNTIME_PORT = "8095"
+powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
+```
+
 ## 项目做什么
 
 这是面向战队赛统筹场景的 Skill-based Agent。它先把自然语言问题解析为意图和槽位，再路由到赛程、卡牌、卡组、对比、备战或 RAG Skill。
@@ -12,6 +66,40 @@
 cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
+
+### Test Quality Gate
+
+`run_tests.ps1` first runs every unittest, including snapshot lifecycle, alias
+parsing, multi-intent routing, deterministic Skills, RAG evidence/preheat, and
+SSE streaming contracts. It then runs the static 348-case evaluation corpus.
+The corpus checks English card metrics, Chinese aliases, comparisons, card rank
+lookups, deck rankings, schedule queries, safe out-of-domain rejection, optional
+RAG routing, and multi-intent decomposition. Every execution writes a new
+timestamped JSON report in `evaluation/reports/`; failed rows retain the parsed
+payload, selected Skill, answer, and per-assertion errors. A failed evaluation
+returns a non-zero exit code, so do not delete a report to make a run appear
+healthy.
+
+Run only the deterministic evaluation or choose an explicit report name:
+
+```powershell
+.\.venv\Scripts\python.exe -m evaluation.run_eval
+.\.venv\Scripts\python.exe -m evaluation.run_eval --report evaluation\reports\manual-evaluation.json
+```
+
+When Ollama embeddings are available, the snapshot retrieval benchmark can be
+run separately. It evaluates 97 current-snapshot evidence queries across card,
+deck, archetype, pair, counter, and matchup documents and refuses to call a
+BM25-only result hybrid retrieval.
+
+```powershell
+.\.venv\Scripts\python.exe evaluation\retrieval_benchmark.py --report evaluation\reports\retrieval-benchmark.json
+```
+
+The default suite performs no external API calls. To add the real complete-chain
+smoke test after a strict backend is healthy, use the live API smoke-test command
+below. It verifies model parsing, official Supercell snapshot
+provenance, multi-intent execution, RAG model synthesis, SSE, and Trace data.
 
 ## 启动后端
 
@@ -59,11 +147,11 @@ powershell -ExecutionPolicy Bypass -File .\run_web.ps1
 帮我根据下一轮对手做备战建议。
 ```
 
-前端会用 SSE 逐步显示“解析、检索、模型生成、输出”状态；每次完成后会在“执行记录”中展示解析意图、实际 Skill、计划、检索模式、候选文档和耗时。面试讲解链路：`Query Parser -> Router -> Local JSON 或 RAG -> Model Synthesis -> Trace -> SSE UI`。
+前端会用 SSE 实时显示默认展开的“执行说明”：已验证的解析结论、实际 Skill 路由、官方快照、RAG 检索和模型生成状态。它不展示模型私有思维链。结构化结果按标题、指标、数据边界和来源分块输出；RAG 回答会转发模型的公开文本增量。上游不支持 token 流时，执行说明会标记“模型未提供 token 流”，并以完成后结果分段输出；Trace 的 `metadata.model_stream` 会明确标为 `streaming`、`fallback_chunked` 或 `unavailable`。面试讲解链路：`Query Parser -> Router -> Official Snapshot 或 RAG -> Model Synthesis -> Execution Events + Trace -> SSE UI`。
 
 ## 模型何时调用
 
-赛程、固定排名、单卡胜率等高置信度问题会直接读取本地 JSON，不会消耗模型调用。开放式环境分析和备战问题强制进入 RAG，再调用 OpenAI 模型综合证据；Ollama embedding 不可用时会在 3 秒后自动降级为 BM25。解析器和模型调用分别有 20 秒、120 秒上限，超时会返回明确错误。模型 Key 只从当前进程的 `OPENAI_API_KEY` 环境变量读取。
+赛程、固定排名、单卡胜率等高置信度问题会直接读取本地 JSON，不会消耗模型调用。开放式环境分析和备战问题强制进入 RAG，再调用 OpenAI 模型综合证据；Ollama embedding 不可用时会在 10 秒后自动降级为 BM25。解析器和模型调用分别有 45 秒、120 秒上限，超时会返回明确错误。模型 Key 只从当前进程的 `OPENAI_API_KEY` 环境变量读取。
 
 ## 失败先查
 
@@ -93,3 +181,59 @@ powershell -ExecutionPolicy Bypass -File .\run_web.ps1
 ## 本项目模型配置
 
 本项目使用 Codex 已配置的 OpenAI 兼容中转站：`https://crs.ruinique.com`。启动脚本会设置 `OPENAI_WIRE_API=responses`、`OPENAI_MODEL=gpt-5.5`，并让解析与 RAG 最终综合统一使用 `medium` 推理强度，以控制响应时间。真实凭证仍然只读取 `OPENAI_API_KEY` 环境变量，不写入项目文件。
+
+## 严格实时 API 模式
+
+默认后端启动脚本会启用 `EXTERNAL_API_REQUIRED=true`。这个模式用于真实环境，行为如下：
+
+- 每个问题先调用模型 API 做解析；模型未返回可验证结果时直接说明失败，不把本地规则伪装成模型解析。
+- 卡牌指标和卡组样本只来自每日一次的 20,000 场完整 Supercell 官方战斗日志快照。采集从全球排行榜第 1 名开始，按官方分页顺序扫描，候选池最多前 3000 名；达到 20,000 条唯一可用对局立即停止。Trace 和页面快照面板会展示实际场次、候选池、实际扫描排名、有效玩家、失败数和重复记录。未完成的采集绝不发布，也不读取 `cards_meta.json` 或 `top_decks.json` 充当实时结果。
+- 复合问题会分成最多四个子任务。例如“雷电巨人的使用率、胜率，还有当前环境主流卡组”会分别执行 `CardMetaSkill` 与 `EvidenceSynthesisSkill`；前者保留精确结构化数值，后者进行检索后调用模型 API 生成回答。
+- RAG 的检索文档仍是仓库中的知识库；`model_generation=api` 表示最终环境分析确实由模型 API 生成。`bm25_only` 仅表示本地向量 embedding 服务未运行，检索已回退到 BM25，不影响模型 API 或 Supercell API 的调用。
+
+先在当前 PowerShell 设置凭证和端口。不要在终端、截图或聊天中打印任何 Token：
+
+```powershell
+cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
+$env:OPENAI_API_KEY = Read-Host "OpenAI-compatible API key"
+$env:SUPERCELL_API_TOKEN = Read-Host "Supercell API token"
+$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
+$env:EXTERNAL_API_REQUIRED = "true"
+$env:SUPERCELL_LEADERBOARD_PLAYERS = "3000"  # 候选池上限，按第 1 名起顺序分页
+$env:RUNTIME_PORT = "8095"
+powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
+```
+
+网页不会提供采样档位切换。页面顶部的“Current Data Snapshot”面板只读展示当前已发布快照的来源、目标、排行榜候选池、实际扫描范围、采集时间、有效玩家和去重数量；打开页面不会触发新的官方 API 请求。
+
+受控采集默认每秒最多 2 个官方请求、严格按排行榜顺序逐名读取 battle log、遵守 `429` 响应的 `Retry-After`，且刷新最多运行 30 分钟。可通过 `SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND`、`SUPERCELL_HIGH_VOLUME_MAX_RETRIES`、`SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS` 调整；但不要提高请求速率来缩短采集。
+
+在另一个 PowerShell 验证严格模式已真正加载：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8095/health
+```
+
+预期至少包含：`live_data_enabled: True`、`external_api_required: True` 和 `model_api_configured: True`。
+
+## 真实 API 冒烟测试
+
+后端保持运行时，在第二个 PowerShell 执行：
+
+```powershell
+cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
+$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
+.\.venv\Scripts\python.exe evaluation\run_live_api_smoke.py
+```
+
+该测试实际发出一个实时卡牌榜请求和一个多意图请求，并断言 Trace 中存在：`parser_api.status=api`、`live_data.source=supercell_api`、`static_card_fallback_count=0`、`MultiIntentOrchestrator`、两个成功的子任务，以及 RAG 子任务的 `model_generation=api`。通过时输出 `LIVE_API_SMOKE_OK`。
+
+也可以把真实冒烟测试并入完整测试命令：
+
+```powershell
+$env:RUN_LIVE_API_SMOKE = "true"
+$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
+powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
+```
+
+离线开发需要验证 JSON 快照逻辑时，显式设为 `$env:EXTERNAL_API_REQUIRED = "false"`；这不是生产或实时演示配置。

@@ -1,5 +1,7 @@
 """OpenAI-compatible model gateway used by parsing and evidence synthesis."""
 
+from collections.abc import AsyncIterator
+
 from app_config import (
     OPENAI_BASE_URL,
     OPENAI_MODEL,
@@ -10,6 +12,56 @@ from app_config import (
 
 def uses_responses_api() -> bool:
     return OPENAI_WIRE_API == "responses"
+
+
+async def generate_model_text_stream(
+    *,
+    api_key: str,
+    instructions: str,
+    input_text: str,
+    reasoning_effort: str | None = None,
+) -> AsyncIterator[str]:
+    """Yield only public answer-text deltas from the configured model API."""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key, base_url=OPENAI_BASE_URL)
+    effort = reasoning_effort or OPENAI_REASONING_EFFORT
+    if uses_responses_api():
+        stream = await client.responses.create(
+            model=OPENAI_MODEL,
+            instructions=instructions,
+            input=input_text,
+            reasoning={"effort": effort},
+            store=False,
+            stream=True,
+        )
+        async for event in stream:
+            if getattr(event, "type", None) == "response.output_text.delta":
+                delta = getattr(event, "delta", "")
+                if isinstance(delta, str) and delta:
+                    yield delta
+        return
+
+    if OPENAI_WIRE_API == "chat_completions":
+        stream = await client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": input_text},
+            ],
+            reasoning_effort=effort,
+            stream=True,
+        )
+        async for chunk in stream:
+            choices = getattr(chunk, "choices", [])
+            if not choices:
+                continue
+            delta = getattr(getattr(choices[0], "delta", None), "content", "")
+            if isinstance(delta, str) and delta:
+                yield delta
+        return
+
+    raise ValueError(f"Unsupported OPENAI_WIRE_API: {OPENAI_WIRE_API}")
 
 
 async def generate_model_text(
