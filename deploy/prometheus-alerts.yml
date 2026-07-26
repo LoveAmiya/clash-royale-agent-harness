@@ -1,0 +1,29 @@
+groups:
+  - name: clash-royale-agent
+    rules:
+      - alert: ClashRoyaleAgentHighFailureRate
+        expr: >-
+          sum(rate(cr_agent_process_requests_total{outcome=~"failure|cancelled"}[10m]))
+          / clamp_min(sum(rate(cr_agent_process_requests_total[10m])), 0.001) > 0.10
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: Clash Royale Agent failure rate exceeds 10 percent
+          runbook: Check Grafana request outcomes, model circuit state, and snapshot/RAG alignment.
+      - alert: ClashRoyaleAgentSnapshotRAGMisaligned
+        expr: cr_agent_runtime_state{snapshot_aligned="false"} == 1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Active snapshot and RAG index are misaligned
+          runbook: Inspect /ready and RAG preheat logs; keep the last valid retriever active.
+      - alert: ClashRoyaleAgentModelCircuitOpen
+        expr: cr_agent_model_provider_circuit{state="open"} == 1
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Model provider circuit breaker is open
+          runbook: Inspect provider failures and wait for the configured half-open probe window.

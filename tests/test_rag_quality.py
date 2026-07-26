@@ -83,6 +83,52 @@ class RAGQualityTests(unittest.TestCase):
                 raise_on_failure=True,
             )
 
+    def test_numeric_validation_binds_metric_value_to_named_entity(self):
+        evidence = (
+            "卡牌：Electro Giant；使用率：4.3%；胜率：62.3%\n"
+            "卡牌：Poison；使用率：5.5%；胜率：51.2%"
+        )
+        report = validate_answer_grounding(
+            "Electro Giant 的使用率是 5.5%。参考 snapshot-1:card:Electro Giant",
+            evidence,
+            {"snapshot-1:card:Electro Giant"},
+        )
+        self.assertFalse(report["passed"])
+        self.assertIn("Electro Giant|usage_rate|5.5%", report["unsupported_numeric_claims"])
+
+    def test_quality_gate_samples_multiple_documents_per_source_type(self):
+        docs = [
+            {
+                "doc_id": f"snapshot-1:card:{index}",
+                "source_type": "card",
+                "text": f"card {index}",
+                "metadata": {"snapshot_id": "snapshot-1", "card_name": f"Card {index}"},
+            }
+            for index in range(3)
+        ] + [
+            {
+                "doc_id": f"snapshot-1:deck:{index}",
+                "source_type": "deck",
+                "text": f"deck {index}",
+                "metadata": {"snapshot_id": "snapshot-1", "deck_name": f"Deck {index}"},
+            }
+            for index in range(3)
+        ]
+        report = evaluate_rag_quality(
+            "snapshot-1",
+            docs,
+            _Retriever(docs, misses={"snapshot-1:card:0", "snapshot-1:card:1"}),
+            min_documents=6,
+            min_source_types=2,
+            min_probe_recall=0.6,
+            probes_per_source=3,
+        )
+        self.assertEqual(report["probe_count"], 6)
+        self.assertEqual(report["probe_recall_by_source"]["card"], 1 / 3)
+        self.assertGreaterEqual(report["probe_recall_at_5"], 0.6)
+        self.assertIn("source_probe_recall_below_threshold:card", report["failures"])
+        self.assertFalse(report["passed"])
+
     def test_quality_report_is_persisted_atomically_by_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = persist_quality_report({"snapshot_id": "snapshot/1", "passed": True}, Path(tmp))

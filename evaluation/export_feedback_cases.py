@@ -14,9 +14,40 @@ if str(ROOT) not in sys.path:
 from feedback_store import FeedbackStore
 
 
+_REVIEW_FIELDS = {
+    "review_status",
+    "reviewer_note",
+    "expected_intent",
+    "expected_skill",
+    "expected_fields",
+    "expected_subqueries",
+    "answer_contains",
+}
+
+
+def _load_existing_reviews(output: Path) -> dict[str, dict]:
+    if not output.exists():
+        return {}
+    reviewed: dict[str, dict] = {}
+    for line_number, line in enumerate(output.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid existing feedback candidate on line {line_number}") from exc
+        candidate_id = str(item.get("id", ""))
+        if candidate_id:
+            review_status = str(item.get("review_status", "pending"))
+            if review_status in {"approved", "rejected"}:
+                reviewed[candidate_id] = {key: item[key] for key in _REVIEW_FIELDS if key in item}
+    return reviewed
+
+
 def export_candidates(database: Path, output: Path, *, limit: int = 1000) -> int:
     records = FeedbackStore(database).list_correction_candidates(limit=limit)
     output.parent.mkdir(parents=True, exist_ok=True)
+    existing_reviews = _load_existing_reviews(output)
     lines = []
     for record in records:
         parsed = record["parsed"] if isinstance(record.get("parsed"), dict) else {}
@@ -39,10 +70,9 @@ def export_candidates(database: Path, output: Path, *, limit: int = 1000) -> int
                 for item in parsed.get("subqueries", [])
                 if isinstance(item, dict)
             ]
-        lines.append(
-            json.dumps(
-                {
-                    "id": f"feedback-{record['feedback_id']}",
+        candidate_id = f"feedback-{record['feedback_id']}"
+        candidate = {
+                    "id": candidate_id,
                     "category": "real_user_feedback",
                     "question": record["question"],
                     "expected_intent": parsed.get("intent"),
@@ -55,11 +85,9 @@ def export_candidates(database: Path, output: Path, *, limit: int = 1000) -> int
                     "snapshot_id": record["snapshot_id"],
                     "request_id": record["request_id"],
                     "review_status": "pending",
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-        )
+                }
+        candidate.update(existing_reviews.get(candidate_id, {}))
+        lines.append(json.dumps(candidate, ensure_ascii=False, sort_keys=True))
     output.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
     return len(lines)
 

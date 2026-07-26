@@ -246,14 +246,17 @@ when intentionally changing direct dependencies.
 ### Quality and Operations
 
 RAG activation is snapshot-scoped. A candidate index must pass document-count,
-source-coverage, uniqueness, and per-source Recall@5 checks before it can replace
-the active retriever. Generated RAG answers validate cited document IDs and
-unit-bearing numeric claims against retrieved evidence. Reports are stored under
-`data/rag_quality/` and are not committed.
+source-coverage, uniqueness, and deterministic multi-probe Recall@5 checks for
+each source type before it can replace the active retriever. Generated RAG
+answers validate cited document IDs and bind unit-bearing numeric claims to the
+matching metric and known card entity in retrieved evidence. Reports include
+overall and per-source recall under `data/rag_quality/` and are not committed.
 
-`/model/status` reports sanitized provider capabilities and circuit state.
-`/metrics` exports provider calls, circuit state, and real-stream versus chunked
-fallback counts. The default circuit opens after three consecutive provider
+`/model/status` reports sanitized provider capabilities, passive live-call
+detection time, and circuit state. No synthetic startup call consumes model
+quota. `/metrics` exports provider calls, circuit state, stream-mode counts, and
+per-mode first-content/total latency for real-stream, chunked fallback, and
+unavailable results. The default circuit opens after three consecutive provider
 failures and permits one half-open probe after 60 seconds.
 
 Completed answers can receive feedback through `POST /feedback` using only the
@@ -265,10 +268,18 @@ modify the deterministic corpus. Export candidates with:
 python -m evaluation.export_feedback_cases
 ```
 
+Reviewers explicitly mark stable candidates `review_status: approved` and run
+`python -m evaluation.run_eval --feedback-cases evaluation/feedback_candidates.jsonl`.
+Re-exporting candidates preserves existing review decisions, notes, and manually
+curated assertions instead of resetting them to pending.
+
 The production Compose topology runs one Supercell collector and two read-only
 API processes. Caddy load-balances the APIs and terminates local HTTPS;
 Prometheus/Grafana persist metrics and Loki/Promtail centralize structured JSON
-logs. Validate and launch it with:
+logs. Grafana provisions an operations dashboard at `http://127.0.0.1:3000`;
+Prometheus retains 30 days, Loki retains 7 days, and symptom alerts cover request
+failure rate, snapshot/RAG misalignment, and an open model circuit. Set a strong
+`GRAFANA_ADMIN_PASSWORD` before deployment. Validate and launch it with:
 
 ```powershell
 docker compose -f compose.production.yml config --quiet

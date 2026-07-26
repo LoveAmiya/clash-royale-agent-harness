@@ -1,0 +1,75 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum(rate(cr_agent_process_requests_total[5m]))", "legendFormat": "requests/sec", "refId": "A"}],
+      "title": "Process Request Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "sum(rate(cr_agent_process_requests_total{outcome=~\"failure|cancelled\"}[5m])) / clamp_min(sum(rate(cr_agent_process_requests_total[5m])), 0.001)", "legendFormat": "failure ratio", "refId": "A"}],
+      "title": "User-visible Failure Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "targets": [{"expr": "sum by (mode) (rate(cr_agent_model_stream_total[5m]))", "legendFormat": "{{mode}}", "refId": "A"}],
+      "title": "Model Stream Modes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 8},
+      "id": 4,
+      "targets": [{"expr": "cr_agent_runtime_state", "legendFormat": "snapshot={{snapshot_status}} rag={{rag_status}} aligned={{snapshot_aligned}}", "refId": "A"}],
+      "title": "Snapshot and RAG State",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 8},
+      "id": 5,
+      "targets": [{"expr": "cr_agent_snapshot_collection_collection_duration_seconds", "legendFormat": "collection duration", "refId": "A"}],
+      "title": "Last Snapshot Collection Duration",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 8},
+      "id": 6,
+      "targets": [{"expr": "cr_agent_model_provider_circuit", "legendFormat": "{{provider}} {{state}}", "refId": "A"}],
+      "title": "Model Circuit State",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 15},
+      "id": 7,
+      "options": {"showLabels": false, "showTime": true, "wrapLogMessage": true},
+      "targets": [{"expr": "{service=~\"api-1|api-2|collector|web|caddy\"}", "refId": "A"}],
+      "title": "Centralized Runtime Logs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["clash-royale", "rag", "production"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Clash Royale Agent Operations",
+  "uid": "clash-royale-agent-ops",
+  "version": 1
+}

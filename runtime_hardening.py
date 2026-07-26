@@ -154,11 +154,19 @@ class RuntimeMetrics:
             if outcome in {"success", "failure", "cancelled"}:
                 self._recent_process_durations.append(max(0.0, float(total_seconds)))
 
-    def record_model_stream(self, mode: str | None) -> None:
+    def record_model_stream(
+        self,
+        mode: str | None,
+        *,
+        first_content_seconds: float | None = None,
+        total_seconds: float | None = None,
+    ) -> None:
         if mode not in {"streaming", "fallback_chunked", "unavailable"}:
             return
         with self._lock:
             self._counters[("model_stream", mode)] += 1
+            self._record_optional_duration("model_stream_first_content", mode, first_content_seconds)
+            self._record_optional_duration("model_stream_duration", mode, total_seconds)
 
     def record_snapshot_collection(self, collection_metrics: dict | None) -> None:
         if not isinstance(collection_metrics, dict):
@@ -232,6 +240,14 @@ class RuntimeMetrics:
                     lines.append(f"{metric_name}_sum{{{metric_labels}}} {self._sums[(kind, *labels)]:.6f}")
                 elif kind == "model_stream":
                     lines.append(f"cr_agent_model_stream_total{{{self._labels(mode=labels[0])}}} {value}")
+                elif kind in {"model_stream_first_content", "model_stream_duration"}:
+                    metric_name = {
+                        "model_stream_first_content": "cr_agent_model_stream_first_content_seconds",
+                        "model_stream_duration": "cr_agent_model_stream_duration_seconds",
+                    }[kind]
+                    metric_labels = self._labels(mode=labels[0])
+                    lines.append(f"{metric_name}_count{{{metric_labels}}} {value}")
+                    lines.append(f"{metric_name}_sum{{{metric_labels}}} {self._sums[(kind, *labels)]:.6f}")
             for key, value in sorted(self._last_snapshot_metrics.items()):
                 lines.append(f"cr_agent_snapshot_collection_{key} {value}")
         lines.append(

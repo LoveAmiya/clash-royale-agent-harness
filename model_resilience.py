@@ -41,6 +41,7 @@ class ModelProviderGuard:
         self._last_failure_at: str | None = None
         self._capabilities = {"text_generation": "unknown", "streaming": "unknown"}
         self._capability_reason: str | None = None
+        self._capability_observed_at: str | None = None
         self._calls: Counter[tuple[str, str]] = Counter()
         self._stream_modes: Counter[str] = Counter()
 
@@ -91,6 +92,7 @@ class ModelProviderGuard:
         with self._lock:
             self._capabilities["streaming"] = "supported" if supported else "unsupported"
             self._capability_reason = reason
+            self._capability_observed_at = datetime.now(timezone.utc).isoformat()
 
     def record_stream_mode(self, mode: str) -> None:
         if mode not in {"streaming", "fallback_chunked", "unavailable"}:
@@ -112,6 +114,8 @@ class ModelProviderGuard:
                 "last_success_at": self._last_success_at,
                 "last_failure_at": self._last_failure_at,
                 "capabilities": dict(self._capabilities),
+                "capability_detection": "passive_live_call",
+                "capability_observed_at": self._capability_observed_at,
                 "stream_modes": {mode: int(self._stream_modes[mode]) for mode in ("streaming", "fallback_chunked", "unavailable")},
             }
 
@@ -121,6 +125,7 @@ class ModelProviderGuard:
             calls = dict(self._calls)
             stream_modes = dict(self._stream_modes)
             streaming_capability = self._capabilities["streaming"]
+            capability_observed = self._capability_observed_at is not None
         lines = [
             "# HELP cr_agent_model_provider_circuit Model provider circuit state.",
             "# TYPE cr_agent_model_provider_circuit gauge",
@@ -137,5 +142,9 @@ class ModelProviderGuard:
         capability_value = {"unknown": 0, "unsupported": 0, "supported": 1}.get(streaming_capability, 0)
         lines.append(
             f'cr_agent_model_stream_capability{{provider="{self.provider_id}",status="{streaming_capability}"}} {capability_value}'
+        )
+        lines.append(
+            f'cr_agent_model_stream_capability_observed{{provider="{self.provider_id}"}} '
+            f'{1 if capability_observed else 0}'
         )
         return "\n".join(lines) + "\n"

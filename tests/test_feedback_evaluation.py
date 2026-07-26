@@ -32,6 +32,15 @@ class FeedbackEvaluationTests(unittest.TestCase):
             self.assertEqual(approved[0]["expected_intent"], "card_query")
             self.assertEqual(approved[0]["expected_fields"]["card_name"], "Electro Giant")
 
+            candidate["answer_contains"] = ["样本边界"]
+            candidate["reviewer_note"] = "稳定断言，不包含会随快照变化的具体数值"
+            output.write_text(json.dumps(candidate, ensure_ascii=False) + "\n", encoding="utf-8")
+            self.assertEqual(export_candidates(database, output), 1)
+            reexported = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(reexported["review_status"], "approved")
+            self.assertEqual(reexported["answer_contains"], ["样本边界"])
+            self.assertEqual(reexported["reviewer_note"], candidate["reviewer_note"])
+
 
 if __name__ == "__main__":
     unittest.main()

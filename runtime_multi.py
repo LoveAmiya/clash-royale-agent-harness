@@ -62,6 +62,7 @@ from app_config import (
     RAG_MIN_DOCUMENTS,
     RAG_MIN_SOURCE_TYPES,
     RAG_MIN_PROBE_RECALL_PERCENT,
+    RAG_PROBES_PER_SOURCE,
     RAG_QUALITY_REPORT_DIR,
     FEEDBACK_DB_FILE,
     FEEDBACK_CACHE_MAX_ITEMS,
@@ -319,6 +320,7 @@ def preheat_retriever(app: FastAPI) -> HybridRetriever | None:
                 min_documents=RAG_MIN_DOCUMENTS,
                 min_source_types=RAG_MIN_SOURCE_TYPES,
                 min_probe_recall=RAG_MIN_PROBE_RECALL_PERCENT / 100.0,
+                probes_per_source=RAG_PROBES_PER_SOURCE,
             )
             persist_quality_report(quality_report, RAG_QUALITY_REPORT_DIR)
             app.state.rag_quality_report = quality_report
@@ -1608,13 +1610,17 @@ async def process(request: Request, payload: ProcessRequest | None = None):
                 outcome = "cancelled"
             for task in unfinished_tasks:
                 task.cancel()
+            finished_at = time.perf_counter()
             if answer_result is not None:
                 live_metadata = answer_result.metadata.get("live_data", {})
                 if isinstance(live_metadata, dict):
                     metrics.record_snapshot_collection(live_metadata.get("collection_metrics"))
-                metrics.record_model_stream(answer_result.metadata.get("model_stream"))
+                metrics.record_model_stream(
+                    answer_result.metadata.get("model_stream"),
+                    first_content_seconds=(first_content_at - started_at) if first_content_at else None,
+                    total_seconds=finished_at - started_at,
+                )
                 record_model_stream_mode(answer_result.metadata.get("model_stream"))
-            finished_at = time.perf_counter()
             metrics.record_process(
                 outcome=outcome,
                 total_seconds=finished_at - started_at,

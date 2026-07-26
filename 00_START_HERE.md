@@ -219,9 +219,9 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 
 ## 质量、反馈与生产拓扑
 
-每次 RAG 预热会先执行同一 `snapshot_id` 的离线质量门槛：文档数量、证据类型覆盖、文档 ID 唯一性和按类型检索 Recall@5。报告写入 `data/rag_quality/`；严格模式下未通过时不会切换 active retriever。RAG 最终回答还会校验引用文档 ID 和带单位数值是否能在检索证据中找到，失败时不输出未经支撑的开放结论。
+每次 RAG 预热会先执行同一 `snapshot_id` 的离线质量门槛：文档数量、证据类型覆盖、文档 ID 唯一性，以及每种证据默认均匀抽取 3 条的 Recall@5。`RAG_PROBES_PER_SOURCE` 可在 1-20 间调整；报告包含总体和分证据类型召回率并写入 `data/rag_quality/`，严格模式下未通过时不会切换 active retriever。RAG 最终回答还会校验引用文档 ID，并把带单位数值绑定到指标和已知卡牌实体；证据中 Poison 的数值不能被错配给 Electro Giant，失败时不输出未经支撑的开放结论。
 
-模型网关包含供应商熔断与能力探测。查看 `GET /model/status`；`GET /metrics` 包含模型调用结果、熔断状态及 `streaming`、`fallback_chunked`、`unavailable` 分布。连续失败默认 3 次后熔断 60 秒，半开只允许一个探测请求。
+模型网关包含供应商熔断与能力探测。能力由真实模型调用返回的公开文本 delta 被动探测，不在启动时额外消耗一次 API；首次调用前为 `unknown`。查看 `GET /model/status` 的探测方式和最近观测时间；`GET /metrics` 包含模型调用结果、熔断状态、`streaming`/`fallback_chunked`/`unavailable` 分布，以及各模式的首内容延迟和总耗时。连续失败默认 3 次后熔断 60 秒，半开只允许一个探测请求。
 
 前端每条完成回答提供“有帮助/需改进”。反馈只接受服务器已完成回答的 `request_id`，存入 `data/feedback.sqlite3`，不会自动改写正式评测集。导出待审核的真实问题候选：
 
@@ -229,7 +229,9 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 .\.venv\Scripts\python.exe -m evaluation.export_feedback_cases
 ```
 
-生产 Compose 将采集器与 API 分离：一个 `collector` 独占 Supercell 刷新，`api-1`、`api-2` 只读共享快照并各自构建内存 RAG，Caddy 负载均衡并提供 HTTPS，Prometheus/Grafana 与 Loki/Promtail 持久化指标和日志。
+审核人员编辑 `evaluation/feedback_candidates.jsonl`，只把确认过且不依赖快照具体数值的条目标记为 `review_status: approved`，再通过 `python -m evaluation.run_eval --feedback-cases evaluation/feedback_candidates.jsonl` 执行。重复导出会保留已有审核状态、审核备注与人工断言，不会把它们重置为 `pending`。
+
+生产 Compose 将采集器与 API 分离：一个 `collector` 独占 Supercell 刷新，`api-1`、`api-2` 只读共享快照并各自构建内存 RAG，Caddy 负载均衡并提供 HTTPS，Prometheus/Grafana 与 Loki/Promtail 持久化指标和日志。Grafana 在 `http://127.0.0.1:3000` 自动加载 “Clash Royale Agent Operations” 仪表盘；指标保留 30 天、日志保留 7 天，并预置失败率、快照/RAG 不一致和模型熔断告警规则。启动前必须设置强 `GRAFANA_ADMIN_PASSWORD`。
 
 ```powershell
 docker compose -f compose.production.yml config --quiet

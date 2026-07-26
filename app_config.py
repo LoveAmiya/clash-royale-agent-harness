@@ -84,6 +84,7 @@ RAG_QUALITY_GATE_ENABLED = os.getenv("RAG_QUALITY_GATE_ENABLED", "true").strip()
 RAG_MIN_DOCUMENTS = _bounded_int("RAG_MIN_DOCUMENTS", 100, 1, 100_000)
 RAG_MIN_SOURCE_TYPES = _bounded_int("RAG_MIN_SOURCE_TYPES", 6, 1, 100)
 RAG_MIN_PROBE_RECALL_PERCENT = _bounded_int("RAG_MIN_PROBE_RECALL_PERCENT", 60, 0, 100)
+RAG_PROBES_PER_SOURCE = _bounded_int("RAG_PROBES_PER_SOURCE", 3, 1, 20)
 RAG_QUALITY_REPORT_DIR = Path(os.getenv("RAG_QUALITY_REPORT_DIR", "data/rag_quality"))
 RAG_FACT_VALIDATION_ENABLED = os.getenv("RAG_FACT_VALIDATION_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 FEEDBACK_DB_FILE = Path(os.getenv("FEEDBACK_DB_FILE", "data/feedback.sqlite3"))

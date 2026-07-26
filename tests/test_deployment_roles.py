@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 import types
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -8,6 +9,8 @@ from hybrid_retriever import HybridRetriever
 
 
 class DeploymentRoleTests(unittest.IsolatedAsyncioTestCase):
+    ROOT = Path(__file__).resolve().parent.parent
+
     def test_in_memory_retriever_never_creates_persistent_manifest(self):
         docs = [{
             "doc_id": "snapshot-1:overview",
@@ -41,6 +44,28 @@ class DeploymentRoleTests(unittest.IsolatedAsyncioTestCase):
                 await runtime_multi.follow_published_snapshot_loop(app)
         self.assertEqual(app.state.live_snapshot["snapshot_id"], "new")
         preheat.assert_awaited_once()
+
+    def test_observability_stack_provisions_dashboard_alerts_and_persistent_storage(self):
+        compose = (self.ROOT / "compose.production.yml").read_text(encoding="utf-8")
+        prometheus = (self.ROOT / "deploy" / "prometheus.yml").read_text(encoding="utf-8")
+        dashboard_provider = (
+            self.ROOT / "deploy" / "grafana-provisioning" / "dashboards" / "dashboards.yml"
+        )
+        dashboard = (
+            self.ROOT / "deploy" / "grafana-provisioning" / "dashboards" / "clash-royale-agent.json"
+        )
+        alerts = self.ROOT / "deploy" / "prometheus-alerts.yml"
+
+        self.assertTrue(dashboard_provider.exists())
+        self.assertTrue(dashboard.exists())
+        self.assertTrue(alerts.exists())
+        self.assertIn("prometheus-alerts.yml", compose)
+        self.assertIn("prometheus_data:/prometheus", compose)
+        self.assertIn("loki_data:/loki", compose)
+        self.assertIn("grafana_data:/var/lib/grafana", compose)
+        self.assertIn("rule_files:", prometheus)
+        self.assertIn("ClashRoyaleAgentHighFailureRate", alerts.read_text(encoding="utf-8"))
+        self.assertIn("cr_agent_runtime_state", dashboard.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

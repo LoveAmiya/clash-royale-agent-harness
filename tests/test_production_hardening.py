@@ -140,10 +140,13 @@ class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
         metrics = RuntimeMetrics()
         metrics.record_http(route="/process", status_code=200, duration_seconds=0.25)
         metrics.record_process(outcome="success", total_seconds=0.5, first_execution_seconds=0.01, first_content_seconds=0.2)
+        metrics.record_model_stream("streaming", first_content_seconds=0.2, total_seconds=0.5)
         rendered = metrics.render_prometheus(snapshot_status="ready", rag_status="ready", snapshot_aligned=True)
 
         self.assertIn('cr_agent_http_requests_total{route="/process",status_class="2xx"} 1', rendered)
         self.assertIn('cr_agent_process_requests_total{outcome="success"} 1', rendered)
+        self.assertIn('cr_agent_model_stream_first_content_seconds_count{mode="streaming"} 1', rendered)
+        self.assertIn('cr_agent_model_stream_duration_seconds_sum{mode="streaming"} 0.500000', rendered)
         self.assertNotIn("request_id", rendered)
 
     async def test_sse_disconnect_cancels_answer_task_and_releases_quota(self):

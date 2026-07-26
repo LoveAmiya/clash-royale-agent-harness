@@ -45,10 +45,13 @@ class ModelResilienceTests(unittest.TestCase):
 
         snapshot = guard.snapshot()
         self.assertEqual(snapshot["capabilities"]["streaming"], "unsupported")
+        self.assertEqual(snapshot["capability_detection"], "passive_live_call")
+        self.assertIsNotNone(snapshot["capability_observed_at"])
         self.assertEqual(snapshot["stream_modes"]["fallback_chunked"], 1)
         rendered = guard.render_prometheus()
         self.assertIn('provider="provider-test"', rendered)
         self.assertNotIn("no_public_delta", rendered)
+        self.assertIn("cr_agent_model_stream_capability_observed", rendered)
 
 
 if __name__ == "__main__":

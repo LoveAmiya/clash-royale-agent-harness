@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Clash Royale Agent
+    orgId: 1
+    folder: Clash Royale Agent
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
