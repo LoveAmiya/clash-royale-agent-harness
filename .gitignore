@@ -35,6 +35,8 @@ outputs/
 data/daily_snapshot_qdrant/
 data/retrieval_benchmark_qdrant/
 data/official_daily_snapshot.json
+data/rag_quality/
+evaluation/feedback_candidates.jsonl
 
 .vscode/
 .idea/

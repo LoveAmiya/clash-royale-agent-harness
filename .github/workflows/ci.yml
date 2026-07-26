@@ -45,6 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag clash-royale-agent:${{ github.sha }} .
+      - run: docker compose -f compose.production.yml config --quiet
       - run: >
           docker run --detach --rm --name clash-royale-agent-ci --publish 8091:8091
           --env EXTERNAL_API_REQUIRED=false --env SUPERCELL_LIVE_DATA_ENABLED=false

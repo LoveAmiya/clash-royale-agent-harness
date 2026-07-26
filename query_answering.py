@@ -26,10 +26,12 @@ from app_config import (
     OPENAI_WIRE_API,
     MODEL_CALL_TIMEOUT_SECONDS,
     EXTERNAL_API_REQUIRED,
+    RAG_FACT_VALIDATION_ENABLED,
 )
 from harness.executor import SkillExecutor
 from hybrid_retriever import HybridRetriever
 from model_gateway import generate_model_text, generate_model_text_stream, uses_responses_api
+from rag_quality import GroundedStreamBuffer, GroundingValidationError, validate_answer_grounding
 from runtime_events import RuntimeEventEmitter
 from planner.planner import RuleBasedPlanner
 from query_parser import extract_text_content
@@ -183,6 +185,7 @@ async def build_rag_answer(
         return "我不知道，当前数据里没有足够可用的压缩上下文。\n参考来源：无"
 
     retrieved_context, refs_text = build_context_and_refs(compressed)
+    allowed_doc_ids = {str(item["doc"].get("doc_id")) for item in compressed}
 
     reviewer_instructions = """你是一个严格基于检索证据回答问题的助手。
 规则：
@@ -228,6 +231,7 @@ async def build_rag_answer(
                 detail="模型正在基于已检索证据输出公开文本。",
             )
             chunks: list[str] = []
+            stream_buffer = GroundedStreamBuffer(retrieved_context, allowed_doc_ids)
             try:
                 async with asyncio.timeout(MODEL_CALL_TIMEOUT_SECONDS):
                     async for delta in generate_model_text_stream(
@@ -237,7 +241,10 @@ async def build_rag_answer(
                         reasoning_effort=SYNTHESIS_REASONING_EFFORT,
                     ):
                         chunks.append(delta)
-                        await event_sink.content(delta, delta=True)
+                        for validated_chunk in stream_buffer.push(delta):
+                            await event_sink.content(validated_chunk, delta=True)
+                for validated_chunk in stream_buffer.finish():
+                    await event_sink.content(validated_chunk, delta=True)
                 answer = "".join(chunks).strip()
                 if not answer:
                     raise RuntimeError("model stream returned no public text")
@@ -267,8 +274,19 @@ async def build_rag_answer(
                     timeout=MODEL_CALL_TIMEOUT_SECONDS,
                 )
             else:
+                if allowed_doc_ids and not any(doc_id in answer for doc_id in allowed_doc_ids):
+                    reference_suffix = f"\n\n参考来源：\n{refs_text}"
+                    answer += reference_suffix
+                    await event_sink.content(reference_suffix, delta=True)
+                validation = validate_answer_grounding(
+                    answer,
+                    retrieved_context,
+                    allowed_doc_ids,
+                    raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
+                )
                 if metadata is not None:
                     metadata["model_stream"] = "streaming"
+                    metadata["grounding_validation"] = validation
                 await event_sink.execution(
                     step_id=f"{subquery_id}.generate",
                     phase="generate",
@@ -297,6 +315,16 @@ async def build_rag_answer(
             answer = extract_text_content(result)
             if metadata is not None:
                 metadata["model_stream"] = "fallback_chunked"
+        if allowed_doc_ids and not any(doc_id in answer for doc_id in allowed_doc_ids):
+            answer = f"{answer}\n\n参考来源：\n{refs_text}"
+        validation = validate_answer_grounding(
+            answer,
+            retrieved_context,
+            allowed_doc_ids,
+            raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
+        )
+        if metadata is not None:
+            metadata["grounding_validation"] = validation
         if event_sink is not None and stream_content:
             chunks = [answer[start : start + 80] for start in range(0, len(answer), 80)]
             for index, chunk in enumerate(chunks):
@@ -316,6 +344,12 @@ async def build_rag_answer(
         if metadata is not None:
             metadata["model_stream"] = "unavailable"
         return "模型在限定时间内未返回，未生成不可靠结论。请检查 OPENAI_MODEL、网络或稍后重试。\n参考来源：\n" + refs_text
+    except GroundingValidationError as exc:
+        if metadata is not None:
+            metadata["model_stream"] = "unavailable"
+            metadata["grounding_validation_error"] = str(exc)[:1000]
+        logger.warning("rag grounding validation failed detail=%s", str(exc)[:1000])
+        return "检索结论未通过引用或数值事实校验，因此未输出不可靠回答。\n参考来源：\n" + refs_text
     except Exception:
         if metadata is not None:
             metadata["model_stream"] = "unavailable"
@@ -398,6 +432,8 @@ async def build_evidence_synthesis_answer(
             f"{sources}"
         )
     retrieved_context, retrieval_refs = build_context_and_refs(compressed)
+    allowed_doc_ids = {str(item["doc"].get("doc_id")) for item in compressed}
+    grounding_evidence = f"{evidence}\n{retrieved_context}"
     reviewer_instructions = """你是皇室战争战队赛分析助手，使用中文回答。
 数据结论只能来自证据包或检索证据；策略建议只能基于检索到的通用战术原则，且必须标为推演。
 禁止虚构具体胜率、使用率、对手真实卡组、更新日期、卡牌组件或数据来源。
@@ -456,6 +492,7 @@ async def build_evidence_synthesis_answer(
                 detail="模型正在基于检索证据输出公开文本。",
             )
             chunks: list[str] = []
+            stream_buffer = GroundedStreamBuffer(grounding_evidence, allowed_doc_ids)
             try:
                 async with asyncio.timeout(MODEL_CALL_TIMEOUT_SECONDS):
                     async for delta in generate_model_text_stream(
@@ -465,7 +502,10 @@ async def build_evidence_synthesis_answer(
                         reasoning_effort=SYNTHESIS_REASONING_EFFORT,
                     ):
                         chunks.append(delta)
-                        await event_sink.content(delta, delta=True)
+                        for validated_chunk in stream_buffer.push(delta):
+                            await event_sink.content(validated_chunk, delta=True)
+                for validated_chunk in stream_buffer.finish():
+                    await event_sink.content(validated_chunk, delta=True)
                 answer = "".join(chunks).strip()
                 if not answer:
                     raise RuntimeError("model stream returned no public text")
@@ -525,6 +565,16 @@ async def build_evidence_synthesis_answer(
         if EXTERNAL_API_REQUIRED:
             raise RequiredExternalAPIError("RAG model API call failed: TimeoutError")
         answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
+    except GroundingValidationError as exc:
+        logger.warning("evidence grounding validation failed detail=%s", str(exc)[:1000])
+        if metadata is not None:
+            metadata["model_generation"] = "unavailable" if EXTERNAL_API_REQUIRED else "fallback_after_grounding_error"
+            metadata["model_failure_type"] = type(exc).__name__
+            metadata["model_stream"] = "unavailable"
+            metadata["grounding_validation_error"] = str(exc)[:1000]
+        if EXTERNAL_API_REQUIRED:
+            raise RequiredExternalAPIError("RAG model API call failed: GroundingValidationError") from exc
+        answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
     except Exception as exc:
         logger.exception("evidence synthesis model call failed")
         if metadata is not None:
@@ -535,6 +585,14 @@ async def build_evidence_synthesis_answer(
             raise RequiredExternalAPIError(f"RAG model API call failed: {type(exc).__name__}") from exc
         answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
     final_answer = f"{answer}\n\n参考来源：\n{sources}\n{retrieval_refs}"
+    grounding_validation = validate_answer_grounding(
+        final_answer,
+        grounding_evidence,
+        allowed_doc_ids,
+        raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
+    )
+    if metadata is not None:
+        metadata["grounding_validation"] = grounding_validation
     if event_sink is not None and stream_content:
         if not model_streamed:
             chunks = [answer[start : start + 80] for start in range(0, len(answer), 80)]

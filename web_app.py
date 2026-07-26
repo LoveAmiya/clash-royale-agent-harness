@@ -19,6 +19,7 @@ from app_config import BACKEND_URL, WEB_HOST, WEB_PORT
 app = FastAPI(title="CR Agent Web UI")
 LIVE_SAMPLE_SETTINGS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/settings/live-sample"
 SNAPSHOT_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/snapshot/status"
+FEEDBACK_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/feedback"
 
 
 HTML_PAGE = """
@@ -166,6 +167,20 @@ HTML_PAGE = """
       flex-direction: column;
       gap: 10px;
     }
+    .feedback-actions {
+      display: flex;
+      gap: 8px;
+      margin: 6px 0 0 4px;
+    }
+    .feedback-actions button {
+      padding: 6px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #fff;
+      color: #374151;
+      font-size: 12px;
+    }
+    .feedback-actions button:disabled { opacity: 0.55; cursor: default; }
     .sample-control {
       display: grid;
       gap: 4px;
@@ -590,6 +605,7 @@ HTML_PAGE = """
     }
 
     function handleSseEvent(event, agentBubble) {
+      if (event.request_id) agentBubble.dataset.requestId = event.request_id;
       if (event.object === "progress") {
         setLoading(true, event.label || "正在处理...");
         return;
@@ -614,6 +630,41 @@ HTML_PAGE = """
         setLoading(false, "");
         loadSnapshotStatus();
       }
+    }
+
+    async function sendFeedback(requestId, rating, correction = null) {
+      const response = await fetch("/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, rating, correction })
+      });
+      if (!response.ok) throw new Error(await response.text() || "反馈提交失败");
+    }
+
+    function addFeedbackControls(agentBubble) {
+      const requestId = agentBubble.dataset.requestId;
+      if (!requestId || agentBubble.parentElement.querySelector(".feedback-actions")) return;
+      const actions = document.createElement("div");
+      actions.className = "feedback-actions";
+      const positive = document.createElement("button");
+      positive.type = "button";
+      positive.textContent = "有帮助";
+      const negative = document.createElement("button");
+      negative.type = "button";
+      negative.textContent = "需改进";
+      actions.append(positive, negative);
+      agentBubble.parentElement.appendChild(actions);
+      const finish = () => actions.querySelectorAll("button").forEach(button => button.disabled = true);
+      positive.addEventListener("click", async () => {
+        try { await sendFeedback(requestId, "positive"); finish(); statusEl.textContent = "反馈已记录"; }
+        catch (err) { statusEl.textContent = err.message; }
+      });
+      negative.addEventListener("click", async () => {
+        const correction = window.prompt("请说明应如何改进（可取消）", "");
+        if (correction === null) return;
+        try { await sendFeedback(requestId, "negative", correction); finish(); statusEl.textContent = "纠错候选已记录"; }
+        catch (err) { statusEl.textContent = err.message; }
+      });
     }
 
     async function sendMessage() {
@@ -675,6 +726,7 @@ HTML_PAGE = """
         if (!agentBubble.textContent) {
           agentBubble.textContent = "未获取到回答。";
         }
+        if (streamCompleted) addFeedbackControls(agentBubble);
         setLoading(false, "");
       } catch (err) {
         agentBubble.textContent = "请求失败：" + err.message;
@@ -719,6 +771,12 @@ class ChatRequest(BaseModel):
 
 class LiveSampleSettingsRequest(BaseModel):
     target_battles: int
+
+
+class FeedbackProxyRequest(BaseModel):
+    request_id: str
+    rating: str
+    correction: str | None = None
 
 
 def sse_data(payload: dict) -> str:
@@ -784,6 +842,24 @@ async def get_snapshot_status():
         body = {"detail": "backend returned an invalid snapshot status response"}
     if response.status_code >= 400:
         raise HTTPException(status_code=response.status_code, detail=body.get("detail", "snapshot status request failed"))
+    return body
+
+
+@app.post("/feedback")
+async def submit_feedback(request: FeedbackProxyRequest):
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(FEEDBACK_URL, json=request.model_dump())
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail="backend feedback service is unavailable") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="backend feedback request failed") from exc
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"detail": "backend returned an invalid feedback response"}
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=body.get("detail", "feedback request failed"))
     return body
 
 

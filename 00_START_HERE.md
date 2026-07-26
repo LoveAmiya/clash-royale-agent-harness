@@ -42,7 +42,7 @@ as a parser-only card-name and alias catalog before the first snapshot exists.
 On restart, the backend loads the last complete snapshot immediately. It only
 collects and vectorizes again when that snapshot is at least 24 hours old. A
 cold start with no published snapshot must finish the official collection before
-answering data or RAG questions. The refresh has a 30-minute maximum runtime;
+answering data or RAG questions. The refresh has a 60-minute default maximum runtime;
 it normally stops earlier once 20,000 unique records have been collected. Configure only the
 credentials and port, then start normally:
 
@@ -216,6 +216,27 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 网页不会提供采样档位切换。页面顶部的“Current Data Snapshot”面板只读展示当前已发布快照的来源、目标、排行榜候选池、实际扫描范围、采集时间、有效玩家和去重数量；打开页面不会触发新的官方 API 请求。
 
 受控采集默认每秒最多 2 个官方请求、严格按排行榜顺序逐名读取 battle log、遵守 `429` 响应的 `Retry-After`，刷新预算默认 60 分钟。`SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS` 可在 60 秒到 7200 秒之间调整；生产建议保持 3600，网络较慢时可设为 7200。未达到 20,000 场的结果会被丢弃并进入 5/15/30 分钟递增冷却，期间继续服务上一次完整快照，不会立即重复抓取。
+
+## 质量、反馈与生产拓扑
+
+每次 RAG 预热会先执行同一 `snapshot_id` 的离线质量门槛：文档数量、证据类型覆盖、文档 ID 唯一性和按类型检索 Recall@5。报告写入 `data/rag_quality/`；严格模式下未通过时不会切换 active retriever。RAG 最终回答还会校验引用文档 ID 和带单位数值是否能在检索证据中找到，失败时不输出未经支撑的开放结论。
+
+模型网关包含供应商熔断与能力探测。查看 `GET /model/status`；`GET /metrics` 包含模型调用结果、熔断状态及 `streaming`、`fallback_chunked`、`unavailable` 分布。连续失败默认 3 次后熔断 60 秒，半开只允许一个探测请求。
+
+前端每条完成回答提供“有帮助/需改进”。反馈只接受服务器已完成回答的 `request_id`，存入 `data/feedback.sqlite3`，不会自动改写正式评测集。导出待审核的真实问题候选：
+
+```powershell
+.\.venv\Scripts\python.exe -m evaluation.export_feedback_cases
+```
+
+生产 Compose 将采集器与 API 分离：一个 `collector` 独占 Supercell 刷新，`api-1`、`api-2` 只读共享快照并各自构建内存 RAG，Caddy 负载均衡并提供 HTTPS，Prometheus/Grafana 与 Loki/Promtail 持久化指标和日志。
+
+```powershell
+docker compose -f compose.production.yml config --quiet
+docker compose -f compose.production.yml up --build -d
+```
+
+本机 Docker 出口 IP 未加入 Supercell 白名单时，不要启动容器内 `collector`。继续用 `run_backend.ps1` 的 `RUNTIME_ROLE=all` 在 Windows 采集；或单独以 `RUNTIME_ROLE=collector` 启动本机采集器，再启动 Compose 中除 `collector` 外的服务。开发用 Caddy 使用本地 CA，地址为 `https://localhost`；公网域名部署需把 `deploy/Caddyfile` 的 `tls internal` 改为受信任证书或 ACME 配置。
 
 在另一个 PowerShell 验证严格模式已真正加载：
 

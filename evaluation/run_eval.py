@@ -36,6 +36,19 @@ def load_cases() -> list[dict]:
     return cases
 
 
+def load_approved_feedback_cases(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    cases = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        case = json.loads(line)
+        if case.get("review_status") == "approved":
+            cases.append(case)
+    return cases
+
+
 def build_context(case: dict, parsed: dict, schedule_data: list[dict], deck_data: list[dict], card_data: list[dict]) -> SkillContext:
     return SkillContext(
         user_text=case["question"],
@@ -239,9 +252,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="JSON report path. Defaults to a new timestamped file under evaluation/reports/.",
     )
+    parser.add_argument(
+        "--feedback-cases",
+        type=Path,
+        default=None,
+        help="Optional reviewed feedback JSONL. Only rows with review_status=approved are evaluated.",
+    )
     args = parser.parse_args(argv)
     report_path = args.report or default_report_path()
-    report = run_evaluation(report_path=report_path)
+    cases = load_cases()
+    if args.feedback_cases is not None:
+        cases.extend(load_approved_feedback_cases(args.feedback_cases))
+    report = run_evaluation(cases=cases, report_path=report_path)
     print_report(report)
     print(f"\nEvaluation report: {report_path}")
     return 1 if report["summary"]["failed_cases"] else 0

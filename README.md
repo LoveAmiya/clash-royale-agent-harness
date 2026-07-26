@@ -17,11 +17,15 @@ The system combines rule-based query parsing, skill routing, local JSON groundin
 - Structured query parsing with optional LLM fallback
 - Multi-intent decomposition with per-subquery execution and partial results
 - Skill registry and skill routing
-- Grounded answers from local schedule, deck, and card JSON data
+- Grounded answers from the local schedule and one complete official daily snapshot
 - Optional RAG path for open-ended preparation questions
 - Traceable execution harness
 - Local evaluation suite and unit tests
 - Dockerfile and PowerShell helper scripts
+- Snapshot-scoped RAG quality gates and grounded numeric/citation validation
+- Model-provider circuit breaker and stream capability telemetry
+- Request-bound feedback and reviewable continuous-evaluation candidates
+- Split collector/API deployment with Caddy, Prometheus, Grafana, Loki, and Promtail
 
 ### Repository Layout
 
@@ -238,6 +242,42 @@ Dependencies are maintained in `requirements.in` and compiled into
 `requirements.lock.txt`. Docker and CI install the lock file; regenerate it with
 `pip-compile --strip-extras --output-file requirements.lock.txt requirements.in`
 when intentionally changing direct dependencies.
+
+### Quality and Operations
+
+RAG activation is snapshot-scoped. A candidate index must pass document-count,
+source-coverage, uniqueness, and per-source Recall@5 checks before it can replace
+the active retriever. Generated RAG answers validate cited document IDs and
+unit-bearing numeric claims against retrieved evidence. Reports are stored under
+`data/rag_quality/` and are not committed.
+
+`/model/status` reports sanitized provider capabilities and circuit state.
+`/metrics` exports provider calls, circuit state, and real-stream versus chunked
+fallback counts. The default circuit opens after three consecutive provider
+failures and permits one half-open probe after 60 seconds.
+
+Completed answers can receive feedback through `POST /feedback` using only the
+server-issued `request_id`. The browser exposes helpful/needs-improvement
+controls. Corrections remain review candidates in SQLite and never silently
+modify the deterministic corpus. Export candidates with:
+
+```powershell
+python -m evaluation.export_feedback_cases
+```
+
+The production Compose topology runs one Supercell collector and two read-only
+API processes. Caddy load-balances the APIs and terminates local HTTPS;
+Prometheus/Grafana persist metrics and Loki/Promtail centralize structured JSON
+logs. Validate and launch it with:
+
+```powershell
+docker compose -f compose.production.yml config --quiet
+docker compose -f compose.production.yml up --build -d
+```
+
+Only run the containerized collector when its stable public egress IP is in the
+Supercell key allowlist. On this project's Windows setup, native collection plus
+containerized read-only API services remains the safer topology.
 
 For local runs, set `OPENAI_API_KEY` in the current PowerShell session before starting the backend. Do not put a real key in source code or commit it to Git. The default runtime uses the configured OpenAI-compatible relay with the Responses API, `gpt-5.5`, and `medium` reasoning effort for parsing and final synthesis.
 

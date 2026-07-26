@@ -30,6 +30,13 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 RUNTIME_HOST = os.getenv("RUNTIME_HOST", "127.0.0.1").strip()
 RUNTIME_PORT = int(os.getenv("RUNTIME_PORT", "8091"))
+RUNTIME_ROLE = os.getenv("RUNTIME_ROLE", "all").strip().lower()
+if RUNTIME_ROLE not in {"all", "api", "collector"}:
+    RUNTIME_ROLE = "all"
+SNAPSHOT_FOLLOWER_POLL_SECONDS = max(5, min(int(os.getenv("SNAPSHOT_FOLLOWER_POLL_SECONDS", "30")), 3600))
+RAG_INDEX_MODE = os.getenv("RAG_INDEX_MODE", "persistent").strip().lower()
+if RAG_INDEX_MODE not in {"persistent", "memory"}:
+    RAG_INDEX_MODE = "persistent"
 
 WEB_HOST = os.getenv("WEB_HOST", "127.0.0.1").strip()
 WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
@@ -60,6 +67,11 @@ EMBED_BATCH_SIZE = max(1, min(int(os.getenv("EMBED_BATCH_SIZE", "32")), 128))
 PARSER_CALL_TIMEOUT_SECONDS = float(os.getenv("PARSER_CALL_TIMEOUT_SECONDS", "45"))
 # A bounded timeout keeps slow relay calls from leaving an SSE request pending forever.
 MODEL_CALL_TIMEOUT_SECONDS = float(os.getenv("MODEL_CALL_TIMEOUT_SECONDS", "120"))
+MODEL_CIRCUIT_FAILURE_THRESHOLD = _bounded_int("MODEL_CIRCUIT_FAILURE_THRESHOLD", 3, 1, 20)
+MODEL_CIRCUIT_RECOVERY_SECONDS = max(
+    1.0,
+    min(float(os.getenv("MODEL_CIRCUIT_RECOVERY_SECONDS", "60")), 3600.0),
+)
 
 RETRIEVAL_TOP_K_BM25 = int(os.getenv("RETRIEVAL_TOP_K_BM25", "10"))
 RETRIEVAL_TOP_K_DENSE = int(os.getenv("RETRIEVAL_TOP_K_DENSE", "10"))
@@ -68,6 +80,16 @@ RETRIEVAL_ALPHA = float(os.getenv("RETRIEVAL_ALPHA", "0.5"))
 RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "4"))
 COMPRESS_MAX_ITEMS = int(os.getenv("COMPRESS_MAX_ITEMS", "4"))
 COMPRESS_CHAR_BUDGET = int(os.getenv("COMPRESS_CHAR_BUDGET", "1200"))
+RAG_QUALITY_GATE_ENABLED = os.getenv("RAG_QUALITY_GATE_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+RAG_MIN_DOCUMENTS = _bounded_int("RAG_MIN_DOCUMENTS", 100, 1, 100_000)
+RAG_MIN_SOURCE_TYPES = _bounded_int("RAG_MIN_SOURCE_TYPES", 6, 1, 100)
+RAG_MIN_PROBE_RECALL_PERCENT = _bounded_int("RAG_MIN_PROBE_RECALL_PERCENT", 60, 0, 100)
+RAG_QUALITY_REPORT_DIR = Path(os.getenv("RAG_QUALITY_REPORT_DIR", "data/rag_quality"))
+RAG_FACT_VALIDATION_ENABLED = os.getenv("RAG_FACT_VALIDATION_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+FEEDBACK_DB_FILE = Path(os.getenv("FEEDBACK_DB_FILE", "data/feedback.sqlite3"))
+FEEDBACK_CACHE_MAX_ITEMS = _bounded_int("FEEDBACK_CACHE_MAX_ITEMS", 512, 16, 10_000)
+FEEDBACK_CACHE_TTL_SECONDS = max(60, min(int(os.getenv("FEEDBACK_CACHE_TTL_SECONDS", "3600")), 86_400))
+FEEDBACK_MAX_CORRECTION_CHARS = _bounded_int("FEEDBACK_MAX_CORRECTION_CHARS", 4000, 64, 20_000)
 
 # Official live data is opt-in because Supercell API credentials are IP-restricted.
 SUPERCELL_API_TOKEN = os.getenv("SUPERCELL_API_TOKEN", "").strip()

@@ -91,6 +91,26 @@ class RAGPreheatTests(unittest.TestCase):
         self.assertEqual(app.state.rag_snapshot_id, "official-old")
         self.assertEqual(app.state.rag_status, "failed")
 
+    def test_quality_gate_rejects_new_index_without_switching_old_retriever(self):
+        app = self.make_app()
+        candidate = types.SimpleNamespace(snapshot_id="official-new", dense_available=True)
+        failed_report = {"snapshot_id": "official-new", "passed": False, "failures": ["probe_recall_below_threshold"]}
+
+        with patch.object(runtime_multi, "EXTERNAL_API_REQUIRED", True), patch.object(
+            runtime_multi, "RAG_QUALITY_GATE_ENABLED", True
+        ), patch.object(runtime_multi, "load_docs", return_value=snapshot_docs("official-new")), patch.object(
+            runtime_multi, "HybridRetriever", return_value=candidate
+        ), patch.object(runtime_multi, "evaluate_rag_quality", return_value=failed_report), patch.object(
+            runtime_multi, "persist_quality_report"
+        ):
+            retriever = runtime_multi.preheat_retriever(app)
+
+        self.assertIsNone(retriever)
+        self.assertEqual(app.state.retriever, "old-retriever")
+        self.assertEqual(app.state.rag_snapshot_id, "official-old")
+        self.assertEqual(app.state.rag_status, "failed")
+        self.assertEqual(app.state.rag_quality_report, failed_report)
+
     def test_snapshot_status_exposes_rag_state_without_exposing_internal_error_details(self):
         app = self.make_app()
         app.state.rag_status = "building"

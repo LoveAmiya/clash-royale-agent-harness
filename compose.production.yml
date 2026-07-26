@@ -1,0 +1,112 @@
+x-api-common: &api-common
+  build: .
+  command: ["uvicorn", "runtime_multi:app", "--host", "0.0.0.0", "--port", "8091", "--workers", "1", "--log-config", "/app/deploy/uvicorn-log.json"]
+  environment:
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    SUPERCELL_API_TOKEN: ${SUPERCELL_API_TOKEN:-}
+    EXTERNAL_API_REQUIRED: ${EXTERNAL_API_REQUIRED:-true}
+    RUNTIME_ROLE: api
+    RAG_INDEX_MODE: memory
+    RUNTIME_HOST: 0.0.0.0
+    RUNTIME_PORT: 8091
+    LOG_FORMAT: json
+  volumes:
+    - ./data:/app/data
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3)"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+
+services:
+  api-1:
+    <<: *api-common
+
+  api-2:
+    <<: *api-common
+
+  collector:
+    build: .
+    command: ["python", "runtime_multi.py"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SUPERCELL_API_TOKEN: ${SUPERCELL_API_TOKEN:-}
+      EXTERNAL_API_REQUIRED: ${EXTERNAL_API_REQUIRED:-true}
+      RUNTIME_ROLE: collector
+      RUNTIME_HOST: 0.0.0.0
+      RUNTIME_PORT: 8092
+      LOG_FORMAT: json
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  web:
+    build: .
+    command: ["python", "web_app.py"]
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      BACKEND_URL: http://caddy/api/process
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-https://localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, api-1, api-2]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.4.2
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes:
+      - ./deploy/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./deploy/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_positions:/positions
+    depends_on: [loki]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+    volumes:
+      - ./deploy/grafana-provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus, loki]
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  prometheus_data:
+  loki_data:
+  promtail_positions:
+  grafana_data:

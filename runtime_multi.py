@@ -26,6 +26,9 @@ from app_config import (
     CARDS_META_FILE,
     RUNTIME_HOST,
     RUNTIME_PORT,
+    RUNTIME_ROLE,
+    SNAPSHOT_FOLLOWER_POLL_SECONDS,
+    RAG_INDEX_MODE,
     SCHEDULE_FILE,
     OPENAI_CLIENT_KWARGS,
     OPENAI_MODEL,
@@ -55,9 +58,26 @@ from app_config import (
     MAX_REQUEST_BODY_BYTES,
     PROCESS_MAX_CONCURRENT,
     PROCESS_RATE_LIMIT_PER_MINUTE,
+    RAG_QUALITY_GATE_ENABLED,
+    RAG_MIN_DOCUMENTS,
+    RAG_MIN_SOURCE_TYPES,
+    RAG_MIN_PROBE_RECALL_PERCENT,
+    RAG_QUALITY_REPORT_DIR,
+    FEEDBACK_DB_FILE,
+    FEEDBACK_CACHE_MAX_ITEMS,
+    FEEDBACK_CACHE_TTL_SECONDS,
+    FEEDBACK_MAX_CORRECTION_CHARS,
 )
+from feedback_store import FeedbackStore, RecentAnswerCache
 from hybrid_retriever import HybridRetriever, load_docs
-from model_gateway import generate_model_text
+from logging_config import configure_logging
+from model_gateway import (
+    generate_model_text,
+    get_model_provider_status,
+    record_model_stream_mode,
+    render_model_provider_metrics,
+)
+from rag_quality import RAGQualityGateError, evaluate_rag_quality, persist_quality_report
 from runtime_events import RuntimeEventEmitter
 from runtime_hardening import ProcessQuota, RuntimeMetrics, authorize_admin, normalize_request_id, redact_for_client
 from supercell_live import SupercellAPIClient
@@ -107,6 +127,12 @@ class ProcessRequest(BaseModel):
 
 class LiveSampleSettingsRequest(BaseModel):
     target_battles: int
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str
+    rating: str
+    correction: str | None = None
 
 
 def get_user_text(request: ProcessRequest) -> str:
@@ -282,9 +308,22 @@ def preheat_retriever(app: FastAPI) -> HybridRetriever | None:
         rag_docs = load_docs()
         if not rag_docs or any(doc.get("metadata", {}).get("snapshot_id") != snapshot_id for doc in rag_docs):
             raise ValueError("RAG documents do not match the active official daily snapshot")
-        candidate = HybridRetriever(rag_docs)
+        candidate = HybridRetriever(rag_docs, in_memory=RAG_INDEX_MODE == "memory")
         if candidate.snapshot_id != snapshot_id:
             raise ValueError("built retriever does not match the active official daily snapshot")
+        if RAG_QUALITY_GATE_ENABLED and EXTERNAL_API_REQUIRED:
+            quality_report = evaluate_rag_quality(
+                snapshot_id,
+                rag_docs,
+                candidate,
+                min_documents=RAG_MIN_DOCUMENTS,
+                min_source_types=RAG_MIN_SOURCE_TYPES,
+                min_probe_recall=RAG_MIN_PROBE_RECALL_PERCENT / 100.0,
+            )
+            persist_quality_report(quality_report, RAG_QUALITY_REPORT_DIR)
+            app.state.rag_quality_report = quality_report
+            if not quality_report["passed"]:
+                raise RAGQualityGateError("RAG index did not meet the configured snapshot quality gate")
         if _active_snapshot_id(app) != snapshot_id:
             # A newer snapshot was published while embedding. Do not replace it
             # with a retriever built for an older evidence boundary.
@@ -429,6 +468,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
                 "status": "not_required" if not SUPERCELL_LIVE_DATA_ENABLED else getattr(app.state, "rag_status", "not_ready"),
                 "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
                 "document_counts": {},
+                "quality": getattr(app.state, "rag_quality_report", None),
             },
             "rag_status": "not_required" if not SUPERCELL_LIVE_DATA_ENABLED else getattr(app.state, "rag_status", "not_ready"),
             "data_sources": {
@@ -469,6 +509,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             "status": getattr(app.state, "rag_status", "not_ready"),
             "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
             "document_counts": snapshot.get("rag_document_counts", {}),
+            "quality": getattr(app.state, "rag_quality_report", None),
         },
         "rag_status": getattr(app.state, "rag_status", "not_ready"),
         "data_sources": {
@@ -509,6 +550,9 @@ def get_readiness_status(
         blockers.append("runtime_initializing")
     if strict and not model_configured:
         blockers.append("model_api_unconfigured")
+    model_provider = get_model_provider_status()
+    if strict and model_provider.get("circuit_state") == "open":
+        blockers.append("model_provider_circuit_open")
     if strict and not snapshot_usable:
         blockers.append("official_snapshot_unavailable")
     if snapshot_usable and snapshot_status in {"refreshing", "cooldown", "stale"}:
@@ -535,6 +579,7 @@ def get_readiness_status(
         "http_status": http_status,
         "initialized": initialized,
         "model_api_configured": model_configured,
+        "model_provider": model_provider,
         "external_api_required": strict,
         "snapshot_status": snapshot_status,
         "snapshot_usable": snapshot_usable,
@@ -704,7 +749,7 @@ async def refresh_live_snapshot_loop(app: FastAPI) -> None:
     while True:
         snapshot = await asyncio.to_thread(ensure_live_snapshot, app)
         snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
-        if snapshot_id and snapshot_id != getattr(app.state, "rag_snapshot_id", None):
+        if RUNTIME_ROLE != "collector" and snapshot_id and snapshot_id != getattr(app.state, "rag_snapshot_id", None):
             await preheat_retriever_in_background(app)
         if getattr(app.state, "live_refresh_status", None) == "cooldown":
             delay = max(60.0, getattr(app.state, "live_cooldown_until", 0.0) - time.monotonic())
@@ -714,6 +759,21 @@ async def refresh_live_snapshot_loop(app: FastAPI) -> None:
             age_seconds = snapshot_age_seconds(snapshot) or 0.0
             delay = max(1.0, DAILY_REFRESH_INTERVAL.total_seconds() - age_seconds)
         await asyncio.sleep(delay)
+
+
+async def follow_published_snapshot_loop(app: FastAPI) -> None:
+    """Reload atomically published snapshots without ever contacting Supercell."""
+    while True:
+        current_id = _active_snapshot_id(app)
+        published = await asyncio.to_thread(load_published_snapshot, DATA_DIR)
+        published_id = published.get("snapshot_id") if isinstance(published, dict) else None
+        if published_id and published_id != current_id:
+            restore_published_snapshot(app)
+            app.state.retriever = None
+            app.state.rag_snapshot_id = None
+            app.state.rag_status = "not_ready"
+            await preheat_retriever_in_background(app)
+        await asyncio.sleep(SNAPSHOT_FOLLOWER_POLL_SECONDS)
 
 
 async def refresh_live_snapshot_once(app: FastAPI) -> None:
@@ -1071,6 +1131,15 @@ async def emit_semantic_content(event_sink: RuntimeEventEmitter, text: str) -> N
 async def lifespan(app: FastAPI):
     app.state.initialized = False
     app.state.runtime_metrics = RuntimeMetrics()
+    app.state.recent_answers = RecentAnswerCache(
+        max_items=FEEDBACK_CACHE_MAX_ITEMS,
+        ttl_seconds=FEEDBACK_CACHE_TTL_SECONDS,
+    )
+    app.state.feedback_store = FeedbackStore(
+        FEEDBACK_DB_FILE,
+        max_correction_chars=FEEDBACK_MAX_CORRECTION_CHARS,
+        answer_ttl_seconds=FEEDBACK_CACHE_TTL_SECONDS,
+    )
     app.state.process_quota = ProcessQuota(
         max_concurrent=PROCESS_MAX_CONCURRENT,
         requests_per_minute=PROCESS_RATE_LIMIT_PER_MINUTE,
@@ -1088,6 +1157,7 @@ async def lifespan(app: FastAPI):
     app.state.rag_snapshot_id = None
     app.state.rag_status = "not_required"
     app.state.rag_error = None
+    app.state.rag_quality_report = None
     app.state.rag_preheat_lock = threading.Lock()
     app.state.rag_preheat_task = None
     app.state.live_snapshot = None
@@ -1109,10 +1179,16 @@ async def lifespan(app: FastAPI):
         len(app.state.top_decks_data),
         len(app.state.cards_meta_data),
     )
-    if SUPERCELL_LIVE_DATA_ENABLED and SUPERCELL_API_TOKEN:
+    if RUNTIME_ROLE == "api":
         app.state.rag_status = "not_ready"
         restore_published_snapshot(app)
         if getattr(app.state, "live_snapshot", None) is not None:
+            app.state.rag_preheat_task = asyncio.create_task(preheat_retriever_in_background(app))
+        app.state.live_refresh_task = asyncio.create_task(follow_published_snapshot_loop(app))
+    elif SUPERCELL_LIVE_DATA_ENABLED and SUPERCELL_API_TOKEN:
+        app.state.rag_status = "not_ready"
+        restore_published_snapshot(app)
+        if RUNTIME_ROLE != "collector" and getattr(app.state, "live_snapshot", None) is not None:
             app.state.rag_status = "not_ready"
             app.state.rag_preheat_task = asyncio.create_task(preheat_retriever_in_background(app))
         app.state.live_refresh_task = asyncio.create_task(refresh_live_snapshot_loop(app))
@@ -1198,7 +1274,13 @@ async def health():
         "status": "healthy",
         "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
         "runtime_file": str(Path(__file__).resolve()),
-        "live_data_enabled": SUPERCELL_LIVE_DATA_ENABLED and bool(SUPERCELL_API_TOKEN),
+        "runtime_role": RUNTIME_ROLE,
+        "live_data_enabled": (
+            RUNTIME_ROLE in {"all", "collector"}
+            and SUPERCELL_LIVE_DATA_ENABLED
+            and bool(SUPERCELL_API_TOKEN)
+        ),
+        "official_collection_enabled": RUNTIME_ROLE in {"all", "collector"},
         "external_api_required": EXTERNAL_API_REQUIRED,
         "model_api_configured": bool(os.getenv("OPENAI_API_KEY")),
         "live_sample_target_battles": get_live_sample_target(app),
@@ -1210,6 +1292,12 @@ async def ready():
     readiness = get_readiness_status(app)
     payload = {key: value for key, value in readiness.items() if key != "http_status"}
     return JSONResponse(status_code=readiness["http_status"], content=payload)
+
+
+@app.get("/model/status")
+async def model_status():
+    """Expose sanitized provider health and detected capabilities."""
+    return get_model_provider_status()
 
 
 @app.get("/metrics")
@@ -1224,6 +1312,7 @@ async def metrics():
         rag_status=rag_status,
         snapshot_aligned=bool(snapshot_id and snapshot_id == getattr(app.state, "rag_snapshot_id", None)),
     )
+    body += render_model_provider_metrics()
     return PlainTextResponse(body, media_type="text/plain; version=0.0.4")
 
 
@@ -1235,6 +1324,34 @@ async def get_live_sample_settings_endpoint():
 @app.get("/snapshot/status")
 async def get_snapshot_status_endpoint():
     return get_live_snapshot_status(app)
+
+
+@app.post("/feedback")
+async def submit_feedback(payload: FeedbackRequest):
+    cache = getattr(app.state, "recent_answers", None)
+    store = getattr(app.state, "feedback_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="feedback service is initializing")
+    try:
+        answer = (cache.get(payload.request_id) if cache is not None else None) or store.get_answer(payload.request_id)
+        record = store.submit(
+            answer=answer,
+            rating=payload.rating,
+            correction=payload.correction,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "recorded", **record}
+
+
+@app.get("/feedback/stats")
+async def feedback_stats():
+    store = getattr(app.state, "feedback_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="feedback service is initializing")
+    return store.stats()
 
 
 @app.put("/settings/live-sample")
@@ -1381,6 +1498,22 @@ async def process(request: Request, payload: ProcessRequest | None = None):
 
         answer_result.metadata["request_id"] = request_id
         answer_text = answer_result.answer
+        recent_answers = getattr(app.state, "recent_answers", None)
+        feedback_store = getattr(app.state, "feedback_store", None)
+        answer_record = None
+        if recent_answers is not None:
+            snapshot = getattr(app.state, "live_snapshot", None)
+            answer_record = {
+                "request_id": request_id,
+                "question": user_text,
+                "answer": answer_text,
+                "snapshot_id": snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None,
+                "parsed": answer_result.parsed,
+                "selected_skill": answer_result.selected_skill,
+            }
+            recent_answers.put(**answer_record)
+        if feedback_store is not None and answer_record is not None:
+            feedback_store.register_answer(answer_record)
         if event_sink.content_count == 0:
             yield encode(
                 {
@@ -1480,6 +1613,7 @@ async def process(request: Request, payload: ProcessRequest | None = None):
                 if isinstance(live_metadata, dict):
                     metrics.record_snapshot_collection(live_metadata.get("collection_metrics"))
                 metrics.record_model_stream(answer_result.metadata.get("model_stream"))
+                record_model_stream_mode(answer_result.metadata.get("model_stream"))
             finished_at = time.perf_counter()
             metrics.record_process(
                 outcome=outcome,
@@ -1501,10 +1635,7 @@ async def process(request: Request, payload: ProcessRequest | None = None):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_logging()
     import uvicorn
 
     # Pass the in-memory application so Windows does not spawn a second interpreter

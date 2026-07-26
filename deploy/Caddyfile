@@ -1,0 +1,18 @@
+(routes) {
+	encode zstd gzip
+
+	handle_path /api/* {
+		reverse_proxy api-1:8091 api-2:8091
+	}
+
+	reverse_proxy web:8080
+}
+
+http://caddy {
+	import routes
+}
+
+{$SITE_ADDRESS:https://localhost} {
+	tls internal
+	import routes
+}

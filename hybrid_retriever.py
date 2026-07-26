@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 class HybridRetriever:
     """Build BM25 plus a snapshot-versioned local Qdrant index."""
-    def __init__(self, docs: List[Dict[str, Any]], *, index_path: Path | None = None):
+    def __init__(self, docs: List[Dict[str, Any]], *, index_path: Path | None = None, in_memory: bool = False):
         """对同一批文档建立两套索引，使词法与语义召回使用相同语料。"""
         self.docs = docs
         self.doc_id_to_doc = {idx: doc for idx, doc in enumerate(docs)}
@@ -38,7 +38,7 @@ class HybridRetriever:
         self.bm25 = BM25Okapi(self.tokenized_corpus)
 
         self.snapshot_id = self._snapshot_id_from_docs(docs)
-        self.index_path = index_path if index_path is not None else (
+        self.index_path = None if in_memory else index_path if index_path is not None else (
             DATA_DIR / "daily_snapshot_qdrant" / self.snapshot_id if self.snapshot_id else None
         )
         self.collection_name = COLLECTION_NAME
