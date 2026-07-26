@@ -96,6 +96,15 @@ class RAGQualityTests(unittest.TestCase):
         self.assertFalse(report["passed"])
         self.assertIn("Electro Giant|usage_rate|5.5%", report["unsupported_numeric_claims"])
 
+    def test_numeric_validation_normalizes_thousands_separators(self):
+        report = validate_answer_grounding(
+            "该结论来自 20,000 场官方样本。参考 snapshot-1:overview",
+            "snapshot_id=snapshot-1 | sample_battles=20000 场",
+            {"snapshot-1:overview"},
+        )
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["unsupported_numeric_facts"], [])
+
     def test_quality_gate_samples_multiple_documents_per_source_type(self):
         docs = [
             {

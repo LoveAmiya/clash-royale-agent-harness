@@ -30,6 +30,27 @@ def _uses_supercell_live_sample(items: list[dict]) -> bool:
     return any(str(item.get("source", "")).strip() == "Supercell API live sample" for item in items)
 
 
+def _live_snapshot_boundary(items: list[dict]) -> str | None:
+    live_item = next(
+        (
+            item
+            for item in items
+            if str(item.get("source", "")).strip() == "Supercell API live sample"
+            and item.get("sample_battles") is not None
+        ),
+        None,
+    )
+    if live_item is None:
+        return None
+    fields = [
+        f"snapshot_id={live_item.get('snapshot_id', 'unknown')}",
+        f"sample_battles={live_item.get('sample_battles')} 场",
+        f"target_battles={live_item.get('target_battles', live_item.get('sample_battles'))} 场",
+        f"fetched_at={live_item.get('fetched_at', 'unknown')}",
+    ]
+    return "Official snapshot boundary: " + " | ".join(fields)
+
+
 def build_meta_evidence_pack(
     schedule_data: list[dict],
     top_decks_data: list[dict],
@@ -88,6 +109,7 @@ def build_meta_evidence_pack(
             f"日期={next_match.get('match_date')}，赛制备注={next_match.get('note', '无')}"
         )
 
+    snapshot_boundary = _live_snapshot_boundary([*ranked_decks, *popular_cards])
     evidence_sections = [
             (
                 "Data freshness boundary: Supercell API live sample; deck and card evidence is a bounded battle-log sample "
@@ -95,6 +117,7 @@ def build_meta_evidence_pack(
                 if uses_live_deck_sample or uses_live_card_sample
                 else "数据时效边界：这是仓库内保存的静态快照（repository static snapshots），不是实时游戏数据。"
             ),
+            *([snapshot_boundary] if snapshot_boundary else []),
             "热门卡组样本：",
             "\n".join(deck_lines) or "- 当前没有卡组样本。",
             "样本内高频组件：",

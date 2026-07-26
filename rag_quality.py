@@ -11,7 +11,7 @@ from typing import Any
 
 
 _NUMERIC_FACT = re.compile(
-    r"(?<![\w.])(\d+(?:\.\d+)?)\s*(%|场|次|battles?|games?|appearances?)",
+    r"(?<![\w.,])((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(%|场|次|battles?|games?|appearances?)",
     re.IGNORECASE,
 )
 _DOC_ID = re.compile(r"\b(?:supercell|snapshot|official|other)[\w-]*:[^\s|`]+", re.IGNORECASE)
@@ -39,6 +39,7 @@ class GroundingValidationError(RuntimeError):
 
 
 def _normalize_fact(value: str, unit: str) -> tuple[str, str]:
+    value = value.replace(",", "")
     normalized_value = value.rstrip("0").rstrip(".") if "." in value else value
     normalized_unit = unit.lower()
     if normalized_unit.startswith("battle") or normalized_unit.startswith("game"):

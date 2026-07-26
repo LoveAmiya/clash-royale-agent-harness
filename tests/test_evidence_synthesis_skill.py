@@ -68,6 +68,25 @@ class MetaEvidenceTests(unittest.TestCase):
         self.assertNotIn("top_decks.json", sources)
         self.assertNotIn("cards_meta.json", sources)
 
+    def test_live_evidence_pack_includes_snapshot_sample_boundary(self):
+        evidence, _ = build_meta_evidence_pack(
+            [],
+            [{
+                "rank": 1,
+                "deck_name": "Live Deck",
+                "source": "Supercell API live sample",
+                "snapshot_id": "supercell-test",
+                "sample_battles": 20000,
+                "target_battles": 20000,
+                "fetched_at": "2026-07-26T17:43:32+00:00",
+            }],
+            [],
+        )
+
+        self.assertIn("snapshot_id=supercell-test", evidence)
+        self.assertIn("sample_battles=20000 场", evidence)
+        self.assertIn("fetched_at=2026-07-26T17:43:32+00:00", evidence)
+
 
 class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
     def build_context(self, intent: str, api_key: str = "test-key") -> SkillContext:
