@@ -12,6 +12,7 @@ from runtime_events import RuntimeEventEmitter
 from runtime_hardening import ProcessQuota, RuntimeMetrics, authorize_admin, normalize_request_id, redact_for_client
 from query_answering import AnswerResult
 import runtime_multi
+import web_app
 
 
 class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
@@ -96,6 +97,35 @@ class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(degraded["status"], "degraded")
         self.assertEqual(degraded["http_status"], 200)
+
+        for refresh_status in ("refreshing", "cooldown", "stale"):
+            degraded_app.state.live_refresh_status = refresh_status
+            degraded_app.state.rag_status = "ready"
+            degraded_app.state.rag_snapshot_id = "official-1"
+            result = runtime_multi.get_readiness_status(
+                degraded_app,
+                external_api_required=True,
+                model_api_configured=True,
+            )
+            self.assertEqual(result["status"], "degraded")
+            self.assertIn(f"snapshot_{refresh_status}", result["degraded_reasons"])
+
+        degraded_app.state.live_refresh_status = "ready"
+        degraded_app.state.rag_snapshot_id = "official-previous"
+        misaligned = runtime_multi.get_readiness_status(
+            degraded_app,
+            external_api_required=True,
+            model_api_configured=True,
+        )
+        self.assertEqual(misaligned["status"], "degraded")
+        self.assertIn("snapshot_rag_misaligned", misaligned["degraded_reasons"])
+
+    async def test_public_web_ui_hides_the_fixed_sample_control(self):
+        self.assertIn(
+            '<label id="sampleControl" class="sample-control" for="sampleTarget" hidden>',
+            web_app.HTML_PAGE,
+        )
+        self.assertNotIn('<option value="400"', web_app.HTML_PAGE)
 
     async def test_external_api_unavailable_result_has_an_explicit_model_stream_state(self):
         result = runtime_multi.build_external_api_unavailable_result(

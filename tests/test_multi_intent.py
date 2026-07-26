@@ -134,6 +134,57 @@ class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MultiIntentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_top_level_model_stream_reflects_rag_subquery_fallback(self):
+        parsed = {
+            "intent": "multi_intent",
+            "subqueries": [
+                {"id": "q1", "intent": "card_query"},
+                {"id": "q2", "intent": "meta_analysis_query"},
+            ],
+        }
+        results = [
+            {
+                "id": "q1",
+                "title": "card",
+                "parsed": parsed["subqueries"][0],
+                "plan": None,
+                "selected_skill": "CardMetaSkill",
+                "mode": "direct",
+                "status": "success",
+                "answer": "card answer",
+                "metadata": {"model_stream": "unavailable"},
+                "error": None,
+                "latency_ms": 1,
+            },
+            {
+                "id": "q2",
+                "title": "meta",
+                "parsed": parsed["subqueries"][1],
+                "plan": None,
+                "selected_skill": "EvidenceSynthesisSkill",
+                "mode": "rag_synthesis",
+                "status": "success",
+                "answer": "meta answer",
+                "metadata": {"model_stream": "fallback_chunked"},
+                "error": None,
+                "latency_ms": 2,
+            },
+        ]
+
+        with patch("query_answering.execute_subquery", AsyncMock(side_effect=results)):
+            result = await answer_query(
+                user_text="compound",
+                parsed=parsed,
+                schedule_data=[],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=None,
+                api_key="test-key",
+                include_metadata=True,
+            )
+
+        self.assertEqual(result.metadata["model_stream"], "fallback_chunked")
+
     async def test_keeps_direct_result_when_rag_subquery_cannot_run(self):
         card_data = load_json("cards_meta.json")
         parsed = {

@@ -30,6 +30,7 @@ HTML_PAGE = """
   <title>皇室战争战队赛统筹 Agent</title>
   <style>
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       font-family: Arial, "Microsoft YaHei", sans-serif;
@@ -303,16 +304,10 @@ HTML_PAGE = """
       <textarea id="inputBox" placeholder="输入问题，例如：\n- 我们第五轮打谁\n- 使用率第三的卡牌是什么\n- 现在热门卡组有哪些"></textarea>
 
       <div class="actions">
-        <label id="sampleControl" class="sample-control" for="sampleTarget">
+        <label id="sampleControl" class="sample-control" for="sampleTarget" hidden>
           实时样本
           <select id="sampleTarget" aria-label="Supercell 实时采样场次">
-            <option value="200">200 场</option>
-            <option value="400" selected>400 场</option>
-            <option value="1000">1000 场</option>
-            <option value="2000">2000 场</option>
-            <option value="5000">5000 场</option>
-            <option value="10000">10000 场</option>
-            <option value="20000">20000 场</option>
+            <option value="20000" selected>20000 场</option>
           </select>
         </label>
         <button id="sendBtn">发送</button>
@@ -407,6 +402,7 @@ HTML_PAGE = """
       const metrics = snapshot.collection_metrics || {};
       const rag = snapshot.rag || {};
       const runtime = snapshot.runtime || {};
+      const lastAttempt = snapshot.last_refresh_attempt || {};
       const scanRange = leaderboard.scanned_rank_end
         ? `${leaderboard.rank_start || 1}-${leaderboard.scanned_rank_end}`
         : "尚未完成";
@@ -423,7 +419,9 @@ HTML_PAGE = """
         ["有效玩家", `${leaderboard.sampled_players || 0} 人`],
         ["跳过重复", `${metrics.duplicates_skipped || 0} 条`],
         ["RAG 索引", ragStateLabel(rag.status)],
-        ["RAG 证据文档", `${Object.values(rag.document_counts || {}).reduce((total, value) => total + Number(value || 0), 0)} 篇`]
+        ["RAG 证据文档", `${Object.values(rag.document_counts || {}).reduce((total, value) => total + Number(value || 0), 0)} 篇`],
+        ["最近刷新尝试", lastAttempt.status ? `${lastAttempt.status} | ${formatSnapshotTime(lastAttempt.finished_at)}` : "无"],
+        ["刷新冷却", snapshot.cooldown_remaining_seconds ? `${Math.ceil(snapshot.cooldown_remaining_seconds)} 秒` : "无"]
       ];
       snapshotState.textContent = snapshotStateLabel(snapshot.status);
       snapshotGrid.innerHTML = "";

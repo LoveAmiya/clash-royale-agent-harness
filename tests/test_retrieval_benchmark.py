@@ -1,9 +1,17 @@
 import unittest
 
-from evaluation.retrieval_benchmark import build_cases, score_ranking
+from evaluation.retrieval_benchmark import build_cases, default_benchmark_index_path, score_ranking
 
 
 class RetrievalBenchmarkTests(unittest.TestCase):
+    def test_default_index_is_isolated_from_the_runtime_qdrant_directory(self):
+        docs = [{"metadata": {"snapshot_id": "official-1"}}]
+
+        path = default_benchmark_index_path(docs)
+
+        self.assertEqual(path.parts[:2], ("data", "retrieval_benchmark_qdrant"))
+        self.assertNotIn("daily_snapshot_qdrant", path.parts)
+
     def test_scores_recall_and_reciprocal_rank_at_k(self):
         metrics = score_ranking(
             [

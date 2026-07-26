@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,18 @@ BENCHMARK_SOURCE_LIMITS = {
     "counter": 12,
     "matchup": 12,
 }
+
+
+def default_benchmark_index_path(docs: list[dict[str, Any]]) -> Path:
+    """Keep offline evaluation isolated from the runtime's locked Qdrant path."""
+    snapshot_ids = {
+        str(doc.get("metadata", {}).get("snapshot_id", "")).strip()
+        for doc in docs
+        if isinstance(doc, dict)
+    }
+    snapshot_id = snapshot_ids.pop() if len(snapshot_ids) == 1 else "mixed"
+    identity = hashlib.sha256(snapshot_id.encode("utf-8")).hexdigest()[:16]
+    return Path("data") / "retrieval_benchmark_qdrant" / identity
 
 
 def score_ranking(rows: list[dict[str, Any]], k: int = 5) -> dict[str, Any]:
@@ -140,13 +153,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", default="evaluation/retrieval_benchmark_report.json")
     parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--index-path")
     args = parser.parse_args()
     if args.k <= 0:
         raise SystemExit("--k must be positive")
     docs = load_docs()
     cases = build_cases(docs)
-    report = evaluate_cases(HybridRetriever(docs), cases, args.k)
+    index_path = Path(args.index_path) if args.index_path else default_benchmark_index_path(docs)
+    report = evaluate_cases(HybridRetriever(docs, index_path=index_path), cases, args.k)
     report["case_source"] = "active official snapshot evidence with template-generated silver labels"
+    report["index_path"] = str(index_path)
     Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({name: item["metrics"] for name, item in report["methods"].items()}, ensure_ascii=False))
 

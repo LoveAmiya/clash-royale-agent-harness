@@ -64,14 +64,22 @@ Keep `.env` out of version control.
 ### Run the Backend
 
 ```powershell
-.\run_backend.ps1
+$env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
+$env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
+if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) { throw "OPENAI_API_KEY is not configured" }
+if ([string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)) { throw "SUPERCELL_API_TOKEN is not configured" }
+$env:RUNTIME_HOST = "127.0.0.1"
+$env:RUNTIME_PORT = "8091"
+$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
+$env:EXTERNAL_API_REQUIRED = "true"
+$env:SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = "3600"
+powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 ```
 
-Or:
-
-```powershell
-python runtime_multi.py
-```
+Native Windows execution is the recommended production collection path. The
+Supercell key must allow the host's current public egress IP. Use Docker for
+build/CI or offline validation unless the container has a stable, allowlisted
+public egress IP; Docker Desktop traffic may use a different and changing IP.
 
 Default backend:
 
@@ -89,7 +97,9 @@ curl http://127.0.0.1:8091/health
 routing strict live-data traffic; it reports `ready`, `degraded`, or
 `unavailable` based on the model credential, complete official snapshot, and RAG
 index. `/snapshot/status` exposes the active sample, while `/metrics` exports
-low-cardinality Prometheus-compatible runtime metrics.
+low-cardinality Prometheus-compatible runtime metrics. While a replacement is
+refreshing or cooling down, the last complete snapshot remains active and
+`/ready` reports `degraded` instead of claiming full readiness.
 
 ### Run the Browser UI
 
@@ -183,6 +193,10 @@ docker build -t clash-royale-agent .
 docker run --rm -p 8091:8091 --env-file .env clash-royale-agent
 ```
 
+The container health check validates packaging, not Supercell IP authorization.
+Do not expect daily refreshes from Docker unless its actual public egress IP is
+stable and included in the Supercell key allowlist.
+
 ### Configuration
 
 The main configuration keys are documented in `.env.example`.
@@ -211,6 +225,7 @@ PROCESS_MAX_CONCURRENT=8
 PROCESS_RATE_LIMIT_PER_MINUTE=30
 ALLOWED_ORIGINS=http://127.0.0.1:8080,http://localhost:8080
 ADMIN_API_KEY=
+SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS=3600
 ```
 
 The default hosts are loopback-only. Set `RUNTIME_HOST=0.0.0.0` deliberately for
@@ -232,7 +247,7 @@ The RAG corpus is not one raw document per battle. It derives high-information e
 
 ### Daily Official Snapshot
 
-Set `SUPERCELL_API_TOKEN` to enable the official Clash Royale API adapter. The production target is fixed at 20,000 unique battles, collected from rank 1 upward through paginated leaderboard results with a maximum candidate pool of 3,000 players. The collector stops as soon as it reaches the target. A partial, timed-out, or rate-limited collection is rejected; the last complete official snapshot remains available and is marked stale while a replacement is unavailable. The browser UI exposes this provenance, candidate pool, actual scanned rank range, sample size, collection time, and duplicate count without triggering a refresh. The model parser remains the first request step. In strict external mode, no repository fixture is represented as live data.
+Set `SUPERCELL_API_TOKEN` to enable the official Clash Royale API adapter. The production target is fixed at 20,000 unique battles, collected from rank 1 upward through paginated leaderboard results with a maximum candidate pool of 3,000 players. The collector stops as soon as it reaches the target. The default refresh budget is 3,600 seconds and may be configured up to 7,200 seconds. A partial, timed-out, or rate-limited collection is rejected; the last complete official snapshot remains available during a 5/15/30-minute escalating cooldown. The browser UI exposes provenance, the latest refresh attempt, cooldown, candidate pool, actual scanned rank range, sample size, collection time, and duplicate count without triggering a refresh. The model parser remains the first request step. In strict external mode, no repository fixture is represented as live data.
 
 ```text
 SUPERCELL_API_TOKEN=your_official_token
@@ -324,14 +339,19 @@ Copy-Item .env.example .env
 ### 启动后端
 
 ```powershell
-.\run_backend.ps1
+$env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
+$env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
+if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) { throw "OPENAI_API_KEY 未配置" }
+if ([string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)) { throw "SUPERCELL_API_TOKEN 未配置" }
+$env:RUNTIME_HOST = "127.0.0.1"
+$env:RUNTIME_PORT = "8091"
+$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
+$env:EXTERNAL_API_REQUIRED = "true"
+$env:SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = "3600"
+powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 ```
 
-或：
-
-```powershell
-python runtime_multi.py
-```
+正式采集推荐直接在 Windows 本机运行，并确保 Supercell Key 白名单包含主机当前公网出口 IP。Docker Desktop 的容器出口 IP 可能与主机不同且会变化；除非已固定并加入白名单，否则 Docker 只用于构建、CI 和离线验证。
 
 默认后端地址：
 
@@ -393,6 +413,8 @@ python -m unittest discover -s tests
 docker build -t clash-royale-agent .
 docker run --rm -p 8091:8091 --env-file .env clash-royale-agent
 ```
+
+容器健康检查只证明镜像能启动，不证明 Supercell IP 授权可用。
 
 ### 配置
 

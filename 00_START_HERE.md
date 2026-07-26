@@ -107,15 +107,19 @@ provenance, multi-intent execution, RAG model synthesis, SSE, and Trace data.
 
 ```powershell
 cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
-if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
-    $env:OPENAI_API_KEY = Read-Host "请输入 OpenAI API Key"
-}
-if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
-    throw "未检测到 OPENAI_API_KEY，后端不会调用模型。"
-}
-Write-Host "已检测到 OPENAI_API_KEY，长度：$($env:OPENAI_API_KEY.Length)"
+$env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
+$env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
+if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) { throw "用户环境变量 OPENAI_API_KEY 未配置" }
+if ([string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)) { throw "用户环境变量 SUPERCELL_API_TOKEN 未配置" }
+$env:RUNTIME_HOST = "127.0.0.1"
+$env:RUNTIME_PORT = "8091"
+$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
+$env:EXTERNAL_API_REQUIRED = "true"
+$env:SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = "3600"
 powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 ```
+
+Supercell Key 必须允许这台 Windows 主机的当前公网出口 IP。本项目推荐在 Windows 本机运行正式采集；Docker 只有在容器出口 IP 固定且已加入 Key 白名单时才适合刷新官方快照。Docker Desktop 的出口 IP 可能与主机浏览器看到的公网 IP 不同，也可能变化。
 
 后端地址：`http://127.0.0.1:8091`
 
@@ -127,7 +131,7 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 Invoke-RestMethod http://127.0.0.1:8091/health
 ```
 
-生产探针区分存活与可回答状态：`/health` 只检查进程；`/ready` 会检查模型凭证、完整官方快照和 RAG 状态。严格模式首次采集期间 `/ready` 返回 `503`，RAG 预热或陈旧快照时返回 `200` 与 `status: degraded`。`/metrics` 提供 Prometheus 文本指标，`/snapshot/status` 还会显示最近请求数、失败数、限流数与 P95 回答耗时。
+生产探针区分存活与可回答状态：`/health` 只检查进程；`/ready` 会检查模型凭证、完整官方快照和 RAG 状态。严格模式首次采集期间 `/ready` 返回 `503`；已有完整旧快照时，刷新中、冷却中、RAG 预热或快照陈旧均返回 `200` 与 `status: degraded`。`/metrics` 提供 Prometheus 文本指标，`/snapshot/status` 还会显示最近刷新尝试、冷却剩余时间、请求数、失败数、限流数与 P95 回答耗时。
 
 默认仅监听 `127.0.0.1`。容器或反向代理部署才显式设置 `RUNTIME_HOST=0.0.0.0`；同时设置 `ALLOWED_ORIGINS`、请求长度/并发/每分钟限流环境变量。`/settings/live-sample` 默认关闭，若显式启用还必须提供 `X-Admin-Key`。
 
@@ -199,23 +203,24 @@ powershell -ExecutionPolicy Bypass -File .\run_web.ps1
 
 ```powershell
 cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
-$env:OPENAI_API_KEY = Read-Host "OpenAI-compatible API key"
-$env:SUPERCELL_API_TOKEN = Read-Host "Supercell API token"
+$env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
+$env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
 $env:SUPERCELL_LIVE_DATA_ENABLED = "true"
 $env:EXTERNAL_API_REQUIRED = "true"
 $env:SUPERCELL_LEADERBOARD_PLAYERS = "3000"  # 候选池上限，按第 1 名起顺序分页
-$env:RUNTIME_PORT = "8095"
+$env:SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = "3600"
+$env:RUNTIME_PORT = "8091"
 powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 ```
 
 网页不会提供采样档位切换。页面顶部的“Current Data Snapshot”面板只读展示当前已发布快照的来源、目标、排行榜候选池、实际扫描范围、采集时间、有效玩家和去重数量；打开页面不会触发新的官方 API 请求。
 
-受控采集默认每秒最多 2 个官方请求、严格按排行榜顺序逐名读取 battle log、遵守 `429` 响应的 `Retry-After`，且刷新最多运行 30 分钟。可通过 `SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND`、`SUPERCELL_HIGH_VOLUME_MAX_RETRIES`、`SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS` 调整；但不要提高请求速率来缩短采集。
+受控采集默认每秒最多 2 个官方请求、严格按排行榜顺序逐名读取 battle log、遵守 `429` 响应的 `Retry-After`，刷新预算默认 60 分钟。`SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS` 可在 60 秒到 7200 秒之间调整；生产建议保持 3600，网络较慢时可设为 7200。未达到 20,000 场的结果会被丢弃并进入 5/15/30 分钟递增冷却，期间继续服务上一次完整快照，不会立即重复抓取。
 
 在另一个 PowerShell 验证严格模式已真正加载：
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8095/health
+Invoke-RestMethod http://127.0.0.1:8091/health
 ```
 
 预期至少包含：`live_data_enabled: True`、`external_api_required: True` 和 `model_api_configured: True`。

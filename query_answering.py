@@ -344,7 +344,12 @@ async def build_evidence_synthesis_answer(
     # A pure meta question should not leak the team's local match schedule into
     # an otherwise game-wide analysis. Match preparation remains schedule-aware.
     evidence_schedule_data = schedule_data if parsed.get("intent") == "match_preparation_query" else []
-    evidence, sources = build_meta_evidence_pack(evidence_schedule_data, top_decks_data, cards_meta_data)
+    evidence, sources = build_meta_evidence_pack(
+        evidence_schedule_data,
+        top_decks_data,
+        cards_meta_data,
+        include_schedule=parsed.get("intent") == "match_preparation_query",
+    )
     # Strict production retrieval is generated from the active official daily
     # snapshot. It intentionally has no static strategy or stale snapshot set.
     retrieval_source_type = None
@@ -774,6 +779,18 @@ async def answer_multi_intent_query(
         "sub_results": results,
         "total_latency_ms": int((time.perf_counter() - started_at) * 1000),
     }
+    stream_modes = {
+        str(result.get("metadata", {}).get("model_stream"))
+        for result in results
+        if isinstance(result.get("metadata"), dict)
+    }
+    metadata["model_stream"] = (
+        "streaming"
+        if "streaming" in stream_modes
+        else "fallback_chunked"
+        if "fallback_chunked" in stream_modes
+        else "unavailable"
+    )
     return AnswerResult(
         answer=compose_multi_intent_answer(results),
         trace_id=trace_id,

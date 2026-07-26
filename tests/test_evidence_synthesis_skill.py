@@ -304,7 +304,7 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(query_answering, "uses_responses_api", return_value=True), patch.object(
             query_answering, "generate_model_text", AsyncMock(return_value="Grounded answer")
-        ):
+        ) as generate:
             answer = await query_answering.build_evidence_synthesis_answer(
                 user_text="Analyze the current environment.",
                 parsed={"intent": "meta_analysis_query"},
@@ -316,3 +316,5 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertNotIn("schedule.json", answer)
+        self.assertNotIn("赛程信息", generate.await_args.kwargs["input_text"])
+        self.assertNotIn("Private Team", generate.await_args.kwargs["input_text"])

@@ -7,6 +7,7 @@ import re
 import threading
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Header, Request
@@ -358,10 +359,50 @@ def get_runtime_summary(app: FastAPI) -> dict:
     return metrics.public_summary()
 
 
+def _refresh_cooldown_seconds(failures: int) -> int:
+    return (300, 900, 1800)[min(max(int(failures), 1) - 1, 2)]
+
+
+def _record_live_refresh_attempt(
+    app: FastAPI,
+    *,
+    status: str,
+    snapshot: dict | None = None,
+    error: str | None = None,
+    finished_at: str | None = None,
+) -> None:
+    collection_metrics = snapshot.get("collection_metrics", {}) if isinstance(snapshot, dict) else {}
+    sample_battles = int(snapshot.get("sample_battles", 0) or 0) if isinstance(snapshot, dict) else 0
+    target_battles = (
+        int(snapshot.get("target_battles", DAILY_TARGET_BATTLES) or DAILY_TARGET_BATTLES)
+        if isinstance(snapshot, dict)
+        else DAILY_TARGET_BATTLES
+    )
+    shortfall_battles = (
+        int(snapshot.get("shortfall_battles", max(0, target_battles - sample_battles)) or 0)
+        if isinstance(snapshot, dict)
+        else DAILY_TARGET_BATTLES
+    )
+    app.state.live_last_refresh_attempt = {
+        "status": status,
+        "finished_at": finished_at or datetime.now(timezone.utc).isoformat(),
+        "sample_battles": sample_battles,
+        "target_battles": target_battles,
+        "shortfall_battles": shortfall_battles,
+        "collection_metrics": collection_metrics,
+        "error": error,
+    }
+    metrics = getattr(app.state, "runtime_metrics", None)
+    if metrics is not None:
+        metrics.record_snapshot_collection(collection_metrics)
+
+
 def get_live_snapshot_status(app: FastAPI) -> dict:
     """Return display-safe provenance for the currently published data snapshot."""
     snapshot = getattr(app.state, "live_snapshot", None)
     refresh_status = getattr(app.state, "live_refresh_status", "unavailable")
+    cooldown_remaining = max(0.0, getattr(app.state, "live_cooldown_until", 0.0) - time.monotonic())
+    last_refresh_attempt = getattr(app.state, "live_last_refresh_attempt", None)
     if not isinstance(snapshot, dict):
         return {
             "source": "Supercell Official API",
@@ -396,6 +437,8 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
                 "decks": "not_available",
                 "rag_documents": "not_available",
             },
+            "last_refresh_attempt": last_refresh_attempt,
+            "cooldown_remaining_seconds": round(cooldown_remaining, 1),
             "error": getattr(app.state, "live_error", None),
         }
 
@@ -434,6 +477,8 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             "decks": "official_daily_snapshot",
             "rag_documents": "official_daily_snapshot",
         },
+        "last_refresh_attempt": last_refresh_attempt,
+        "cooldown_remaining_seconds": round(cooldown_remaining, 1),
         "error": getattr(app.state, "live_error", None),
     }
 
@@ -459,17 +504,26 @@ def get_readiness_status(
     rag_status = getattr(app.state, "rag_status", "not_required")
     initialized = bool(getattr(app.state, "initialized", False))
     blockers: list[str] = []
+    degraded_reasons: list[str] = []
     if not initialized:
         blockers.append("runtime_initializing")
     if strict and not model_configured:
         blockers.append("model_api_unconfigured")
     if strict and not snapshot_usable:
         blockers.append("official_snapshot_unavailable")
+    if snapshot_usable and snapshot_status in {"refreshing", "cooldown", "stale"}:
+        degraded_reasons.append(f"snapshot_{snapshot_status}")
+    if rag_status not in {"ready", "bm25_only", "not_required"}:
+        degraded_reasons.append(f"rag_{rag_status}")
+    rag_snapshot_id = getattr(app.state, "rag_snapshot_id", None)
+    snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
+    if snapshot_usable and rag_status in {"ready", "bm25_only"} and snapshot_id != rag_snapshot_id:
+        degraded_reasons.append("snapshot_rag_misaligned")
 
     if blockers:
         status = "unavailable"
         http_status = 503
-    elif rag_status not in {"ready", "bm25_only", "not_required"} or snapshot_status == "stale":
+    elif degraded_reasons:
         status = "degraded"
         http_status = 200
     else:
@@ -484,15 +538,16 @@ def get_readiness_status(
         "external_api_required": strict,
         "snapshot_status": snapshot_status,
         "snapshot_usable": snapshot_usable,
-        "snapshot_id": snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None,
+        "snapshot_id": snapshot_id,
         "rag_status": rag_status,
-        "rag_snapshot_id": getattr(app.state, "rag_snapshot_id", None),
+        "rag_snapshot_id": rag_snapshot_id,
         "snapshot_rag_aligned": bool(
             isinstance(snapshot, dict)
             and snapshot.get("snapshot_id")
             and snapshot.get("snapshot_id") == getattr(app.state, "rag_snapshot_id", None)
         ),
         "blockers": blockers,
+        "degraded_reasons": degraded_reasons,
     }
 
 
@@ -517,6 +572,12 @@ def restore_published_snapshot(app: FastAPI) -> dict | None:
     app.state.card_deck_stats_data = dict(snapshot.get("card_deck_stats", {}))
     app.state.live_error = None
     app.state.live_refresh_status = "ready" if not snapshot_refresh_due(snapshot) else "stale"
+    _record_live_refresh_attempt(
+        app,
+        status="restored",
+        snapshot=snapshot,
+        finished_at=snapshot.get("published_at") or snapshot.get("fetched_at"),
+    )
     logger.info(
         "restored official daily snapshot id=%s battles=%s age_seconds=%.1f",
         snapshot.get("snapshot_id"),
@@ -575,7 +636,16 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
                 "IncompleteOfficialSnapshot: "
                 f"sample_battles={snapshot.get('sample_battles')} target_battles={target_battles}"
             )
-            app.state.live_refresh_status = "stale" if cached is not None else "unavailable"
+            failures = getattr(app.state, "live_refresh_failures", 0) + 1
+            app.state.live_refresh_failures = failures
+            app.state.live_cooldown_until = time.monotonic() + _refresh_cooldown_seconds(failures)
+            app.state.live_refresh_status = "cooldown"
+            _record_live_refresh_attempt(
+                app,
+                status="incomplete",
+                snapshot=snapshot,
+                error=app.state.live_error,
+            )
             logger.warning("discarded incomplete official daily snapshot %s", app.state.live_error)
             return cached
 
@@ -590,10 +660,11 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
         app.state.rag_status = "not_ready"
         app.state.rag_error = None
         app.state.live_error = None
+        _record_live_refresh_attempt(app, status="success", snapshot=snapshot)
         if snapshot.get("collection_metrics", {}).get("rate_limited", 0):
             failures = getattr(app.state, "live_refresh_failures", 0) + 1
             app.state.live_refresh_failures = failures
-            cooldown_seconds = (300, 900, 1800)[min(failures - 1, 2)]
+            cooldown_seconds = _refresh_cooldown_seconds(failures)
             app.state.live_cooldown_until = time.monotonic() + cooldown_seconds
             app.state.live_refresh_status = "cooldown"
         else:
@@ -617,9 +688,10 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
         logger.warning("official live snapshot refresh failed: %s", exc)
         failures = getattr(app.state, "live_refresh_failures", 0) + 1
         app.state.live_refresh_failures = failures
-        cooldown_seconds = (300, 900, 1800)[min(failures - 1, 2)]
+        cooldown_seconds = _refresh_cooldown_seconds(failures)
         app.state.live_cooldown_until = time.monotonic() + cooldown_seconds
         app.state.live_refresh_status = "cooldown"
+        _record_live_refresh_attempt(app, status="failed", error=app.state.live_error)
         # A prior successful response is still official API data. Preserve it as
         # a clearly stale cache instead of substituting repository JSON.
         return cached
@@ -827,6 +899,7 @@ async def build_answer(
             live_metadata = {
                 "status": "live_sample",
                 "source": "supercell_api",
+                "snapshot_id": live_snapshot.get("snapshot_id"),
                 "fetched_at": live_snapshot.get("fetched_at"),
                 "sample_battles": live_snapshot.get("sample_battles"),
                 "target_battles": live_snapshot.get("target_battles"),
@@ -1028,6 +1101,7 @@ async def lifespan(app: FastAPI):
     app.state.live_battle_log_cache = {}
     app.state.live_cooldown_until = 0.0
     app.state.live_refresh_failures = 0
+    app.state.live_last_refresh_attempt = None
 
     logger.info(
         "startup complete schedule=%s decks=%s cards=%s retriever=lazy",

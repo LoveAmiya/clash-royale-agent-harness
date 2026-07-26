@@ -527,6 +527,8 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored["snapshot_id"], "official-yesterday")
         self.assertEqual(app.state.live_snapshot["snapshot_id"], "official-yesterday")
         self.assertEqual(app.state.cards_meta_data[0]["card_name"], "Zap")
+        self.assertEqual(app.state.live_last_refresh_attempt["status"], "restored")
+        self.assertEqual(app.state.live_last_refresh_attempt["sample_battles"], 20000)
 
     def test_runtime_does_not_publish_a_partial_daily_collection(self):
         previous = {
@@ -564,8 +566,17 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, previous)
         self.assertEqual(app.state.live_snapshot, previous)
-        self.assertEqual(app.state.live_refresh_status, "stale")
+        self.assertEqual(app.state.live_refresh_status, "cooldown")
+        self.assertGreater(app.state.live_cooldown_until, 0)
+        self.assertEqual(app.state.live_last_refresh_attempt["status"], "incomplete")
+        self.assertEqual(app.state.live_last_refresh_attempt["sample_battles"], 19999)
+        self.assertEqual(app.state.live_last_refresh_attempt["shortfall_battles"], 1)
         publish.assert_not_called()
+
+        status = runtime_multi.get_live_snapshot_status(app)
+        self.assertEqual(status["snapshot_status"], "cooldown")
+        self.assertGreater(status["cooldown_remaining_seconds"], 0)
+        self.assertEqual(status["last_refresh_attempt"]["status"], "incomplete")
 
     def test_runtime_passes_configured_fallback_tags_to_official_client(self):
         app = types.SimpleNamespace(state=types.SimpleNamespace(live_snapshot=None, live_snapshot_at=0.0, live_error=None))
@@ -838,6 +849,7 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer_query.await_args.kwargs["card_deck_stats"], official_snapshot["card_deck_stats"])
         self.assertEqual(actual.metadata["data_context"]["cards"], "official_daily_snapshot")
         self.assertEqual(actual.metadata["data_context"]["schedule"], "local_schedule_json")
+        self.assertEqual(actual.metadata["live_data"]["snapshot_id"], "official-20260725")
 
     async def test_strict_external_api_mode_stops_when_supercell_is_unavailable(self):
         app = types.SimpleNamespace(

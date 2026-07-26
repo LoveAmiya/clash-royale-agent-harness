@@ -33,6 +33,7 @@ temp/
 runs/
 outputs/
 data/daily_snapshot_qdrant/
+data/retrieval_benchmark_qdrant/
 data/official_daily_snapshot.json
 
 .vscode/

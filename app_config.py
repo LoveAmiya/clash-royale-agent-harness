@@ -94,7 +94,7 @@ LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED = os.getenv("LIVE_SAMPLE_SETTINGS_ADMIN_ENABL
 # Large samples intentionally trade freshness for controlled official API usage.
 SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND = max(0.1, float(os.getenv("SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND", "2")))
 SUPERCELL_HIGH_VOLUME_MAX_RETRIES = max(0, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_RETRIES", "0")), 5))
-SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = max(60, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS", "1800")), 3600))
+SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = max(60, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS", "3600")), 7200))
 
 
 def _parse_supercell_player_tags(value: str) -> tuple[str, ...]:

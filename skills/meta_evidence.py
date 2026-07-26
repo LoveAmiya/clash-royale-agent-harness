@@ -37,6 +37,7 @@ def build_meta_evidence_pack(
     *,
     deck_limit: int = 10,
     card_limit: int = 12,
+    include_schedule: bool = True,
 ) -> tuple[str, str]:
     """返回模型可读的事实包和面向用户的来源清单。
 
@@ -87,8 +88,7 @@ def build_meta_evidence_pack(
             f"日期={next_match.get('match_date')}，赛制备注={next_match.get('note', '无')}"
         )
 
-    evidence = "\n".join(
-        [
+    evidence_sections = [
             (
                 "Data freshness boundary: Supercell API live sample; deck and card evidence is a bounded battle-log sample "
                 "collected for this request. It is not a global or full-season leaderboard."
@@ -101,10 +101,15 @@ def build_meta_evidence_pack(
             "\n".join(frequency_lines) or "- 当前没有可统计的卡牌组件。",
             "高使用率单卡：",
             "\n".join(card_lines) or "- 当前没有单卡样本。",
-            "赛程信息：",
-            "\n".join(schedule_lines) or "- 当前没有 upcoming 赛程。",
         ]
-    )
+    if include_schedule:
+        evidence_sections.extend(
+            [
+                "赛程信息：",
+                "\n".join(schedule_lines) or "- 当前没有 upcoming 赛程。",
+            ]
+        )
+    evidence = "\n".join(evidence_sections)
     deck_source = (
         "[1] Supercell API live sample | bounded battle-log deck sample"
         if uses_live_deck_sample
@@ -116,7 +121,7 @@ def build_meta_evidence_pack(
         else "[2] cards_meta.json | 静态快照 | " + _source_url(popular_cards, "https://royaleapi.com/cards/popular")
     )
     sources_list = [deck_source, card_source]
-    if schedule_data:
+    if include_schedule and schedule_data:
         sources_list.append("[3] schedule.json | 本地赛程快照")
     sources = "\n".join(sources_list)
     return evidence, sources
