@@ -186,6 +186,7 @@ def build_single_card_answer(card: dict) -> str:
 
 def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
     if card.get("source") == "Supercell API live sample":
+        fetched_at = card.get("fetched_at") or "未知"
         labels = {
             "usage_rate": "\u4f7f\u7528\u7387",
             "win_rate": "\u80dc\u7387",
@@ -201,7 +202,7 @@ def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
             [
                 "",
                 "\u6570\u636e\u8fb9\u754c\uff1a\u4ee5\u4e0a\u4e3a Supercell \u5b98\u65b9\u5168\u7403\u6392\u884c\u699c\u73a9\u5bb6\u8fd1\u671f\u6218\u6597\u8bb0\u5f55\u7684\u6709\u9650\u6837\u672c"
-                f"\uff08{card.get('sample_battles', 0)} \u573a\uff0c\u6293\u53d6\u4e8e {card.get('fetched_at', '\u672a\u77e5')}\uff09\uff0cnot global meta.",
+                f"\uff08{card.get('sample_battles', 0)} \u573a\uff0c\u6293\u53d6\u4e8e {fetched_at}\uff09\uff0cnot global meta.",
                 "\u53c2\u8003\u6765\u6e90\uff1a",
                 f"[1] Supercell API live sample | {card.get('card_name')}",
             ]

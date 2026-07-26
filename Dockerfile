@@ -2,8 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
 COPY requirements.lock.txt .
-RUN pip install --no-cache-dir --requirement requirements.lock.txt
+RUN pip install --no-cache-dir --timeout 120 --requirement requirements.lock.txt
 
 COPY . .
 
