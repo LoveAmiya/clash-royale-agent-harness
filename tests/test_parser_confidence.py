@@ -127,6 +127,15 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["parse_source"], "local_rule")
         self.assertIn("rejected a high-confidence", parsed["parse_reason"])
 
+    async def test_llm_reject_keeps_current_mainstream_decks_on_rag_route(self):
+        with patch("runtime_multi.generate_model_text", AsyncMock(return_value='{"intent":"reject"}')):
+            parsed = await parse_user_query("当前主流卡组有哪些？", self.card_data, api_key="test-key")
+
+        self.assertEqual(parsed["intent"], "meta_analysis_query")
+        self.assertEqual(parsed["parse_source"], "local_rule")
+        self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_HIGH)
+        self.assertIn("rejected a high-confidence", parsed["parse_reason"])
+
     async def test_llm_non_json_response_keeps_local_parse_with_reason(self):
         fake_agent = AsyncMock(return_value="not json")
 

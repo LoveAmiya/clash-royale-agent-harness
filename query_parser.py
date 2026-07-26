@@ -473,7 +473,7 @@ PARSER_SYSTEM_PROMPT = (
     "1. 问赛程、下一轮、谁上场、某轮打谁 -> schedule_query。\n"
     "1.1 问总结一下接下来的赛程、后面还有几场比赛、赛程压力怎么样 -> schedule_summary_query。\n"
     "1.2 问下一轮怎么准备、下一场比赛有什么准备建议、推荐可练卡组 -> match_preparation_query。\n"
-    "1.3 问当前环境、卡牌定位、搭配、克制关系、打法或反制方案 -> meta_analysis_query。\n"
+    "1.3 问当前环境、当前主流卡组、卡牌定位、搭配、克制关系、打法或反制方案 -> meta_analysis_query。\n"
     "2. 问热门卡组、卡组排行、某名次卡组 -> deck_query。\n"
     "3. 问单卡使用率/胜率，或问前几张高使用率卡牌、某名次卡牌 -> card_query。\n"
     "3.1 问两张卡哪个更高/更强/谁更高，解析为 card_compare_query，并给出 card_names。\n"
@@ -820,6 +820,7 @@ def is_meta_analysis_query(question: str) -> bool:
     analysis_keywords = [
         "当前版本",
         "当前环境",
+        "当前主流卡组",
         "整体环境",
         "环境是什么样",
         "环境怎么样",
