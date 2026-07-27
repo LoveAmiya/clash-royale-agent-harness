@@ -1,14 +1,15 @@
-"""Small production safeguards shared by the FastAPI runtime.
+"""Production safeguards shared by the FastAPI runtime.
 
-The module intentionally uses only the standard library. The application is
-deployed as one process today, so an in-memory quota is an explicit local
-protection rather than a substitute for an edge proxy or distributed limiter.
+Local runs use an in-memory quota. Multi-instance deployments select the Redis
+backend so every API process shares the same rate and concurrency boundary.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
+import json
 import re
 import threading
 import time
@@ -19,6 +20,79 @@ from dataclasses import dataclass
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SENSITIVE_FIELD_PATTERN = re.compile(r"(?:api[_-]?key|token|authorization|secret|password)", re.IGNORECASE)
+
+
+class RequestBodyLimitMiddleware:
+    """Enforce a byte limit from ASGI receive messages, including chunked bodies."""
+
+    def __init__(self, app, *, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max(1, int(max_body_bytes))
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        request_id = normalize_request_id(headers.get(b"x-request-id", b"").decode("ascii", errors="ignore"))
+        scope.setdefault("state", {})["request_id"] = request_id
+        content_length = headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                declared_length = int(content_length)
+            except ValueError:
+                await self._send_error(send, 400, "invalid_content_length", request_id)
+                return
+            if declared_length < 0:
+                await self._send_error(send, 400, "invalid_content_length", request_id)
+                return
+            if declared_length > self.max_body_bytes:
+                await self._send_error(send, 413, "request_body_too_large", request_id)
+                return
+
+        received_bytes = 0
+        buffered_messages = []
+        while True:
+            message = await receive()
+            buffered_messages.append(message)
+            if message.get("type") != "http.request":
+                break
+            received_bytes += len(message.get("body", b""))
+            if received_bytes > self.max_body_bytes:
+                await self._send_error(send, 413, "request_body_too_large", request_id)
+                return
+            if not message.get("more_body", False):
+                break
+
+        message_index = 0
+
+        async def replay_receive():
+            nonlocal message_index
+            if message_index < len(buffered_messages):
+                message = buffered_messages[message_index]
+                message_index += 1
+                return message
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+    @staticmethod
+    async def _send_error(send, status_code: int, error: str, request_id: str) -> None:
+        body = json.dumps({"error": error, "request_id": request_id}, separators=(",", ":")).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status_code,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                    (b"x-request-id", request_id.encode("ascii")),
+                    (b"x-content-type-options", b"nosniff"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
 def normalize_request_id(value: object) -> str:
@@ -55,6 +129,7 @@ class QuotaDecision:
     allowed: bool
     reason: str | None = None
     retry_after_seconds: int = 0
+    lease_id: str | None = None
 
 
 class ProcessQuota:
@@ -75,6 +150,7 @@ class ProcessQuota:
         self._lock = asyncio.Lock()
         self._requests_by_client: dict[str, deque[float]] = defaultdict(deque)
         self._in_flight = 0
+        self._leases: set[str] = set()
 
     @property
     def in_flight(self) -> int:
@@ -95,15 +171,29 @@ class ProcessQuota:
             if self._in_flight >= self.max_concurrent:
                 return QuotaDecision(False, "concurrency", 1)
 
+            lease_id = uuid.uuid4().hex
             timestamps.append(now)
             self._in_flight += 1
+            self._leases.add(lease_id)
             self._prune_clients_locked(boundary)
-            return QuotaDecision(True)
+            return QuotaDecision(True, lease_id=lease_id)
 
-    def release(self) -> None:
-        # The quota is used only from the FastAPI event loop. Keeping release
-        # synchronous makes it safe to call in a streaming generator's finally.
-        self._in_flight = max(0, self._in_flight - 1)
+    async def release(self, lease_id: str | None = None) -> None:
+        async with self._lock:
+            if lease_id is not None and lease_id not in self._leases:
+                return
+            if lease_id is not None:
+                self._leases.discard(lease_id)
+            self._in_flight = max(0, self._in_flight - 1)
+
+    async def close(self) -> None:
+        return None
+
+    async def probe(self) -> bool:
+        return True
+
+    def status(self) -> dict[str, object]:
+        return {"backend": "memory", "available": True, "in_flight": self._in_flight}
 
     def _prune_clients_locked(self, boundary: float) -> None:
         for client_id in list(self._requests_by_client):
@@ -117,6 +207,174 @@ class ProcessQuota:
             # memory use. Clearing only expired data is preferred; if all are
             # active, reset accounting rather than retaining attacker input.
             self._requests_by_client.clear()
+
+
+_REDIS_ACQUIRE_SCRIPT = """
+local now = redis.call('TIME')
+local now_ms = (tonumber(now[1]) * 1000) + math.floor(tonumber(now[2]) / 1000)
+local window_ms = tonumber(ARGV[4])
+local lease_ms = tonumber(ARGV[5])
+local max_concurrent = tonumber(ARGV[2])
+local rate_limit = tonumber(ARGV[3])
+
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms - window_ms)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now_ms)
+
+local rate_count = redis.call('ZCARD', KEYS[1])
+if rate_limit > 0 and rate_count >= rate_limit then
+  local earliest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  local retry_ms = window_ms
+  if earliest[2] then
+    retry_ms = math.max(1000, tonumber(earliest[2]) + window_ms - now_ms)
+  end
+  return {0, 1, retry_ms}
+end
+
+if redis.call('ZCARD', KEYS[2]) >= max_concurrent then
+  local earliest_lease = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+  local retry_ms = 1000
+  if earliest_lease[2] then
+    retry_ms = math.max(1000, tonumber(earliest_lease[2]) - now_ms)
+  end
+  return {0, 2, retry_ms}
+end
+
+redis.call('ZADD', KEYS[1], now_ms, ARGV[1])
+redis.call('PEXPIRE', KEYS[1], window_ms + 1000)
+redis.call('ZADD', KEYS[2], now_ms + lease_ms, ARGV[1])
+redis.call('PEXPIRE', KEYS[2], lease_ms + 1000)
+return {1, 0, 0}
+"""
+
+_REDIS_RELEASE_SCRIPT = "return redis.call('ZREM', KEYS[1], ARGV[1])"
+
+
+class RedisProcessQuota:
+    """Atomic cross-process quota backed by Redis sorted sets and expiring leases."""
+
+    def __init__(
+        self,
+        redis_client,
+        *,
+        max_concurrent: int,
+        requests_per_minute: int,
+        lease_seconds: float,
+        key_prefix: str = "cr-agent:process-quota",
+        window_seconds: float = 60.0,
+        fail_mode: str = "closed",
+    ) -> None:
+        self._redis = redis_client
+        self.max_concurrent = max(1, int(max_concurrent))
+        self.requests_per_minute = max(0, int(requests_per_minute))
+        self.lease_seconds = max(1.0, float(lease_seconds))
+        self.window_seconds = max(1.0, float(window_seconds))
+        self.key_prefix = key_prefix.strip().rstrip(":") or "cr-agent:process-quota"
+        self.fail_mode = "open" if fail_mode == "open" else "closed"
+        self._available = True
+        self._last_error: str | None = None
+
+    async def try_acquire(self, client_id: str) -> QuotaDecision:
+        token = uuid.uuid4().hex
+        client_digest = hashlib.sha256((client_id[:256] or "unknown").encode("utf-8")).hexdigest()[:32]
+        rate_key = f"{self.key_prefix}:rate:{client_digest}"
+        inflight_key = f"{self.key_prefix}:inflight"
+        try:
+            result = await self._redis.eval(
+                _REDIS_ACQUIRE_SCRIPT,
+                2,
+                rate_key,
+                inflight_key,
+                token,
+                self.max_concurrent,
+                self.requests_per_minute,
+                int(self.window_seconds * 1000),
+                int(self.lease_seconds * 1000),
+            )
+            self._available = True
+            self._last_error = None
+        except Exception as exc:
+            self._available = False
+            self._last_error = type(exc).__name__
+            if self.fail_mode == "open":
+                return QuotaDecision(True, reason="quota_backend_bypassed")
+            return QuotaDecision(False, "quota_backend_unavailable", 1)
+
+        allowed, reason_code, retry_ms = (int(result[0]), int(result[1]), int(result[2]))
+        if allowed:
+            return QuotaDecision(True, lease_id=token)
+        reason = "rate_limit" if reason_code == 1 else "concurrency"
+        return QuotaDecision(False, reason, max(1, (retry_ms + 999) // 1000))
+
+    async def release(self, lease_id: str | None = None) -> None:
+        if not lease_id:
+            return
+        try:
+            await self._redis.eval(
+                _REDIS_RELEASE_SCRIPT,
+                1,
+                f"{self.key_prefix}:inflight",
+                lease_id,
+            )
+            self._available = True
+            self._last_error = None
+        except Exception as exc:
+            self._available = False
+            self._last_error = type(exc).__name__
+
+    async def close(self) -> None:
+        close = getattr(self._redis, "aclose", None)
+        if close is not None:
+            await close()
+
+    async def probe(self) -> bool:
+        try:
+            await self._redis.ping()
+            self._available = True
+            self._last_error = None
+            return True
+        except Exception as exc:
+            self._available = False
+            self._last_error = type(exc).__name__
+            return False
+
+    def status(self) -> dict[str, object]:
+        return {
+            "backend": "redis",
+            "available": self._available,
+            "fail_mode": self.fail_mode,
+            "last_error_type": self._last_error,
+        }
+
+
+def create_process_quota(
+    *,
+    backend: str,
+    max_concurrent: int,
+    requests_per_minute: int,
+    redis_url: str = "",
+    lease_seconds: float = 300,
+    key_prefix: str = "cr-agent:process-quota",
+    fail_mode: str = "closed",
+):
+    """Create the configured quota without importing Redis for local memory mode."""
+    if backend != "redis":
+        return ProcessQuota(
+            max_concurrent=max_concurrent,
+            requests_per_minute=requests_per_minute,
+        )
+    if not redis_url:
+        raise ValueError("REDIS_URL is required when PROCESS_QUOTA_BACKEND=redis")
+    from redis.asyncio import Redis
+
+    client = Redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+    return RedisProcessQuota(
+        client,
+        max_concurrent=max_concurrent,
+        requests_per_minute=requests_per_minute,
+        lease_seconds=lease_seconds,
+        key_prefix=key_prefix,
+        fail_mode=fail_mode,
+    )
 
 
 class RuntimeMetrics:

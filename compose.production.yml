@@ -10,6 +10,9 @@ x-api-common: &api-common
     RUNTIME_HOST: 0.0.0.0
     RUNTIME_PORT: 8091
     LOG_FORMAT: json
+    PROCESS_QUOTA_BACKEND: redis
+    PROCESS_QUOTA_FAIL_MODE: closed
+    REDIS_URL: redis://redis:6379/0
   volumes:
     - ./data:/app/data
   restart: unless-stopped
@@ -22,9 +25,27 @@ x-api-common: &api-common
 services:
   api-1:
     <<: *api-common
+    depends_on:
+      redis:
+        condition: service_healthy
 
   api-2:
     <<: *api-common
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   collector:
     build: .
@@ -105,6 +126,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  redis_data:
   caddy_data:
   caddy_config:
   prometheus_data:

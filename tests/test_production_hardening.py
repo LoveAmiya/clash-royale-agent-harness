@@ -9,13 +9,126 @@ from support import install_test_stubs
 install_test_stubs()
 
 from runtime_events import RuntimeEventEmitter
-from runtime_hardening import ProcessQuota, RuntimeMetrics, authorize_admin, normalize_request_id, redact_for_client
+from runtime_hardening import (
+    ProcessQuota,
+    RequestBodyLimitMiddleware,
+    RedisProcessQuota,
+    RuntimeMetrics,
+    authorize_admin,
+    normalize_request_id,
+    redact_for_client,
+)
 from query_answering import AnswerResult
 import runtime_multi
 import web_app
 
 
+class _FakeRedisScriptClient:
+    """Small shared-state script double; production behavior is integration-tested with Redis."""
+
+    def __init__(self, *, fail=False):
+        self.fail = fail
+        self.rate_clients = set()
+        self.leases = set()
+
+    async def eval(self, script, number_of_keys, *args):
+        if self.fail:
+            raise ConnectionError("redis unavailable")
+        if number_of_keys == 2:
+            rate_key, _inflight_key, token, max_concurrent, rate_limit, *_ = args
+            if int(rate_limit) and rate_key in self.rate_clients:
+                return [0, 1, 60_000]
+            if len(self.leases) >= int(max_concurrent):
+                return [0, 2, 1_000]
+            self.rate_clients.add(rate_key)
+            self.leases.add(token)
+            return [1, 0, 0]
+        token = args[1]
+        self.leases.discard(token)
+        return 1
+
+    async def aclose(self):
+        return None
+
+
 class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
+    async def test_request_body_limit_counts_streamed_bytes_without_content_length(self):
+        app_called = False
+
+        async def inner_app(scope, receive, send):
+            nonlocal app_called
+            app_called = True
+            while (await receive()).get("more_body", False):
+                pass
+
+        middleware = RequestBodyLimitMiddleware(inner_app, max_body_bytes=5)
+        messages = iter(
+            [
+                {"type": "http.request", "body": b"123", "more_body": True},
+                {"type": "http.request", "body": b"456", "more_body": False},
+            ]
+        )
+        sent = []
+
+        async def receive():
+            return next(messages)
+
+        async def send(message):
+            sent.append(message)
+
+        await middleware(
+            {"type": "http", "method": "POST", "path": "/process", "headers": [], "state": {}},
+            receive,
+            send,
+        )
+
+        self.assertFalse(app_called)
+        self.assertEqual(sent[0]["status"], 413)
+        self.assertIn(b"request_body_too_large", sent[1]["body"])
+
+    async def test_full_asgi_stack_rejects_chunked_process_body(self):
+        messages = iter(
+            [
+                {"type": "http.request", "body": b'{"query":"', "more_body": True},
+                {
+                    "type": "http.request",
+                    "body": b"x" * runtime_multi.MAX_REQUEST_BODY_BYTES,
+                    "more_body": True,
+                },
+                {"type": "http.request", "body": b'"}', "more_body": False},
+            ]
+        )
+        sent = []
+
+        async def receive():
+            return next(messages)
+
+        async def send(message):
+            sent.append(message)
+
+        await runtime_multi.app(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "http",
+                "path": "/process",
+                "raw_path": b"/process",
+                "query_string": b"",
+                "root_path": "",
+                "headers": [(b"content-type", b"application/json"), (b"x-request-id", b"chunked-limit")],
+                "client": ("127.0.0.1", 50000),
+                "server": ("127.0.0.1", 8091),
+                "state": {},
+            },
+            receive,
+            send,
+        )
+
+        self.assertEqual(sent[0]["status"], 413)
+        self.assertIn((b"x-request-id", b"chunked-limit"), sent[0]["headers"])
+
     async def test_process_quota_rejects_concurrent_and_rate_limited_requests(self):
         quota = ProcessQuota(max_concurrent=1, requests_per_minute=1)
 
@@ -26,10 +139,56 @@ class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(concurrent.allowed)
         self.assertEqual(concurrent.reason, "concurrency")
 
-        quota.release()
+        await quota.release(first.lease_id)
         rate_limited = await quota.try_acquire("127.0.0.1")
         self.assertFalse(rate_limited.allowed)
         self.assertEqual(rate_limited.reason, "rate_limit")
+
+    async def test_redis_quota_shares_rate_and_concurrency_state(self):
+        redis = _FakeRedisScriptClient()
+        first_instance = RedisProcessQuota(
+            redis,
+            max_concurrent=1,
+            requests_per_minute=1,
+            lease_seconds=30,
+            key_prefix="test-quota",
+        )
+        second_instance = RedisProcessQuota(
+            redis,
+            max_concurrent=1,
+            requests_per_minute=1,
+            lease_seconds=30,
+            key_prefix="test-quota",
+        )
+
+        first = await first_instance.try_acquire("198.51.100.5")
+        concurrent = await second_instance.try_acquire("198.51.100.6")
+        self.assertTrue(first.allowed)
+        self.assertIsNotNone(first.lease_id)
+        self.assertFalse(concurrent.allowed)
+        self.assertEqual(concurrent.reason, "concurrency")
+
+        await second_instance.release(first.lease_id)
+        rate_limited = await second_instance.try_acquire("198.51.100.5")
+        self.assertFalse(rate_limited.allowed)
+        self.assertEqual(rate_limited.reason, "rate_limit")
+
+    async def test_redis_quota_fails_closed_when_backend_is_unavailable(self):
+        redis = _FakeRedisScriptClient(fail=True)
+        quota = RedisProcessQuota(
+            redis,
+            max_concurrent=8,
+            requests_per_minute=30,
+            lease_seconds=30,
+            key_prefix="test-quota",
+            fail_mode="closed",
+        )
+
+        decision = await quota.try_acquire("198.51.100.5")
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "quota_backend_unavailable")
+        self.assertFalse(quota.status()["available"])
 
     async def test_event_emitter_propagates_request_id_without_breaking_content_contract(self):
         emitter = RuntimeEventEmitter(request_id="req-123")

@@ -58,6 +58,11 @@ from app_config import (
     MAX_REQUEST_BODY_BYTES,
     PROCESS_MAX_CONCURRENT,
     PROCESS_RATE_LIMIT_PER_MINUTE,
+    PROCESS_QUOTA_BACKEND,
+    PROCESS_QUOTA_FAIL_MODE,
+    PROCESS_QUOTA_KEY_PREFIX,
+    PROCESS_QUOTA_LEASE_SECONDS,
+    REDIS_URL,
     RAG_QUALITY_GATE_ENABLED,
     RAG_MIN_DOCUMENTS,
     RAG_MIN_SOURCE_TYPES,
@@ -80,7 +85,15 @@ from model_gateway import (
 )
 from rag_quality import RAGQualityGateError, evaluate_rag_quality, persist_quality_report
 from runtime_events import RuntimeEventEmitter
-from runtime_hardening import ProcessQuota, RuntimeMetrics, authorize_admin, normalize_request_id, redact_for_client
+from runtime_hardening import (
+    ProcessQuota,
+    RequestBodyLimitMiddleware,
+    RuntimeMetrics,
+    authorize_admin,
+    create_process_quota,
+    normalize_request_id,
+    redact_for_client,
+)
 from supercell_live import SupercellAPIClient
 from snapshot_store import (
     DAILY_REFRESH_INTERVAL,
@@ -687,10 +700,17 @@ def get_readiness_status(
     snapshot_status = getattr(app.state, "live_refresh_status", "missing")
     rag_status = getattr(app.state, "rag_status", "not_required")
     initialized = bool(getattr(app.state, "initialized", False))
+    quota = getattr(app.state, "process_quota", None)
+    quota_status = quota.status() if quota is not None else {
+        "backend": PROCESS_QUOTA_BACKEND,
+        "available": PROCESS_QUOTA_BACKEND == "memory",
+    }
     blockers: list[str] = []
     degraded_reasons: list[str] = []
     if not initialized:
         blockers.append("runtime_initializing")
+    if not quota_status.get("available", False) and PROCESS_QUOTA_FAIL_MODE == "closed":
+        blockers.append("process_quota_unavailable")
     if strict and not model_configured:
         blockers.append("model_api_unconfigured")
     model_provider = get_model_provider_status()
@@ -726,6 +746,7 @@ def get_readiness_status(
         "initialized": initialized,
         "model_api_configured": model_configured,
         "model_provider": model_provider,
+        "quota": quota_status,
         "external_api_required": strict,
         "snapshot_status": snapshot_status,
         "snapshot_usable": snapshot_usable,
@@ -1311,10 +1332,16 @@ async def lifespan(app: FastAPI):
         max_correction_chars=FEEDBACK_MAX_CORRECTION_CHARS,
         answer_ttl_seconds=FEEDBACK_CACHE_TTL_SECONDS,
     )
-    app.state.process_quota = ProcessQuota(
+    app.state.process_quota = create_process_quota(
+        backend=PROCESS_QUOTA_BACKEND,
         max_concurrent=PROCESS_MAX_CONCURRENT,
         requests_per_minute=PROCESS_RATE_LIMIT_PER_MINUTE,
+        redis_url=REDIS_URL,
+        lease_seconds=PROCESS_QUOTA_LEASE_SECONDS,
+        key_prefix=PROCESS_QUOTA_KEY_PREFIX,
+        fail_mode=PROCESS_QUOTA_FAIL_MODE,
     )
+    await app.state.process_quota.probe()
     app.state.schedule_data = load_json_file(SCHEDULE_FILE)
     app.state.bootstrap_top_decks_data = load_json_file(TOP_DECKS_FILE)
     app.state.bootstrap_cards_meta_data = load_json_file(CARDS_META_FILE)
@@ -1388,6 +1415,9 @@ async def lifespan(app: FastAPI):
                 await rag_task
             except asyncio.CancelledError:
                 pass
+        quota = getattr(app.state, "process_quota", None)
+        if quota is not None:
+            await quota.close()
 
 
 app = FastAPI(title="ClashRoyaleMatchCoordinator", lifespan=lifespan)
@@ -1402,32 +1432,11 @@ app.add_middleware(
 
 @app.middleware("http")
 async def runtime_protection_middleware(request: Request, call_next):
-    """Attach correlation/security headers and reject oversized bodies early."""
-    request_id = normalize_request_id(request.headers.get("X-Request-ID"))
+    """Attach correlation, metrics, and browser security headers."""
+    request_id = getattr(request.state, "request_id", None) or normalize_request_id(request.headers.get("X-Request-ID"))
     request.state.request_id = request_id
     metrics = getattr(app.state, "runtime_metrics", None)
     started_at = time.perf_counter()
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            if int(content_length) > MAX_REQUEST_BODY_BYTES:
-                response = JSONResponse(
-                    status_code=413,
-                    content={"error": "request_body_too_large", "request_id": request_id},
-                )
-                response.headers["X-Request-ID"] = request_id
-                if metrics is not None:
-                    metrics.record_http(route=request.url.path, status_code=413, duration_seconds=time.perf_counter() - started_at)
-                return response
-        except ValueError:
-            response = JSONResponse(
-                status_code=400,
-                content={"error": "invalid_content_length", "request_id": request_id},
-            )
-            response.headers["X-Request-ID"] = request_id
-            if metrics is not None:
-                metrics.record_http(route=request.url.path, status_code=400, duration_seconds=time.perf_counter() - started_at)
-            return response
 
     try:
         response = await call_next(request)
@@ -1444,8 +1453,14 @@ async def runtime_protection_middleware(request: Request, call_next):
     return response
 
 
+# Added after the BaseHTTP middleware so raw ASGI body bytes are bounded before
+# Starlette or Pydantic consume them, including requests without Content-Length.
+app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
+
+
 @app.get("/health")
 async def health():
+    quota = getattr(app.state, "process_quota", None)
     return {
         "status": "healthy",
         "runtime_contract_version": RUNTIME_CONTRACT_VERSION,
@@ -1460,6 +1475,7 @@ async def health():
         "external_api_required": EXTERNAL_API_REQUIRED,
         "model_api_configured": bool(os.getenv("OPENAI_API_KEY")),
         "live_sample_target_battles": get_live_sample_target(app),
+        "quota": quota.status() if quota is not None else {"backend": PROCESS_QUOTA_BACKEND, "available": False},
     }
 
 
@@ -1568,14 +1584,27 @@ async def process(request: Request, payload: ProcessRequest | None = None):
         app.state.runtime_metrics = metrics
     quota = getattr(app.state, "process_quota", None)
     if quota is None:
-        quota = ProcessQuota(max_concurrent=PROCESS_MAX_CONCURRENT, requests_per_minute=PROCESS_RATE_LIMIT_PER_MINUTE)
+        quota = create_process_quota(
+            backend=PROCESS_QUOTA_BACKEND,
+            max_concurrent=PROCESS_MAX_CONCURRENT,
+            requests_per_minute=PROCESS_RATE_LIMIT_PER_MINUTE,
+            redis_url=REDIS_URL,
+            lease_seconds=PROCESS_QUOTA_LEASE_SECONDS,
+            key_prefix=PROCESS_QUOTA_KEY_PREFIX,
+            fail_mode=PROCESS_QUOTA_FAIL_MODE,
+        )
         app.state.process_quota = quota
     decision = await quota.try_acquire(client_id)
     if not decision.allowed:
         metrics.record_process(outcome="rate_limited", total_seconds=0.0)
+        backend_unavailable = decision.reason == "quota_backend_unavailable"
         raise HTTPException(
-            status_code=429,
-            detail="process request rate or concurrency limit exceeded",
+            status_code=503 if backend_unavailable else 429,
+            detail=(
+                "process quota backend is unavailable"
+                if backend_unavailable
+                else "process request rate or concurrency limit exceeded"
+            ),
             headers={"Retry-After": str(decision.retry_after_seconds or 1)},
         )
 
@@ -1801,7 +1830,7 @@ async def process(request: Request, payload: ProcessRequest | None = None):
                 first_execution_seconds=(first_execution_at - started_at) if first_execution_at else None,
                 first_content_seconds=(first_content_at - started_at) if first_content_at else None,
             )
-            quota.release()
+            await quota.release(decision.lease_id)
 
     return StreamingResponse(
         event_stream(),

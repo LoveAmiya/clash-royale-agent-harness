@@ -48,6 +48,15 @@ MAX_REQUEST_BODY_BYTES = _bounded_int("MAX_REQUEST_BODY_BYTES", 65_536, 1_024, 1
 MAX_QUERY_CHARS = _bounded_int("MAX_QUERY_CHARS", 8_000, 64, 100_000)
 PROCESS_MAX_CONCURRENT = _bounded_int("PROCESS_MAX_CONCURRENT", 8, 1, 128)
 PROCESS_RATE_LIMIT_PER_MINUTE = _bounded_int("PROCESS_RATE_LIMIT_PER_MINUTE", 30, 0, 10_000)
+PROCESS_QUOTA_BACKEND = os.getenv("PROCESS_QUOTA_BACKEND", "memory").strip().lower()
+if PROCESS_QUOTA_BACKEND not in {"memory", "redis"}:
+    PROCESS_QUOTA_BACKEND = "memory"
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+PROCESS_QUOTA_KEY_PREFIX = os.getenv("PROCESS_QUOTA_KEY_PREFIX", "cr-agent:process-quota").strip()
+PROCESS_QUOTA_LEASE_SECONDS = max(5, min(int(os.getenv("PROCESS_QUOTA_LEASE_SECONDS", "300")), 3600))
+PROCESS_QUOTA_FAIL_MODE = os.getenv("PROCESS_QUOTA_FAIL_MODE", "closed").strip().lower()
+if PROCESS_QUOTA_FAIL_MODE not in {"closed", "open"}:
+    PROCESS_QUOTA_FAIL_MODE = "closed"
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
 ALLOWED_ORIGINS = tuple(
     origin.strip().rstrip("/")
