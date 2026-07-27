@@ -51,7 +51,6 @@ it normally stops earlier once 20,000 unique records have been collected. Config
 credentials and port, then start normally:
 
 ```powershell
-cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 $env:SUPERCELL_LIVE_DATA_ENABLED = "true"
 $env:EXTERNAL_API_REQUIRED = "true"
 $env:RUNTIME_PORT = "8091"
@@ -64,10 +63,11 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 
 确定性问题优先从本地 JSON 数据回答；开放式环境分析和备战问题会先使用 RAG 检索，再由模型基于证据综合回答，避免把所有问题都交给模型猜测。
 
+前端“系统可视化”面板用于把升级价值直接展示给非开发用户：数据血缘卡解释官方快照如何进入结构化查询和 RAG，质量卡显示文档校验与 Recall@5，运行卡显示模型熔断、配额、反馈、请求成功率和 Prometheus 指标。面板读取状态接口，不会触发新的数据采集或模型调用。
+
 ## 先测试
 
 ```powershell
-cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
 
@@ -113,7 +113,6 @@ stages are written immediately so an upstream failure remains auditable.
 打开第一个 PowerShell：
 
 ```powershell
-cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 $env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
 $env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
 if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) { throw "用户环境变量 OPENAI_API_KEY 未配置" }
@@ -147,7 +146,6 @@ Invoke-RestMethod http://127.0.0.1:8091/health
 打开第二个 PowerShell：
 
 ```powershell
-cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 powershell -ExecutionPolicy Bypass -File .\run_web.ps1
 ```
 
@@ -258,7 +256,7 @@ powershell -ExecutionPolicy Bypass -File .\test_alert_pipeline.ps1
 
 ## 本项目模型配置
 
-本项目使用 Codex 已配置的 OpenAI 兼容中转站：`https://crs.ruinique.com`。启动脚本会设置 `OPENAI_WIRE_API=responses`、`OPENAI_MODEL=gpt-5.5`，并让解析与 RAG 最终综合统一使用 `medium` 推理强度，以控制响应时间。真实凭证仍然只读取 `OPENAI_API_KEY` 环境变量，不写入项目文件。
+项目不再写死任何私人中转站。请在启动前按服务商文档设置 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和 `OPENAI_WIRE_API`；真实凭证只从当前进程的 `OPENAI_API_KEY` 读取。示例配置必须使用占位符，不能把真实 Key、私人地址或个人目录提交到 Git。
 
 ## 严格实时 API 模式
 
@@ -272,7 +270,6 @@ powershell -ExecutionPolicy Bypass -File .\test_alert_pipeline.ps1
 先在当前 PowerShell 设置凭证和端口。不要在终端、截图或聊天中打印任何 Token：
 
 ```powershell
-cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 $env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
 $env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
 $env:SUPERCELL_LIVE_DATA_ENABLED = "true"
@@ -338,7 +335,6 @@ Invoke-RestMethod http://127.0.0.1:8091/health
 后端保持运行时，在第二个 PowerShell 执行：
 
 ```powershell
-cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 $env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8091"
 .\.venv\Scripts\python.exe evaluation\run_live_api_smoke.py
 ```

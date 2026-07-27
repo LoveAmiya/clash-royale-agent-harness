@@ -26,6 +26,9 @@ The system combines rule-based query parsing, skill routing, local JSON groundin
 - Model-provider circuit breaker and stream capability telemetry
 - Request-bound feedback and reviewable continuous-evaluation candidates
 - Split collector/API deployment with Caddy, Prometheus, Grafana, Loki, and Promtail
+- Browser operations dashboard for snapshot lineage, RAG quality gates, model circuit state, quota, feedback, and Prometheus metrics
+
+Verified on 2026-07-28: `636` unit/integration tests passed with `1` documented skip; the deterministic evaluation passed all `344` active cases, with `4` optional RAG cases skipped.
 
 ### Repository Layout
 
@@ -221,8 +224,8 @@ OPENAI_API_KEY=your_key_here
 RUNTIME_PORT=8091
 WEB_PORT=8080
 BACKEND_URL=http://127.0.0.1:8091/process
-OPENAI_MODEL=gpt-5.5
-OPENAI_BASE_URL=https://crs.ruinique.com
+OPENAI_MODEL=<your-model-name>
+OPENAI_BASE_URL=<your-openai-compatible-base-url>
 OPENAI_WIRE_API=responses
 OPENAI_REASONING_EFFORT=medium
 PARSER_REASONING_EFFORT=medium
@@ -392,6 +395,9 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的 Agent 工作流项目，�
 - 可追踪执行 harness
 - 本地评测集和单元测试
 - Dockerfile 和 PowerShell 辅助脚本
+- 浏览器系统面板，展示快照血缘、RAG 质量门槛、模型熔断、配额、反馈和 Prometheus 指标
+
+2026-07-28 本机验收：`636` 项单元/集成测试通过，`1` 项按设计跳过；确定性评测 `344/344` 有效用例通过，另有 `4` 项可选 RAG 用例跳过。
 
 ### 项目结构
 
@@ -521,8 +527,8 @@ docker run --rm -p 8091:8091 --env-file .env clash-royale-agent
 RUNTIME_PORT=8091
 WEB_PORT=8080
 BACKEND_URL=http://127.0.0.1:8091/process
-OPENAI_MODEL=gpt-5.5
-OPENAI_BASE_URL=https://crs.ruinique.com
+OPENAI_MODEL=<your-model-name>
+OPENAI_BASE_URL=<your-openai-compatible-base-url>
 OPENAI_WIRE_API=responses
 OPENAI_REASONING_EFFORT=medium
 PARSER_REASONING_EFFORT=medium
@@ -534,7 +540,7 @@ PARSER_CALL_TIMEOUT_SECONDS=45
 MODEL_CALL_TIMEOUT_SECONDS=120
 ```
 
-本地运行前，请在当前 PowerShell 窗口设置 `OPENAI_API_KEY`，不要把真实 Key 写进源码或提交到 Git。默认运行时使用已配置的 OpenAI 兼容中转站、Responses API、`gpt-5.5`，解析与最终综合统一使用 `medium` 推理强度。
+本地运行前，请在当前 PowerShell 窗口设置 `OPENAI_API_KEY`，并按所选服务商配置 `OPENAI_MODEL`、`OPENAI_BASE_URL` 和 `OPENAI_WIRE_API`。不要把真实 Key、私人中转站地址或个人目录写进源码、文档或 Git。
 
 直接基于 JSON 的查询可以只依赖本地数据运行。环境分析和战队备战类问题会先从 RAG 语料检索证据，再由 LLM 生成受限综合回答，并在答案末尾附来源链接和数据时效边界。Ollama embedding 不可用时，检索会在短超时后自动降级为 BM25。浏览器会直接消费后端 SSE，显示处理中状态和最终执行 Trace。
 

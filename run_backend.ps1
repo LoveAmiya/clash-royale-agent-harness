@@ -14,10 +14,11 @@ if (-not $env:RUNTIME_PORT) {
     $env:RUNTIME_PORT = "8091"
 }
 
-# Keep this project's runtime aligned with the Codex OpenAI-compatible relay.
-# API credentials are still read only from OPENAI_API_KEY in the environment.
-$env:OPENAI_BASE_URL = "https://crs.ruinique.com"
-$env:OPENAI_WIRE_API = "responses"
+# Provider endpoints and credentials must come from the caller's environment.
+# Never hard-code a private relay or API key in this repository.
+if (-not $env:OPENAI_WIRE_API) {
+    $env:OPENAI_WIRE_API = "responses"
+}
 if (-not $env:OPENAI_MODEL) {
     $env:OPENAI_MODEL = "gpt-5.5"
 }

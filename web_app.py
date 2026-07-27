@@ -20,6 +20,10 @@ app = FastAPI(title="CR Agent Web UI")
 LIVE_SAMPLE_SETTINGS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/settings/live-sample"
 SNAPSHOT_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/snapshot/status"
 FEEDBACK_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/feedback"
+READY_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/ready"
+MODEL_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/model/status"
+METRICS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/metrics"
+FEEDBACK_STATS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/feedback/stats"
 
 
 HTML_PAGE = """
@@ -95,6 +99,133 @@ HTML_PAGE = """
     }
     @media (max-width: 720px) {
       .snapshot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .dashboard-panel {
+      margin-bottom: 16px;
+      border: 1px solid #dbe3ef;
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px 16px;
+    }
+    .dashboard-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .dashboard-title {
+      color: #1f2937;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .dashboard-state {
+      color: #2563eb;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .viz-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 12px;
+      min-width: 0;
+      background: #fafafa;
+    }
+    .viz-card-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #111827;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .viz-subtitle {
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .status-pill {
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      white-space: nowrap;
+      background: #e5e7eb;
+      color: #374151;
+    }
+    .status-ok { background: #dcfce7; color: #166534; }
+    .status-warn { background: #fef3c7; color: #92400e; }
+    .status-bad { background: #fee2e2; color: #991b1b; }
+    .viz-flow {
+      display: grid;
+      gap: 7px;
+    }
+    .viz-step {
+      border-left: 3px solid #93c5fd;
+      padding-left: 8px;
+      line-height: 1.45;
+    }
+    .viz-step-title {
+      color: #111827;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .viz-step-detail {
+      color: #64748b;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .viz-kv {
+      display: grid;
+      grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+      gap: 6px 10px;
+      color: #334155;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .viz-kv-label { color: #64748b; }
+    .viz-kv-value {
+      color: #111827;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .source-bars {
+      display: grid;
+      gap: 7px;
+      margin-top: 8px;
+    }
+    .source-row {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr) 40px;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: #334155;
+    }
+    .source-meter {
+      height: 7px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      overflow: hidden;
+    }
+    .source-meter > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: #60a5fa;
+    }
+    .ops-list {
+      display: grid;
+      gap: 8px;
+    }
+    @media (max-width: 900px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
     }
     .chat-box {
       background: #fff;
@@ -299,6 +430,36 @@ HTML_PAGE = """
       <div id="snapshotGrid" class="snapshot-grid"></div>
     </section>
 
+    <section class="dashboard-panel" aria-live="polite" aria-label="系统可视化面板">
+      <div class="dashboard-header">
+        <span class="dashboard-title">系统可视化</span>
+        <span id="dashboardState" class="dashboard-state">正在读取</span>
+      </div>
+      <div class="dashboard-grid">
+        <article id="dataLineageViz" class="viz-card" aria-label="数据血缘与快照对齐">
+          <div class="viz-card-title">
+            <span>数据血缘</span>
+            <span class="status-pill">等待</span>
+          </div>
+          <div class="viz-subtitle">展示 Supercell 快照如何同时驱动结构化查询和 RAG。</div>
+        </article>
+        <article id="qualityGateViz" class="viz-card" aria-label="RAG 质量门槛">
+          <div class="viz-card-title">
+            <span>RAG 质量</span>
+            <span class="status-pill">等待</span>
+          </div>
+          <div class="viz-subtitle">展示证据切片、召回探针和无效文档校验。</div>
+        </article>
+        <article id="opsViz" class="viz-card" aria-label="运行与模型状态">
+          <div class="viz-card-title">
+            <span>运行状态</span>
+            <span class="status-pill">等待</span>
+          </div>
+          <div class="viz-subtitle">展示模型熔断、流式模式、反馈和配额状态。</div>
+        </article>
+      </div>
+    </section>
+
     <div id="chatBox" class="chat-box"></div>
 
     <section class="trace-panel" aria-live="polite">
@@ -353,6 +514,10 @@ HTML_PAGE = """
     const debugTrace = document.getElementById("debugTrace");
     const snapshotState = document.getElementById("snapshotState");
     const snapshotGrid = document.getElementById("snapshotGrid");
+    const dashboardState = document.getElementById("dashboardState");
+    const dataLineageViz = document.getElementById("dataLineageViz");
+    const qualityGateViz = document.getElementById("qualityGateViz");
+    const opsViz = document.getElementById("opsViz");
 
     let sessionId = localStorage.getItem("cr_agent_session_id");
     if (!sessionId) {
@@ -412,6 +577,198 @@ HTML_PAGE = """
       }[status] || status || "未知";
     }
 
+    function makeEl(tag, className = "", text = "") {
+      const el = document.createElement(tag);
+      if (className) el.className = className;
+      if (text !== "") el.textContent = text;
+      return el;
+    }
+
+    function shortValue(value, left = 10, right = 6) {
+      if (!value) return "无";
+      const text = String(value);
+      if (text.length <= left + right + 3) return text;
+      return text.slice(0, left) + "..." + text.slice(-right);
+    }
+
+    function numberValue(value, fallback = 0) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function formatMaybePercent(value) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return "未记录";
+      return (Math.round(parsed * 1000) / 10) + "%";
+    }
+
+    function clearCard(panel, title, status, tone, subtitle) {
+      panel.innerHTML = "";
+      const header = makeEl("div", "viz-card-title");
+      header.appendChild(makeEl("span", "", title));
+      const pillClass = "status-pill " + (tone ? "status-" + tone : "");
+      header.appendChild(makeEl("span", pillClass, status));
+      panel.appendChild(header);
+      if (subtitle) panel.appendChild(makeEl("div", "viz-subtitle", subtitle));
+    }
+
+    function appendKvRows(parent, rows) {
+      const box = makeEl("div", "viz-kv");
+      rows.forEach(([label, value]) => {
+        box.appendChild(makeEl("div", "viz-kv-label", label));
+        box.appendChild(makeEl("div", "viz-kv-value", value == null || value === "" ? "无" : String(value)));
+      });
+      parent.appendChild(box);
+      return box;
+    }
+
+    function appendFlow(parent, steps) {
+      const flow = makeEl("div", "viz-flow");
+      steps.forEach(([title, detail]) => {
+        const item = makeEl("div", "viz-step");
+        item.appendChild(makeEl("div", "viz-step-title", title));
+        item.appendChild(makeEl("div", "viz-step-detail", detail));
+        flow.appendChild(item);
+      });
+      parent.appendChild(flow);
+      return flow;
+    }
+
+    function appendSourceBars(parent, counts) {
+      const entries = Object.entries(counts || {})
+        .map(([name, value]) => [name, numberValue(value)])
+        .filter(([, value]) => value > 0)
+        .sort((a, b) => b[1] - a[1]);
+      if (!entries.length) {
+        parent.appendChild(makeEl("div", "viz-subtitle", "暂无证据分布数据"));
+        return;
+      }
+      const maxValue = Math.max(...entries.map(([, value]) => value));
+      const bars = makeEl("div", "source-bars");
+      entries.slice(0, 9).forEach(([name, value]) => {
+        const row = makeEl("div", "source-row");
+        row.appendChild(makeEl("span", "", name));
+        const meter = makeEl("div", "source-meter");
+        const fill = makeEl("span");
+        fill.style.width = Math.max(3, Math.round((value / maxValue) * 100)) + "%";
+        meter.appendChild(fill);
+        row.appendChild(meter);
+        row.appendChild(makeEl("span", "", String(value)));
+        bars.appendChild(row);
+      });
+      parent.appendChild(bars);
+    }
+
+    function metricLineCount(metricsText) {
+      return String(metricsText || "")
+        .split("\n")
+        .filter(line => line.startsWith("cr_agent_"))
+        .length;
+    }
+
+    function renderVisualizationDashboard(snapshot, extra = {}) {
+      const rag = snapshot.rag || {};
+      const quality = rag.quality || rag.validation || (extra.ready && extra.ready.rag_document_validation) || {};
+      const sourceCounts = quality.source_counts || rag.document_counts || {};
+      const collection = snapshot.collection_metrics || {};
+      const leaderboard = snapshot.leaderboard || {};
+      const runtime = snapshot.runtime || {};
+      const ready = extra.ready || {};
+      const model = extra.model || {};
+      const feedback = extra.feedback || {};
+      const aligned = Boolean(
+        rag.fully_aligned ||
+        (ready.snapshot_rag_aligned && ready.snapshot_rag_fingerprint_aligned) ||
+        (rag.snapshot_aligned && rag.fingerprint_aligned)
+      );
+
+      clearCard(
+        dataLineageViz,
+        "数据血缘",
+        aligned ? "完全对齐" : "需关注",
+        aligned ? "ok" : "warn",
+        "从官方战斗日志到结构化聚合、RAG 证据和 active retriever 的链路。"
+      );
+      appendFlow(dataLineageViz, [
+        ["Supercell battle logs", String(collection.raw_battle_records || 0) + " raw / " + String(snapshot.sample_battles || 0) + " usable"],
+        ["official_daily_snapshot", (snapshot.snapshot_id || "无") + " | " + formatSnapshotTime(snapshot.fetched_at)],
+        ["结构化聚合", "cards_meta / top_decks / card_deck_stats 均来自当前快照"],
+        ["RAG evidence docs", String(quality.document_count || Object.values(sourceCounts).reduce((a, b) => a + numberValue(b), 0)) + " docs"],
+        ["active retriever", aligned ? "snapshot_id 与 docs_fingerprint 匹配" : "等待新索引完成或回退旧索引"]
+      ]);
+      appendKvRows(dataLineageViz, [
+        ["候选池", "前 " + String(leaderboard.candidate_limit || "-") + " 名"],
+        ["扫描排名", leaderboard.scanned_rank_end ? String(leaderboard.rank_start || 1) + "-" + String(leaderboard.scanned_rank_end) : "未完成"],
+        ["docs 指纹", shortValue(rag.snapshot_docs_fingerprint || quality.docs_fingerprint)],
+        ["index 指纹", shortValue(rag.index_docs_fingerprint)]
+      ]);
+
+      const invalidCount = numberValue(quality.invalid_document_count || (quality.invalid_evidence_doc_ids || []).length);
+      const qualityPassed = quality.passed !== false && invalidCount === 0;
+      clearCard(
+        qualityGateViz,
+        "RAG 质量",
+        qualityPassed ? "通过" : "阻止切换",
+        qualityPassed ? "ok" : "bad",
+        "每次快照发布前校验证据字段完整性、数值一致性、引用和召回探针。"
+      );
+      appendKvRows(qualityGateViz, [
+        ["文档总数", quality.document_count || Object.values(sourceCounts).reduce((a, b) => a + numberValue(b), 0)],
+        ["Recall@5", formatMaybePercent(quality.probe_recall_at_5)],
+        ["探针数", quality.probe_count || "未记录"],
+        ["无效文档", invalidCount],
+        ["失败项", (quality.failures || []).length]
+      ]);
+      appendSourceBars(qualityGateViz, sourceCounts);
+
+      const streamModes = model.stream_modes || {};
+      const streamSummary = Object.entries(streamModes)
+        .map(([name, value]) => name + ":" + value)
+        .join(" | ") || "未观测";
+      const quota = ready.quota || {};
+      const quotaOk = quota.available !== false;
+      const circuitOpen = model.circuit_state === "open";
+      clearCard(
+        opsViz,
+        "运行状态",
+        circuitOpen ? "模型熔断" : quotaOk ? "正常" : "配额后端异常",
+        circuitOpen || !quotaOk ? "warn" : "ok",
+        "展示模型网关、SSE 流式模式、反馈闭环、限流配额和 Prometheus 指标。"
+      );
+      appendKvRows(opsViz, [
+        ["ready", ready.status || "未知"],
+        ["quota", (quota.backend || "memory") + " | " + (quotaOk ? "available" : "unavailable")],
+        ["model", (model.circuit_state || "unknown") + " | failures=" + String(model.consecutive_failures ?? 0)],
+        ["stream", streamSummary],
+        ["feedback", "正向 " + String(feedback.positive || 0) + " | 负向 " + String(feedback.negative || 0) + " | 总计 " + String(feedback.total || 0)],
+        ["请求", String(runtime.process_requests || 0) + " | 成功 " + String(runtime.successes || 0) + " | 失败 " + String(runtime.failures || 0)],
+        ["P95", runtime.sample_size ? String(runtime.process_p95_ms || 0) + " ms" : "暂无样本"],
+        ["metrics", String(metricLineCount(extra.metrics)) + " 条 Prometheus 指标"]
+      ]);
+      dashboardState.textContent = extra.partial ? "部分状态可用" : "已更新";
+    }
+
+    async function loadVisualizationStatus(snapshot) {
+      dashboardState.textContent = "正在读取";
+      const readyPromise = fetch("/ready").then(resp => resp.ok ? resp.json() : null);
+      const modelPromise = fetch("/model/status").then(resp => resp.ok ? resp.json() : null);
+      const metricsPromise = fetch("/metrics").then(resp => resp.ok ? resp.text() : "");
+      const feedbackPromise = fetch("/feedback/stats").then(resp => resp.ok ? resp.json() : null);
+      const [ready, model, metrics, feedback] = await Promise.allSettled([
+        readyPromise,
+        modelPromise,
+        metricsPromise,
+        feedbackPromise
+      ]);
+      renderVisualizationDashboard(snapshot, {
+        ready: ready.status === "fulfilled" ? ready.value : null,
+        model: model.status === "fulfilled" ? model.value : null,
+        metrics: metrics.status === "fulfilled" ? metrics.value : "",
+        feedback: feedback.status === "fulfilled" ? feedback.value : null,
+        partial: [ready, model, metrics, feedback].some(result => result.status !== "fulfilled")
+      });
+    }
+
     function renderSnapshotStatus(snapshot) {
       const leaderboard = snapshot.leaderboard || {};
       const metrics = snapshot.collection_metrics || {};
@@ -459,10 +816,13 @@ HTML_PAGE = """
       try {
         const resp = await fetch("/snapshot/status");
         if (!resp.ok) throw new Error("snapshot status request failed");
-        renderSnapshotStatus(await resp.json());
+        const snapshot = await resp.json();
+        renderSnapshotStatus(snapshot);
+        await loadVisualizationStatus(snapshot);
       } catch (_) {
         snapshotState.textContent = "无法连接后端";
         snapshotGrid.innerHTML = "";
+        dashboardState.textContent = "无法连接后端";
       }
     }
 
@@ -796,6 +1156,82 @@ async def health():
         "ok": True,
         "backend_url": BACKEND_URL,
     }
+
+
+async def proxy_backend_json(url: str, *, unavailable: str, failed: str, invalid: str) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url)
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail=unavailable) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=failed) from exc
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"detail": invalid}
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=body.get("detail", failed))
+    return body
+
+
+async def proxy_backend_text(url: str, *, unavailable: str, failed: str) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url)
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail=unavailable) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=failed) from exc
+
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=response.text or failed)
+    return response.text
+
+
+@app.get("/ready")
+async def get_backend_readiness():
+    return await proxy_backend_json(
+        READY_STATUS_URL,
+        unavailable="backend readiness service is unavailable",
+        failed="backend readiness request failed",
+        invalid="backend returned an invalid readiness response",
+    )
+
+
+@app.get("/model/status")
+async def get_model_status():
+    return await proxy_backend_json(
+        MODEL_STATUS_URL,
+        unavailable="backend model status service is unavailable",
+        failed="backend model status request failed",
+        invalid="backend returned an invalid model status response",
+    )
+
+
+@app.get("/feedback/stats")
+async def get_feedback_stats():
+    return await proxy_backend_json(
+        FEEDBACK_STATS_URL,
+        unavailable="backend feedback stats service is unavailable",
+        failed="backend feedback stats request failed",
+        invalid="backend returned an invalid feedback stats response",
+    )
+
+
+@app.get("/metrics")
+async def get_backend_metrics():
+    body = await proxy_backend_text(
+        METRICS_URL,
+        unavailable="backend metrics service is unavailable",
+        failed="backend metrics request failed",
+    )
+    return StreamingResponse(
+        iter([body]),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 async def proxy_live_sample_settings(method: str, payload: dict | None = None) -> dict:

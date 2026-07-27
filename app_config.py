@@ -12,7 +12,7 @@ RAG_DOCS_FILE = DATA_DIR / "rag_documents.json"
 # The API key is supplied by the process environment, never by source files.
 # This project uses the same OpenAI-compatible relay configured for Codex.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://crs.ruinique.com").strip().rstrip("/")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
 OPENAI_WIRE_API = os.getenv("OPENAI_WIRE_API", "responses").strip().lower()
 OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "medium").strip().lower()
 # The project uses a consistent medium reasoning effort for parsing and final synthesis.
