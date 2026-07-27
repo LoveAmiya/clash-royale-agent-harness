@@ -17,6 +17,7 @@ from runtime_hardening import (
     authorize_admin,
     normalize_request_id,
     redact_for_client,
+    resolve_client_id,
 )
 from query_answering import AnswerResult
 import runtime_multi
@@ -213,6 +214,20 @@ class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
         generated = normalize_request_id("x" * 100)
         self.assertNotEqual(generated, "x" * 100)
         self.assertLessEqual(len(generated), 64)
+
+    async def test_forwarded_client_ip_is_used_only_for_explicitly_trusted_proxy_mode(self):
+        self.assertEqual(
+            resolve_client_id("172.20.0.5", "198.51.100.9, 172.20.0.1", trust_proxy_headers=True),
+            "198.51.100.9",
+        )
+        self.assertEqual(
+            resolve_client_id("172.20.0.5", "198.51.100.9", trust_proxy_headers=False),
+            "172.20.0.5",
+        )
+        self.assertEqual(
+            resolve_client_id("172.20.0.5", "not-an-ip", trust_proxy_headers=True),
+            "172.20.0.5",
+        )
 
     async def test_client_redaction_recursively_removes_credential_shaped_metadata(self):
         redacted = redact_for_client({"api_key": "private", "nested": {"token": "private"}, "public": "ok"})
@@ -417,6 +432,25 @@ class ProductionHardeningHTTPContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 413)
         build_answer.assert_not_awaited()
+
+    def test_quota_backend_failure_is_not_reported_as_client_rate_limiting(self):
+        runtime_multi.app.state.process_quota = types.SimpleNamespace(
+            try_acquire=AsyncMock(
+                return_value=types.SimpleNamespace(
+                    allowed=False,
+                    reason="quota_backend_unavailable",
+                    retry_after_seconds=1,
+                    lease_id=None,
+                )
+            )
+        )
+
+        response = self.client.post("/process", json=self._payload())
+        summary = runtime_multi.app.state.runtime_metrics.public_summary()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(summary["failures"], 1)
+        self.assertEqual(summary["rate_limited"], 0)
 
     def test_live_settings_require_an_admin_key_when_enabled(self):
         with patch.object(runtime_multi, "LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED", True), patch.object(

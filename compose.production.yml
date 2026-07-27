@@ -13,6 +13,7 @@ x-api-common: &api-common
     PROCESS_QUOTA_BACKEND: redis
     PROCESS_QUOTA_FAIL_MODE: closed
     REDIS_URL: redis://redis:6379/0
+    TRUST_PROXY_HEADERS: "true"
   volumes:
     - ./data:/app/data
   restart: unless-stopped

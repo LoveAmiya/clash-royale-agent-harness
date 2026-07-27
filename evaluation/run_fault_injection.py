@@ -200,7 +200,7 @@ async def _quota_decision(data: dict[str, Any]):
     for index in range(int(data["requests_in_window"])):
         decision = await quota.try_acquire("rate-client")
         if decision.allowed:
-            quota.release()
+            await quota.release(decision.lease_id)
     for index in range(int(data["active_requests"])):
         await quota.try_acquire(f"concurrent-client-{index}")
     return await quota.try_acquire("rate-client")

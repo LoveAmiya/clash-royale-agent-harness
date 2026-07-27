@@ -63,6 +63,7 @@ from app_config import (
     PROCESS_QUOTA_KEY_PREFIX,
     PROCESS_QUOTA_LEASE_SECONDS,
     REDIS_URL,
+    TRUST_PROXY_HEADERS,
     RAG_QUALITY_GATE_ENABLED,
     RAG_MIN_DOCUMENTS,
     RAG_MIN_SOURCE_TYPES,
@@ -93,6 +94,7 @@ from runtime_hardening import (
     create_process_quota,
     normalize_request_id,
     redact_for_client,
+    resolve_client_id,
 )
 from supercell_live import SupercellAPIClient
 from snapshot_store import (
@@ -1577,7 +1579,15 @@ async def process(request: Request, payload: ProcessRequest | None = None):
         if request_object is not None
         else normalize_request_id(None)
     )
-    client_id = request_object.client.host if request_object is not None and request_object.client is not None else "local-test"
+    client_id = (
+        resolve_client_id(
+            request_object.client.host if request_object.client is not None else None,
+            request_object.headers.get("X-Forwarded-For"),
+            trust_proxy_headers=TRUST_PROXY_HEADERS,
+        )
+        if request_object is not None
+        else "local-test"
+    )
     metrics = getattr(app.state, "runtime_metrics", None)
     if metrics is None:
         metrics = RuntimeMetrics()
@@ -1596,8 +1606,11 @@ async def process(request: Request, payload: ProcessRequest | None = None):
         app.state.process_quota = quota
     decision = await quota.try_acquire(client_id)
     if not decision.allowed:
-        metrics.record_process(outcome="rate_limited", total_seconds=0.0)
         backend_unavailable = decision.reason == "quota_backend_unavailable"
+        metrics.record_process(
+            outcome="failure" if backend_unavailable else "rate_limited",
+            total_seconds=0.0,
+        )
         raise HTTPException(
             status_code=503 if backend_unavailable else 429,
             detail=(
@@ -1608,7 +1621,7 @@ async def process(request: Request, payload: ProcessRequest | None = None):
             headers={"Retry-After": str(decision.retry_after_seconds or 1)},
         )
 
-    logger.info("request received request_id=%s client=%s query_chars=%s", request_id, client_id, len(user_text))
+    logger.info("request received request_id=%s query_chars=%s", request_id, len(user_text))
 
     response_id = f"resp-{uuid.uuid4().hex}"
     message_id = f"msg-{uuid.uuid4().hex}"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import re
 import threading
@@ -101,6 +102,18 @@ def normalize_request_id(value: object) -> str:
     if _REQUEST_ID_PATTERN.fullmatch(candidate):
         return candidate
     return f"req-{uuid.uuid4().hex}"
+
+
+def resolve_client_id(remote_host: str | None, forwarded_for: str | None, *, trust_proxy_headers: bool) -> str:
+    """Resolve a quota identity without trusting caller-controlled headers by default."""
+    remote = str(remote_host or "unknown")[:128]
+    if not trust_proxy_headers or not forwarded_for:
+        return remote
+    candidate = forwarded_for.split(",", 1)[0].strip()
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return remote
 
 
 def authorize_admin(expected_key: str | None, provided_key: str | None) -> bool:

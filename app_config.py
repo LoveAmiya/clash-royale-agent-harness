@@ -57,6 +57,7 @@ PROCESS_QUOTA_LEASE_SECONDS = max(5, min(int(os.getenv("PROCESS_QUOTA_LEASE_SECO
 PROCESS_QUOTA_FAIL_MODE = os.getenv("PROCESS_QUOTA_FAIL_MODE", "closed").strip().lower()
 if PROCESS_QUOTA_FAIL_MODE not in {"closed", "open"}:
     PROCESS_QUOTA_FAIL_MODE = "closed"
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").strip().lower() in {"1", "true", "yes"}
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
 ALLOWED_ORIGINS = tuple(
     origin.strip().rstrip("/")

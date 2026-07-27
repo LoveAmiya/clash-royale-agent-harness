@@ -15,6 +15,7 @@ x-load-api: &load-api
     PROCESS_QUOTA_FAIL_MODE: closed
     PROCESS_QUOTA_KEY_PREFIX: cr-agent:loadtest
     REDIS_URL: redis://redis:6379/0
+    TRUST_PROXY_HEADERS: "true"
   depends_on:
     redis:
       condition: service_healthy
