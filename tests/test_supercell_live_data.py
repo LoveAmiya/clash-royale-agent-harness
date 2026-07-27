@@ -491,6 +491,8 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch.object(runtime_multi, "SUPERCELL_API_TOKEN", "test-token"), patch.object(
+            runtime_multi, "RUNTIME_ROLE", "collector"
+        ), patch.object(
             runtime_multi, "SupercellAPIClient"
         ) as client_class, patch.object(runtime_multi, "publish_daily_snapshot", side_effect=lambda value, *_: value):
             client_class.return_value.fetch_snapshot.return_value = snapshot
@@ -671,7 +673,7 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(app.state.live_error, "ValueError: official API returned no usable battle-log decks")
 
-    async def test_runtime_parses_with_the_model_before_fetching_live_data(self):
+    async def test_runtime_parses_without_triggering_live_collection_on_the_request_path(self):
         order = []
         app = types.SimpleNamespace(
             state=types.SimpleNamespace(
@@ -684,20 +686,32 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
             order.append("parse")
             return {"intent": "card_query", "card_name": "Electro Giant", "rank": None, "top_n": None}
 
-        async def run_thread(*_args):
-            order.append("live")
-            return {"cards_meta": [], "top_decks": [], "fetched_at": "now", "sample_battles": 3}
-
         with patch.object(runtime_multi, "SUPERCELL_API_TOKEN", "test-token"), patch.object(
             runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", True
         ), patch.object(runtime_multi, "parse_user_query", AsyncMock(side_effect=parse)), patch.object(
-            runtime_multi.asyncio, "to_thread", AsyncMock(side_effect=run_thread)
+            runtime_multi.asyncio, "to_thread", AsyncMock()
+        ) as to_thread, patch.object(
+            runtime_multi, "EXTERNAL_API_REQUIRED", False
         ), patch.object(runtime_multi, "answer_query", AsyncMock(return_value=result)):
             await runtime_multi.build_answer("question", app)
 
-        self.assertEqual(order, ["parse", "live"])
+        self.assertEqual(order, ["parse"])
+        to_thread.assert_not_awaited()
 
     async def test_strict_external_api_mode_uses_only_supercell_cards(self):
+        official_snapshot = {
+            "snapshot_id": "official-20260725",
+            "cards_meta": [{"card_name": "Zap", "source": "Supercell API live sample"}],
+            "top_decks": [],
+            "card_deck_stats": {},
+            "fetched_at": "now",
+            "sample_battles": 20000,
+            "target_battles": 20000,
+            "shortfall_battles": 0,
+            "sampled_players": 1000,
+            "fetched_players": 1000,
+            "failed_players": 1,
+        }
         app = types.SimpleNamespace(
             state=types.SimpleNamespace(
                 cards_meta_data=[
@@ -707,7 +721,7 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
                 schedule_data=[],
                 top_decks_data=[],
                 retriever=None,
-                live_snapshot=None,
+                live_snapshot=official_snapshot,
                 live_snapshot_at=0.0,
                 live_error=None,
             )
@@ -725,27 +739,13 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
             runtime_multi,
             "parse_user_query",
             AsyncMock(return_value={"intent": "card_query", "card_name": "Zap", "rank": None, "top_n": None, "parse_source": "llm_parser"}),
-        ), patch.object(
-            runtime_multi.asyncio,
-            "to_thread",
-            AsyncMock(return_value={
-                "cards_meta": [{"card_name": "Zap", "source": "Supercell API live sample"}],
-                "top_decks": [],
-                "fetched_at": "now",
-                "sample_battles": 400,
-                "target_battles": 400,
-                "shortfall_battles": 0,
-                "sampled_players": 16,
-                "fetched_players": 16,
-                "failed_players": 1,
-            }),
         ), patch.object(runtime_multi, "answer_query", AsyncMock(side_effect=answer_query)):
             actual = await runtime_multi.build_answer("Zap usage", app)
 
         self.assertEqual([item["card_name"] for item in captured["cards_meta_data"]], ["Zap"])
         self.assertEqual(actual.metadata["live_data"]["static_card_fallback_count"], 0)
-        self.assertEqual(actual.metadata["live_data"]["target_battles"], 400)
-        self.assertEqual(actual.metadata["live_data"]["sampled_players"], 16)
+        self.assertEqual(actual.metadata["live_data"]["target_battles"], 20000)
+        self.assertEqual(actual.metadata["live_data"]["sampled_players"], 1000)
         self.assertEqual(actual.metadata["live_data"]["failed_players"], 1)
 
     async def test_strict_schedule_query_does_not_wait_for_official_snapshot(self):
@@ -820,6 +820,7 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
             "fetched_players": 1000,
             "failed_players": 0,
         }
+        app.state.live_snapshot = official_snapshot
 
         with patch.dict(runtime_multi.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(
             runtime_multi, "SUPERCELL_API_TOKEN", "test-token"
@@ -838,8 +839,7 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
                     ],
                 }
             ),
-        ), patch.object(runtime_multi.asyncio, "to_thread", AsyncMock(return_value=official_snapshot)), patch.object(
-            runtime_multi, "answer_query", AsyncMock(return_value=result)
+        ), patch.object(runtime_multi, "answer_query", AsyncMock(return_value=result)
         ) as answer_query:
             actual = await runtime_multi.build_answer("第一轮打谁，Zap 使用率", app)
 

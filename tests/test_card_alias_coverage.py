@@ -97,6 +97,16 @@ class CardAliasCoverageTests(unittest.TestCase):
         self.assertEqual(parsed["intent"], "card_query")
         self.assertEqual(parsed["card_name"], "Mini P.E.K.K.A")
 
+    def test_common_skeletons_shorthand_keeps_metrics_on_structured_card_route(self):
+        parsed = fallback_parse_query(
+            "\u9ab7\u9ac5\u7684\u4f7f\u7528\u7387\u80dc\u7387\u5462\uff1f",
+            CARDS,
+        )
+
+        self.assertEqual(parsed["intent"], "card_query")
+        self.assertEqual(parsed["card_name"], "Skeletons")
+        self.assertEqual(parsed["metrics"], ["usage_rate", "win_rate"])
+
 
 if __name__ == "__main__":
     unittest.main()

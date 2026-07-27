@@ -46,9 +46,10 @@ class HybridRetriever:
         self.docs_fingerprint = hashlib.sha256(
             json.dumps(docs, ensure_ascii=True, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        self.qdrant = QdrantClient(path=str(self.index_path)) if self.index_path else QdrantClient(":memory:")
+        self.qdrant = None
         self.dense_available = False
         try:
+            self.qdrant = QdrantClient(path=str(self.index_path)) if self.index_path else QdrantClient(":memory:")
             if not self._can_reuse_persisted_index():
                 self._build_dense_index()
                 self._write_index_manifest()
@@ -56,6 +57,16 @@ class HybridRetriever:
         except Exception as exc:
             # Open-ended answers remain available through BM25 when local Ollama is not running.
             logger.warning("dense retrieval disabled; using BM25 fallback: %s", exc)
+            self.close()
+
+    def close(self) -> None:
+        client = self.qdrant
+        self.qdrant = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                logger.debug("failed to close local Qdrant client", exc_info=True)
 
     @staticmethod
     def _snapshot_id_from_docs(docs: List[Dict[str, Any]]) -> str | None:
@@ -76,6 +87,7 @@ class HybridRetriever:
         return (
             manifest.get("snapshot_id") == self.snapshot_id
             and manifest.get("docs_fingerprint") == self.docs_fingerprint
+            and self.qdrant is not None
             and self.qdrant.collection_exists(self.collection_name)
         )
 
@@ -157,6 +169,8 @@ class HybridRetriever:
 
     def _build_dense_index(self):
         """为当前文档语料创建可丢弃的本地 Qdrant collection。"""
+        if self.qdrant is None:
+            raise RuntimeError("Qdrant client is unavailable")
         if self.qdrant.collection_exists(self.collection_name):
             self.qdrant.delete_collection(self.collection_name)
 

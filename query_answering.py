@@ -39,6 +39,7 @@ from retrieval_postprocess import (
     build_context_and_refs,
     compress_results,
     rerank_results,
+    strip_generated_reference_section,
 )
 from skills.base import SkillContext
 from skills.meta_evidence import build_meta_evidence_pack
@@ -431,7 +432,11 @@ async def build_evidence_synthesis_answer(
             "请补充对应的卡组、对手或战术资料后重试。\n\n参考来源：\n"
             f"{sources}"
         )
-    retrieved_context, retrieval_refs = build_context_and_refs(compressed)
+    structured_source_count = len([line for line in sources.splitlines() if line.strip()])
+    retrieved_context, retrieval_refs = build_context_and_refs(
+        compressed,
+        start_index=structured_source_count + 1,
+    )
     allowed_doc_ids = {str(item["doc"].get("doc_id")) for item in compressed}
     grounding_evidence = f"{evidence}\n{retrieved_context}"
     reviewer_instructions = """你是皇室战争战队赛分析助手，使用中文回答。
@@ -445,7 +450,8 @@ async def build_evidence_synthesis_answer(
             "You are a Clash Royale meta analyst. Answer in Chinese using only supplied evidence. "
             "Use exactly these sections: conclusion, data evidence, data boundaries. "
             "Do not add training advice, match advice, opponent scouting, Bo3 preparation, schedules, or recommendations "
-            "unless the user explicitly asks for them. Do not invent statistics, dates, sources, decks, or opponent information."
+            "unless the user explicitly asks for them. Do not invent statistics, dates, sources, decks, or opponent information. "
+            "Do not write a references or source-list section; the runtime appends verified references."
         )
     strict_live_instruction = (
         "\n当前证据包来自 Supercell API 的有限实时战斗日志：不得称其为本地快照或全局环境统计；"
@@ -477,7 +483,7 @@ async def build_evidence_synthesis_answer(
         f"{evidence}\n\n"
         "RAG 检索证据：\n"
         f"{retrieved_context}\n\n"
-        "请严格按照系统规则回答，并在最后保留‘参考来源：’标题。"
+        "请严格按照系统规则回答。不要输出参考来源标题或来源列表；运行时会附加经过校验的来源。"
     )
     answer = ""
     model_streamed = False
@@ -492,7 +498,12 @@ async def build_evidence_synthesis_answer(
                 detail="模型正在基于检索证据输出公开文本。",
             )
             chunks: list[str] = []
-            stream_buffer = GroundedStreamBuffer(grounding_evidence, allowed_doc_ids)
+            public_chunks: list[str] = []
+            stream_buffer = GroundedStreamBuffer(
+                grounding_evidence,
+                allowed_doc_ids,
+                stop_markers=("参考来源：", "参考来源:", "References:", "Sources:"),
+            )
             try:
                 async with asyncio.timeout(MODEL_CALL_TIMEOUT_SECONDS):
                     async for delta in generate_model_text_stream(
@@ -503,10 +514,12 @@ async def build_evidence_synthesis_answer(
                     ):
                         chunks.append(delta)
                         for validated_chunk in stream_buffer.push(delta):
+                            public_chunks.append(validated_chunk)
                             await event_sink.content(validated_chunk, delta=True)
                 for validated_chunk in stream_buffer.finish():
+                    public_chunks.append(validated_chunk)
                     await event_sink.content(validated_chunk, delta=True)
-                answer = "".join(chunks).strip()
+                answer = "".join(public_chunks).strip()
                 if not answer:
                     raise RuntimeError("model stream returned no public text")
                 model_streamed = True
@@ -584,6 +597,7 @@ async def build_evidence_synthesis_answer(
         if EXTERNAL_API_REQUIRED:
             raise RequiredExternalAPIError(f"RAG model API call failed: {type(exc).__name__}") from exc
         answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
+    answer = strip_generated_reference_section(answer)
     final_answer = f"{answer}\n\n参考来源：\n{sources}\n{retrieval_refs}"
     grounding_validation = validate_answer_grounding(
         final_answer,

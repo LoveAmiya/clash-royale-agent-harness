@@ -289,7 +289,7 @@ CARD_COMMUNITY_ALIASES = {
     "Skeleton Barrel": ["\u9ab7\u9ac5\u6876", "\u9ab7\u9ac5\u6c14\u7403", "sbarrel"],
     "Skeleton Dragons": ["\u9ab7\u9ac5\u9f99", "\u53cc\u9f99", "sdragons"],
     "Skeleton King": ["\u9ab7\u738b", "\u9ab7\u9ac5\u738b", "sk"],
-    "Skeletons": ["\u5c0f\u9ab7\u9ac5", "\u9ab7\u9ac5\u5175", "skeles"],
+    "Skeletons": ["\u5c0f\u9ab7\u9ac5", "\u9ab7\u9ac5\u5175", "\u9ab7\u9ac5", "skeles"],
     "Sparky": ["\u7535\u78c1\u70ae", "\u5927\u7535\u78c1\u70ae", "\u7535\u70ae", "sparky"],
     "Spear Goblins": ["\u54e5\u5e03\u6797\u77db\u624b", "\u957f\u77db\u54e5\u5e03\u6797", "sgobs"],
     "Spirit Empress": ["\u7075\u9b42\u5973\u7687", "\u7075\u540e", "\u7075\u9b42\u7687\u540e", "spiritempress"],
@@ -820,6 +820,8 @@ def is_meta_analysis_query(question: str) -> bool:
     analysis_keywords = [
         "当前版本",
         "当前环境",
+        "现在的环境",
+        "环境是怎样",
         "当前主流卡组",
         "整体环境",
         "环境是什么样",
@@ -1180,10 +1182,14 @@ def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
             if any(keyword in question for keyword in ["有哪些", "哪些", "分别是谁", "都有什么"]):
                 top_n = 5
 
+    metrics = normalize_metrics(None, question, intent)
+    if intent == "card_query" and metrics:
+        metric = metrics[0]
+
     parsed = {
         "intent": intent,
         "metric": metric,
-        "metrics": normalize_metrics(None, question, intent),
+        "metrics": metrics,
         "compare_metric": compare_metric,
         "rank": rank_target,
         "top_n": top_n,
@@ -1322,6 +1328,8 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         if result["metric"] is None:
             result["metric"] = get_metric(question)
         result["metrics"] = normalize_metrics(result["metrics"], question, result["intent"])
+        if result["metrics"]:
+            result["metric"] = result["metrics"][0]
 
     if result["intent"] == "card_rank_lookup_query":
         result["compare_metric"] = None
@@ -1409,39 +1417,47 @@ def fallback_parse_multi_intent(question: str, cards_meta_data: list[dict]) -> d
         seen.add(key)
         candidates.append(candidate)
 
-    card_names = resolve_card_names(question, cards_meta_data)
-    requested_metrics = extract_metrics(question)
-    if (
-        card_names
-        and requested_metrics
-        and not is_card_compare_query(question, cards_meta_data)
-        and not is_card_rank_lookup_query(question, cards_meta_data)
-    ):
-        # A request such as "Fireball and Poison usage" contains two
-        # independent measurements, not one ambiguous card lookup. Keep them
-        # separate so each result has an auditable Skill and output section.
-        for card_name in card_names:
-            card_query = fallback_parse_query(question, cards_meta_data)
-            card_query.update(
-                {
-                    "intent": "card_query",
-                    "card_name": card_name,
-                    "card_names": None,
-                    "metric": requested_metrics[0],
-                    "metrics": requested_metrics,
-                    "compare_metric": None,
-                    "rank": None,
-                    "top_n": None,
-                    "round": None,
-                    "date": None,
-                    "ask_players": False,
-                }
-            )
-            add_candidate(card_query)
-
     segments = [part.strip() for part in re.split(r"[，,；;。！？!?]|(?:还有|以及|并且|同时)", question) if part.strip()]
+    last_card_name: str | None = None
     for segment in segments:
-        add_candidate(fallback_parse_query(segment, cards_meta_data))
+        candidate = fallback_parse_query(segment, cards_meta_data)
+        segment_card_names = resolve_card_names(segment, cards_meta_data)
+        segment_metrics = extract_metrics(segment)
+
+        if (
+            candidate.get("intent") == "card_query"
+            and len(segment_card_names) > 1
+            and segment_metrics
+            and not is_card_compare_query(segment, cards_meta_data)
+            and not is_card_rank_lookup_query(segment, cards_meta_data)
+        ):
+            # A request such as "Fireball and Poison usage" contains two
+            # independent measurements at the same position in the utterance.
+            for card_name in segment_card_names:
+                card_query = dict(candidate)
+                card_query.update(
+                    {
+                        "card_name": card_name,
+                        "card_names": None,
+                        "metric": segment_metrics[0],
+                        "metrics": segment_metrics,
+                    }
+                )
+                add_candidate(card_query)
+            last_card_name = segment_card_names[-1]
+            continue
+
+        if segment_card_names:
+            last_card_name = segment_card_names[-1]
+        elif segment_metrics and last_card_name and candidate.get("card_name") is None:
+            # Follow-up fragments such as "usage and win rate?" inherit the
+            # nearest preceding card mention instead of becoming a generic RAG query.
+            candidate = fallback_parse_query(f"{last_card_name} {segment}", cards_meta_data)
+            candidate["intent"] = "card_query"
+            candidate["card_name"] = last_card_name
+            candidate["metric"] = segment_metrics[0]
+            candidate["metrics"] = segment_metrics
+        add_candidate(candidate)
     full_query = fallback_parse_query(question, cards_meta_data)
     if not any(candidate.get("intent") == full_query.get("intent") for candidate in candidates):
         add_candidate(full_query)
@@ -1451,7 +1467,14 @@ def fallback_parse_multi_intent(question: str, cards_meta_data: list[dict]) -> d
     if any(candidate.get("intent") == "meta_analysis_query" for candidate in candidates) and not (
         has_explicit_rank_signal(question) or has_explicit_top_n_signal(question)
     ):
-        candidates = [candidate for candidate in candidates if candidate.get("intent") != "deck_query"]
+        candidates = [
+            candidate
+            for candidate in candidates
+            if not (
+                candidate.get("intent") == "deck_query"
+                and candidate.get("card_name") is None
+            )
+        ]
 
     if len(candidates) <= 1:
         return candidates[0] if candidates else fallback_parse_query(question, cards_meta_data)

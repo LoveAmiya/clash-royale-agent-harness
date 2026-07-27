@@ -8,6 +8,7 @@ from rag_quality import (
     evaluate_rag_quality,
     persist_quality_report,
     validate_answer_grounding,
+    _probe_query,
 )
 
 
@@ -19,7 +20,21 @@ class _Retriever:
         self.misses = set(misses or [])
 
     def hybrid_search(self, query, **_kwargs):
-        expected = next((doc for doc in self.docs if doc["doc_id"] in query), self.docs[0])
+        lowered = query.lower()
+        expected = next(
+            (
+                doc
+                for doc in self.docs
+                if any(
+                    str(value).lower() in lowered
+                    for key, value in doc.get("metadata", {}).items()
+                    if key in {"card_name", "deck_name", "opponent_deck_name", "archetype"}
+                    and isinstance(value, str)
+                    and value
+                )
+            ),
+            self.docs[0],
+        )
         if expected["doc_id"] in self.misses:
             expected = self.docs[-1]
         return [{"doc": expected, "retrieval_mode": "hybrid", "final_score": 1.0}]
@@ -66,6 +81,15 @@ class RAGQualityTests(unittest.TestCase):
         self.assertFalse(failed["passed"])
         self.assertIn("snapshot_mismatch", failed["failures"])
 
+    def test_quality_probe_uses_user_slots_without_leaking_doc_id_or_document_text(self):
+        doc = self.docs[1]
+        query = _probe_query(doc)
+
+        self.assertIn("Electro Giant", query)
+        self.assertIn("usage rate", query)
+        self.assertNotIn(doc["doc_id"], query)
+        self.assertNotIn(doc["text"], query)
+
     def test_numeric_and_citation_validation_rejects_unsupported_claims(self):
         evidence = "Electro Giant usage rate 4.3% and 859 次 appearances."
         valid = validate_answer_grounding(
@@ -105,6 +129,16 @@ class RAGQualityTests(unittest.TestCase):
         self.assertTrue(report["passed"])
         self.assertEqual(report["unsupported_numeric_facts"], [])
 
+    def test_numeric_validation_normalizes_english_appearances_to_chinese_count_unit(self):
+        report = validate_answer_grounding(
+            "Skeletons 样本出场 6610 次。来源 snapshot-1:card:Skeletons",
+            "Card evidence. Skeletons had 6610 appearances.",
+            {"snapshot-1:card:Skeletons"},
+        )
+
+        self.assertTrue(report["passed"], report)
+        self.assertEqual(report["unsupported_numeric_facts"], [])
+
     def test_quality_gate_samples_multiple_documents_per_source_type(self):
         docs = [
             {
@@ -138,6 +172,46 @@ class RAGQualityTests(unittest.TestCase):
         self.assertIn("source_probe_recall_below_threshold:card", report["failures"])
         self.assertFalse(report["passed"])
 
+    def test_quality_gate_rejects_missing_snapshot_metrics_before_activation(self):
+        docs = [
+            {
+                "doc_id": "snapshot-1:card:1:Skeletons",
+                "source_type": "card",
+                "text": "Card evidence. Skeletons usage rate None%; win rate None%.",
+                "metadata": {
+                    "snapshot_id": "snapshot-1",
+                    "card_name": "Skeletons",
+                    "rank": 1,
+                },
+            },
+            {
+                "doc_id": "snapshot-1:deck:1:Broken",
+                "source_type": "deck",
+                "text": "Deck evidence. Broken sampled games None; win rate None%.",
+                "metadata": {
+                    "snapshot_id": "snapshot-1",
+                    "deck_name": "Broken",
+                    "rank": 1,
+                },
+            },
+        ]
+
+        report = evaluate_rag_quality(
+            "snapshot-1",
+            docs,
+            _Retriever(docs),
+            min_documents=2,
+            min_source_types=2,
+            min_probe_recall=0.0,
+        )
+
+        self.assertFalse(report["passed"])
+        self.assertIn("invalid_evidence_fields", report["failures"])
+        self.assertEqual(
+            report["invalid_evidence_doc_ids"],
+            ["snapshot-1:card:1:Skeletons", "snapshot-1:deck:1:Broken"],
+        )
+
     def test_quality_report_is_persisted_atomically_by_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = persist_quality_report({"snapshot_id": "snapshot/1", "passed": True}, Path(tmp))
@@ -150,6 +224,20 @@ class RAGQualityTests(unittest.TestCase):
         self.assertEqual(buffer.push("使用率 "), [])
         with self.assertRaises(GroundingValidationError):
             buffer.push("99.9%。")
+
+    def test_stream_buffer_stops_before_model_generated_reference_section(self):
+        buffer = GroundedStreamBuffer(
+            "usage rate 4.3%",
+            set(),
+            stop_markers=("参考来源：",),
+        )
+
+        chunks = buffer.push("结论基于 usage rate 4.3%。\n参考来")
+        chunks += buffer.push("源：\n[1] unverified")
+        chunks += buffer.finish()
+
+        self.assertEqual("".join(chunks), "结论基于 usage rate 4.3%。\n")
+        self.assertTrue(buffer.stopped)
 
     def test_citation_followed_by_chinese_punctuation_remains_valid(self):
         report = validate_answer_grounding(

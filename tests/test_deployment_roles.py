@@ -23,7 +23,7 @@ class DeploymentRoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(retriever.index_path)
         self.assertIsNone(retriever.manifest_path)
 
-    async def test_api_follower_switches_only_after_new_published_snapshot(self):
+    async def test_api_follower_keeps_old_snapshot_until_candidate_preheat_switches_atomically(self):
         app = types.SimpleNamespace(state=types.SimpleNamespace(
             live_snapshot={"snapshot_id": "old"},
             rag_snapshot_id="old",
@@ -42,8 +42,12 @@ class DeploymentRoleTests(unittest.IsolatedAsyncioTestCase):
         ) as preheat, patch("runtime_multi.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
             with self.assertRaises(asyncio.CancelledError):
                 await runtime_multi.follow_published_snapshot_loop(app)
-        self.assertEqual(app.state.live_snapshot["snapshot_id"], "new")
-        preheat.assert_awaited_once()
+        self.assertEqual(app.state.live_snapshot["snapshot_id"], "old")
+        preheat.assert_awaited_once_with(
+            app,
+            candidate_snapshot=published,
+            activate_snapshot=True,
+        )
 
     def test_observability_stack_provisions_dashboard_alerts_and_persistent_storage(self):
         compose = (self.ROOT / "compose.production.yml").read_text(encoding="utf-8")

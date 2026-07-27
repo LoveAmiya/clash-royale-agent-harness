@@ -90,6 +90,7 @@ from snapshot_store import (
     publish_daily_snapshot,
     snapshot_age_seconds,
     snapshot_refresh_due,
+    validate_snapshot_rag_documents,
 )
 from query_answering import AnswerResult, answer_query, read_trace
 from query_parser import (
@@ -285,16 +286,77 @@ def _active_snapshot_id(app: FastAPI) -> str | None:
     return snapshot_id if isinstance(snapshot_id, str) and snapshot_id else None
 
 
-def preheat_retriever(app: FastAPI) -> HybridRetriever | None:
-    """Build a new snapshot index before atomically activating it for requests."""
-    snapshot_id = _active_snapshot_id(app)
+def _rag_alignment_state(app: FastAPI) -> dict:
+    snapshot = getattr(app.state, "live_snapshot", None)
+    retriever = getattr(app.state, "retriever", None)
+    snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
+    rag_snapshot_id = getattr(app.state, "rag_snapshot_id", None)
+    snapshot_fingerprint = snapshot.get("rag_docs_fingerprint") if isinstance(snapshot, dict) else None
+    active_fingerprint = getattr(app.state, "rag_docs_fingerprint", None)
+    index_fingerprint = getattr(retriever, "docs_fingerprint", None)
+    snapshot_aligned = bool(snapshot_id and snapshot_id == rag_snapshot_id)
+    fingerprint_aligned = bool(
+        snapshot_fingerprint
+        and snapshot_fingerprint == active_fingerprint
+        and snapshot_fingerprint == index_fingerprint
+    )
+    return {
+        "snapshot_id": rag_snapshot_id,
+        "snapshot_docs_fingerprint": snapshot_fingerprint,
+        "active_docs_fingerprint": active_fingerprint,
+        "index_docs_fingerprint": index_fingerprint,
+        "snapshot_aligned": snapshot_aligned,
+        "fingerprint_aligned": fingerprint_aligned,
+        "fully_aligned": snapshot_aligned and fingerprint_aligned,
+    }
+
+
+def _public_rag_validation(report: object) -> dict | None:
+    if not isinstance(report, dict):
+        return None
+    invalid_ids = report.get("invalid_doc_ids") if isinstance(report.get("invalid_doc_ids"), list) else []
+    return {
+        key: report.get(key)
+        for key in (
+            "schema_version",
+            "snapshot_id",
+            "docs_fingerprint",
+            "document_count",
+            "source_counts",
+            "card_documents_checked",
+            "deck_documents_checked",
+            "matchup_documents_checked",
+            "passed",
+            "failures",
+        )
+    } | {
+        "invalid_document_count": len(invalid_ids),
+        "invalid_doc_ids_sample": invalid_ids[:20],
+    }
+
+
+def _activate_snapshot_state(app: FastAPI, snapshot: dict) -> None:
+    """Switch every structured-data view to one already validated snapshot."""
+    app.state.live_snapshot = snapshot
+    app.state.live_snapshot_at = time.monotonic()
+    app.state.live_snapshot_target_battles = DAILY_TARGET_BATTLES
+    app.state.cards_meta_data = list(snapshot.get("cards_meta", []))
+    app.state.top_decks_data = list(snapshot.get("top_decks", []))
+    app.state.card_deck_stats_data = dict(snapshot.get("card_deck_stats", {}))
+
+
+def preheat_retriever(
+    app: FastAPI,
+    *,
+    candidate_snapshot: dict | None = None,
+    activate_snapshot: bool = False,
+) -> HybridRetriever | None:
+    """Validate and build an index, then atomically activate its evidence boundary."""
+    target_snapshot = candidate_snapshot if isinstance(candidate_snapshot, dict) else getattr(app.state, "live_snapshot", None)
+    snapshot_id = target_snapshot.get("snapshot_id") if isinstance(target_snapshot, dict) else None
     if not snapshot_id:
         app.state.rag_status = "not_ready"
         return None
-
-    existing = getattr(app.state, "retriever", None)
-    if getattr(app.state, "rag_snapshot_id", None) == snapshot_id and existing is not None:
-        return existing
 
     lock = getattr(app.state, "rag_preheat_lock", None)
     if lock is None:
@@ -303,15 +365,44 @@ def preheat_retriever(app: FastAPI) -> HybridRetriever | None:
     if not lock.acquire(blocking=False):
         return None
 
+    previous_status = getattr(app.state, "rag_status", "not_ready")
+    previous_retriever = getattr(app.state, "retriever", None)
+    previous_snapshot_id = getattr(app.state, "rag_snapshot_id", None)
+    previous_fingerprint = getattr(app.state, "rag_docs_fingerprint", None)
     try:
-        app.state.rag_status = "building"
+        app.state.rag_candidate_status = "building"
+        if previous_retriever is None:
+            app.state.rag_status = "building"
         app.state.rag_error = None
         rag_docs = load_docs()
-        if not rag_docs or any(doc.get("metadata", {}).get("snapshot_id") != snapshot_id for doc in rag_docs):
-            raise ValueError("RAG documents do not match the active official daily snapshot")
+        validation = validate_snapshot_rag_documents(target_snapshot, rag_docs)
+        app.state.rag_candidate_validation = validation
+        if not validation["passed"]:
+            raise ValueError("RAG documents failed full snapshot evidence validation")
+        docs_fingerprint = validation["docs_fingerprint"]
+        snapshot_fingerprint = target_snapshot.get("rag_docs_fingerprint")
+        if snapshot_fingerprint != docs_fingerprint:
+            raise ValueError("RAG document fingerprint does not match the active official snapshot")
+
+        existing = getattr(app.state, "retriever", None)
+        existing_fingerprint = getattr(existing, "docs_fingerprint", None)
+        if (
+            not activate_snapshot
+            and getattr(app.state, "rag_snapshot_id", None) == snapshot_id
+            and getattr(app.state, "rag_docs_fingerprint", None) == docs_fingerprint
+            and existing_fingerprint == docs_fingerprint
+            and existing is not None
+        ):
+            app.state.rag_status = "ready" if getattr(existing, "dense_available", False) else "bm25_only"
+            app.state.rag_candidate_status = app.state.rag_status
+            app.state.rag_document_validation = validation
+            return existing
+
         candidate = HybridRetriever(rag_docs, in_memory=RAG_INDEX_MODE == "memory")
         if candidate.snapshot_id != snapshot_id:
             raise ValueError("built retriever does not match the active official daily snapshot")
+        if candidate.docs_fingerprint != docs_fingerprint:
+            raise ValueError("built retriever fingerprint does not match validated RAG documents")
         if RAG_QUALITY_GATE_ENABLED and EXTERNAL_API_REQUIRED:
             quality_report = evaluate_rag_quality(
                 snapshot_id,
@@ -326,26 +417,46 @@ def preheat_retriever(app: FastAPI) -> HybridRetriever | None:
             app.state.rag_quality_report = quality_report
             if not quality_report["passed"]:
                 raise RAGQualityGateError("RAG index did not meet the configured snapshot quality gate")
-        if _active_snapshot_id(app) != snapshot_id:
+        if not activate_snapshot and _active_snapshot_id(app) != snapshot_id:
             # A newer snapshot was published while embedding. Do not replace it
             # with a retriever built for an older evidence boundary.
             app.state.rag_status = "not_ready"
             return None
 
+        if activate_snapshot:
+            _activate_snapshot_state(app, target_snapshot)
         app.state.retriever = candidate
         app.state.rag_snapshot_id = snapshot_id
+        app.state.rag_docs_fingerprint = docs_fingerprint
+        app.state.rag_document_validation = validation
         app.state.rag_status = "ready" if candidate.dense_available else "bm25_only"
+        app.state.rag_candidate_status = app.state.rag_status
+        app.state.rag_candidate_error = None
         logger.info(
-            "rag_preheat_complete snapshot_id=%s documents=%s mode=%s",
+            "rag_preheat_complete snapshot_id=%s documents=%s docs_fingerprint=%s mode=%s",
             snapshot_id,
             len(rag_docs),
+            docs_fingerprint[:12],
             app.state.rag_status,
         )
         return candidate
     except Exception as exc:
         # Keep an old retriever in memory for rollback, but never use it for a
         # newer snapshot because the evidence boundary would be wrong.
-        app.state.rag_status = "failed"
+        active_snapshot = getattr(app.state, "live_snapshot", None)
+        old_index_usable = bool(
+            previous_status in {"ready", "bm25_only"}
+            and previous_retriever is not None
+            and previous_snapshot_id
+            and previous_fingerprint
+            and isinstance(active_snapshot, dict)
+            and active_snapshot.get("snapshot_id") == previous_snapshot_id
+            and active_snapshot.get("rag_docs_fingerprint") == previous_fingerprint
+            and getattr(previous_retriever, "docs_fingerprint", None) == previous_fingerprint
+        )
+        app.state.rag_status = previous_status if old_index_usable else "failed"
+        app.state.rag_candidate_status = "failed"
+        app.state.rag_candidate_error = type(exc).__name__
         app.state.rag_error = type(exc).__name__
         logger.warning("rag_preheat_failed snapshot_id=%s error_type=%s", snapshot_id, type(exc).__name__)
         return None
@@ -362,11 +473,28 @@ def ensure_retriever(app: FastAPI) -> HybridRetriever | None:
         return None
     if getattr(app.state, "rag_status", None) not in {"ready", "bm25_only"}:
         return None
+    snapshot = getattr(app.state, "live_snapshot", None)
+    snapshot_fingerprint = snapshot.get("rag_docs_fingerprint") if isinstance(snapshot, dict) else None
+    active_fingerprint = getattr(app.state, "rag_docs_fingerprint", None)
+    if not snapshot_fingerprint or snapshot_fingerprint != active_fingerprint:
+        return None
+    if getattr(retriever, "docs_fingerprint", None) != snapshot_fingerprint:
+        return None
     return retriever
 
 
-async def preheat_retriever_in_background(app: FastAPI) -> None:
-    await asyncio.to_thread(preheat_retriever, app)
+async def preheat_retriever_in_background(
+    app: FastAPI,
+    *,
+    candidate_snapshot: dict | None = None,
+    activate_snapshot: bool = False,
+) -> None:
+    await asyncio.to_thread(
+        preheat_retriever,
+        app,
+        candidate_snapshot=candidate_snapshot,
+        activate_snapshot=activate_snapshot,
+    )
 
 
 def get_live_sample_target(app: FastAPI) -> int:
@@ -444,6 +572,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
     refresh_status = getattr(app.state, "live_refresh_status", "unavailable")
     cooldown_remaining = max(0.0, getattr(app.state, "live_cooldown_until", 0.0) - time.monotonic())
     last_refresh_attempt = getattr(app.state, "live_last_refresh_attempt", None)
+    rag_alignment = _rag_alignment_state(app)
     if not isinstance(snapshot, dict):
         return {
             "source": "Supercell Official API",
@@ -471,6 +600,11 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
                 "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
                 "document_counts": {},
                 "quality": getattr(app.state, "rag_quality_report", None),
+                **rag_alignment,
+                "validation": _public_rag_validation(getattr(app.state, "rag_document_validation", None)),
+                "candidate_status": getattr(app.state, "rag_candidate_status", "not_ready"),
+                "candidate_error": getattr(app.state, "rag_candidate_error", None),
+                "candidate_validation": _public_rag_validation(getattr(app.state, "rag_candidate_validation", None)),
             },
             "rag_status": "not_required" if not SUPERCELL_LIVE_DATA_ENABLED else getattr(app.state, "rag_status", "not_ready"),
             "data_sources": {
@@ -512,6 +646,13 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
             "document_counts": snapshot.get("rag_document_counts", {}),
             "quality": getattr(app.state, "rag_quality_report", None),
+            **rag_alignment,
+            "validation": _public_rag_validation(
+                getattr(app.state, "rag_document_validation", snapshot.get("rag_document_validation"))
+            ),
+            "candidate_status": getattr(app.state, "rag_candidate_status", "not_ready"),
+            "candidate_error": getattr(app.state, "rag_candidate_error", None),
+            "candidate_validation": _public_rag_validation(getattr(app.state, "rag_candidate_validation", None)),
         },
         "rag_status": getattr(app.state, "rag_status", "not_ready"),
         "data_sources": {
@@ -565,6 +706,9 @@ def get_readiness_status(
     snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
     if snapshot_usable and rag_status in {"ready", "bm25_only"} and snapshot_id != rag_snapshot_id:
         degraded_reasons.append("snapshot_rag_misaligned")
+    rag_alignment = _rag_alignment_state(app)
+    if snapshot_usable and rag_status in {"ready", "bm25_only"} and not rag_alignment["fingerprint_aligned"]:
+        degraded_reasons.append("snapshot_rag_fingerprint_misaligned")
 
     if blockers:
         status = "unavailable"
@@ -593,6 +737,11 @@ def get_readiness_status(
             and snapshot.get("snapshot_id")
             and snapshot.get("snapshot_id") == getattr(app.state, "rag_snapshot_id", None)
         ),
+        "snapshot_rag_fingerprint_aligned": rag_alignment["fingerprint_aligned"],
+        "snapshot_docs_fingerprint": rag_alignment["snapshot_docs_fingerprint"],
+        "active_rag_docs_fingerprint": rag_alignment["active_docs_fingerprint"],
+        "index_docs_fingerprint": rag_alignment["index_docs_fingerprint"],
+        "rag_document_validation": _public_rag_validation(getattr(app.state, "rag_document_validation", None)),
         "blockers": blockers,
         "degraded_reasons": degraded_reasons,
     }
@@ -611,6 +760,7 @@ def restore_published_snapshot(app: FastAPI) -> dict | None:
     if snapshot is None:
         return None
     app.state.live_snapshot = snapshot
+    app.state.rag_document_validation = snapshot.get("rag_document_validation")
     age_seconds = snapshot_age_seconds(snapshot)
     app.state.live_snapshot_at = time.monotonic() - (age_seconds or 0.0)
     app.state.live_snapshot_target_battles = DAILY_TARGET_BATTLES
@@ -697,15 +847,24 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
             return cached
 
         snapshot = publish_daily_snapshot(snapshot, DATA_DIR)
-        app.state.live_snapshot = snapshot
-        app.state.live_snapshot_at = time.monotonic()
-        app.state.live_snapshot_target_battles = target_battles
-        app.state.cards_meta_data = list(snapshot.get("cards_meta", []))
-        app.state.top_decks_data = list(snapshot.get("top_decks", []))
-        app.state.card_deck_stats_data = dict(snapshot.get("card_deck_stats", {}))
-        app.state.retriever = None
-        app.state.rag_status = "not_ready"
-        app.state.rag_error = None
+        if RUNTIME_ROLE == "collector":
+            _activate_snapshot_state(app, snapshot)
+        else:
+            candidate = preheat_retriever(
+                app,
+                candidate_snapshot=snapshot,
+                activate_snapshot=True,
+            )
+            if candidate is None:
+                app.state.live_error = "RAGActivationFailed"
+                app.state.live_refresh_status = "stale" if cached is not None else "unavailable"
+                _record_live_refresh_attempt(
+                    app,
+                    status="rag_activation_failed",
+                    snapshot=snapshot,
+                    error=app.state.live_error,
+                )
+                return cached
         app.state.live_error = None
         _record_live_refresh_attempt(app, status="success", snapshot=snapshot)
         if snapshot.get("collection_metrics", {}).get("rate_limited", 0):
@@ -751,7 +910,11 @@ async def refresh_live_snapshot_loop(app: FastAPI) -> None:
     while True:
         snapshot = await asyncio.to_thread(ensure_live_snapshot, app)
         snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
-        if RUNTIME_ROLE != "collector" and snapshot_id and snapshot_id != getattr(app.state, "rag_snapshot_id", None):
+        snapshot_fingerprint = snapshot.get("rag_docs_fingerprint") if isinstance(snapshot, dict) else None
+        if RUNTIME_ROLE != "collector" and snapshot_id and (
+            snapshot_id != getattr(app.state, "rag_snapshot_id", None)
+            or snapshot_fingerprint != getattr(app.state, "rag_docs_fingerprint", None)
+        ):
             await preheat_retriever_in_background(app)
         if getattr(app.state, "live_refresh_status", None) == "cooldown":
             delay = max(60.0, getattr(app.state, "live_cooldown_until", 0.0) - time.monotonic())
@@ -766,15 +929,18 @@ async def refresh_live_snapshot_loop(app: FastAPI) -> None:
 async def follow_published_snapshot_loop(app: FastAPI) -> None:
     """Reload atomically published snapshots without ever contacting Supercell."""
     while True:
-        current_id = _active_snapshot_id(app)
         published = await asyncio.to_thread(load_published_snapshot, DATA_DIR)
         published_id = published.get("snapshot_id") if isinstance(published, dict) else None
-        if published_id and published_id != current_id:
-            restore_published_snapshot(app)
-            app.state.retriever = None
-            app.state.rag_snapshot_id = None
-            app.state.rag_status = "not_ready"
-            await preheat_retriever_in_background(app)
+        published_fingerprint = published.get("rag_docs_fingerprint") if isinstance(published, dict) else None
+        if published_id and (
+            published_id != _active_snapshot_id(app)
+            or published_fingerprint != getattr(app.state, "rag_docs_fingerprint", None)
+        ):
+            await preheat_retriever_in_background(
+                app,
+                candidate_snapshot=published,
+                activate_snapshot=True,
+            )
         await asyncio.sleep(SNAPSHOT_FOLLOWER_POLL_SECONDS)
 
 
@@ -942,7 +1108,9 @@ async def build_answer(
                 title="正在确认官方数据快照",
                 detail="读取当前完整 Supercell 官方排行榜战斗日志快照。",
             )
-        live_snapshot = await asyncio.to_thread(ensure_live_snapshot, app)
+        live_snapshot = getattr(app.state, "live_snapshot", None)
+        if not isinstance(live_snapshot, dict):
+            live_snapshot = None
         if live_snapshot is not None:
             if EXTERNAL_API_REQUIRED:
                 cards_meta_data = list(live_snapshot["cards_meta"])
@@ -1011,6 +1179,7 @@ async def build_answer(
     rag_metadata = {
         "status": getattr(app.state, "rag_status", "not_required"),
         "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
+        "docs_fingerprint": getattr(app.state, "rag_docs_fingerprint", None),
     }
     if query_needs_rag(parsed):
         # RAG indexing is preheated on startup and snapshot publication. User
@@ -1157,6 +1326,11 @@ async def lifespan(app: FastAPI):
     app.state.card_deck_stats_data = {}
     app.state.retriever = None
     app.state.rag_snapshot_id = None
+    app.state.rag_docs_fingerprint = None
+    app.state.rag_document_validation = None
+    app.state.rag_candidate_status = "not_ready"
+    app.state.rag_candidate_error = None
+    app.state.rag_candidate_validation = None
     app.state.rag_status = "not_required"
     app.state.rag_error = None
     app.state.rag_quality_report = None

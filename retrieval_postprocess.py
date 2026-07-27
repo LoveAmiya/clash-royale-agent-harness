@@ -93,6 +93,16 @@ def compress_doc(doc: Dict[str, Any]) -> str:
 
     if source_type == "deck":
         cards = meta.get("cards", [])
+        battles = meta.get("battles")
+        sample_win_rate = meta.get("sample_win_rate")
+        if cards and battles is not None and sample_win_rate is not None:
+            return (
+                f"Deck: rank {meta.get('rank')}; {meta.get('deck_name')}; "
+                f"{battles} games; win rate: {sample_win_rate}%; "
+                f"cards: {', '.join(str(card) for card in cards[:8])}"
+            )
+        if doc.get("text"):
+            return str(doc["text"])
         cards_text = "，".join(cards[:8])
         return (
             f"卡组：排名第 {meta.get('rank')}，"
@@ -104,6 +114,18 @@ def compress_doc(doc: Dict[str, Any]) -> str:
         )
 
     if source_type == "card":
+        usage_rate = meta.get("usage_rate")
+        win_rate = meta.get("win_rate")
+        appearance_count = meta.get("appearance_count")
+        if usage_rate is not None and win_rate is not None and appearance_count is not None:
+            return (
+                f"Card: {meta.get('card_name')}; rank: {meta.get('rank')}; "
+                f"usage rate: {usage_rate}%; win rate: {win_rate}%; "
+                f"clean win rate: {meta.get('clean_win_rate')}%; "
+                f"{appearance_count} appearances"
+            )
+        if doc.get("text"):
+            return str(doc["text"])
         return (
             f"卡牌：{meta.get('card_name')}；"
             f"排名：{meta.get('rank')}；"
@@ -161,11 +183,11 @@ def compress_results(
     return compressed
 
 
-def build_context_and_refs(results: List[Dict[str, Any]]) -> Tuple[str, str]:
+def build_context_and_refs(results: List[Dict[str, Any]], *, start_index: int = 1) -> Tuple[str, str]:
     context_lines = []
     refs = []
 
-    for i, item in enumerate(results, start=1):
+    for i, item in enumerate(results, start=start_index):
         doc = item["doc"]
         text = item.get("compressed_text", doc.get("text", ""))
 
@@ -182,3 +204,11 @@ def build_context_and_refs(results: List[Dict[str, Any]]) -> Tuple[str, str]:
         refs.append(f"[{i}] {doc['source_type']} | {doc['doc_id']} | {source}{suffix}")
 
     return "\n\n".join(context_lines), "\n".join(refs)
+
+
+def strip_generated_reference_section(text: str) -> str:
+    """Remove model-written source lists before verified references are appended."""
+    markers = ("参考来源：", "参考来源:", "References:", "Sources:")
+    positions = [text.find(marker) for marker in markers]
+    positions = [position for position in positions if position >= 0]
+    return text[: min(positions)].rstrip() if positions else text.strip()

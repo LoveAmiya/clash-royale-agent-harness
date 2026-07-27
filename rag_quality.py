@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ _NUMERIC_FACT = re.compile(
     re.IGNORECASE,
 )
 _DOC_ID = re.compile(r"\b(?:supercell|snapshot|official|other)[\w-]*:[^\s|`]+", re.IGNORECASE)
+_INVALID_PERCENT = re.compile(r"\b(?:none|null|nan)\s*%", re.IGNORECASE)
 _CARD_ENTITY_PATTERNS = (
     re.compile(r"(?:卡牌|card)\s*[:：]\s*([A-Za-z][A-Za-z .'-]{1,50})", re.IGNORECASE),
     re.compile(
@@ -36,6 +38,42 @@ class RAGQualityGateError(RuntimeError):
 
 class GroundingValidationError(RuntimeError):
     pass
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _invalid_evidence_doc_ids(docs: list[dict[str, Any]]) -> list[str]:
+    invalid: list[str] = []
+    for doc in docs:
+        if not isinstance(doc, dict):
+            invalid.append("")
+            continue
+        doc_id = str(doc.get("doc_id", ""))
+        source_type = doc.get("source_type")
+        metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+        text = str(doc.get("text", ""))
+        malformed = not text.strip() or bool(_INVALID_PERCENT.search(text))
+        if source_type == "card" and any(
+            key in metadata for key in ("usage_rate", "win_rate", "appearance_count")
+        ):
+            malformed = malformed or not all(
+                _is_number(metadata.get(key))
+                for key in ("usage_rate", "win_rate", "appearance_count")
+            )
+        elif source_type == "deck" and any(
+            key in metadata for key in ("cards", "battles", "sample_win_rate")
+        ):
+            malformed = malformed or not (
+                isinstance(metadata.get("cards"), list)
+                and bool(metadata.get("cards"))
+                and _is_number(metadata.get("battles"))
+                and _is_number(metadata.get("sample_win_rate"))
+            )
+        if malformed:
+            invalid.append(doc_id)
+    return sorted(invalid)
 
 
 def _normalize_fact(value: str, unit: str) -> tuple[str, str]:
@@ -168,13 +206,40 @@ class GroundedStreamBuffer:
 
     _BOUNDARY = re.compile(r"(?<=[\n。！？!?])")
 
-    def __init__(self, evidence: str, allowed_doc_ids: set[str] | list[str] | tuple[str, ...]):
+    def __init__(
+        self,
+        evidence: str,
+        allowed_doc_ids: set[str] | list[str] | tuple[str, ...],
+        *,
+        stop_markers: tuple[str, ...] = (),
+    ):
         self.evidence = evidence
         self.allowed_doc_ids = set(allowed_doc_ids)
+        self.stop_markers = stop_markers
         self.pending = ""
+        self.stopped = False
 
     def push(self, delta: str) -> list[str]:
+        if self.stopped:
+            return []
         self.pending += delta
+        marker_positions = [self.pending.find(marker) for marker in self.stop_markers]
+        marker_positions = [position for position in marker_positions if position >= 0]
+        if marker_positions:
+            position = min(marker_positions)
+            pending = self.pending[:position]
+            self.pending = ""
+            self.stopped = True
+            if not pending:
+                return []
+            validate_answer_grounding(
+                pending,
+                self.evidence,
+                self.allowed_doc_ids,
+                raise_on_failure=True,
+                require_citations=False,
+            )
+            return [pending]
         parts = self._BOUNDARY.split(self.pending)
         if len(parts) == 1:
             return []
@@ -191,7 +256,7 @@ class GroundedStreamBuffer:
         return [part for part in parts if part]
 
     def finish(self) -> list[str]:
-        if not self.pending:
+        if self.stopped or not self.pending:
             return []
         pending = self.pending
         self.pending = ""
@@ -207,15 +272,32 @@ class GroundedStreamBuffer:
 
 def _probe_query(doc: dict[str, Any]) -> str:
     metadata = doc.get("metadata", {})
-    labels = [
-        metadata.get("card_name"),
-        metadata.get("deck_name"),
-        metadata.get("opponent_deck_name"),
-        metadata.get("archetype"),
-        metadata.get("title"),
-    ]
-    label_text = " ".join(str(value) for value in labels if value)
-    return f"{doc.get('doc_id', '')} {label_text} {str(doc.get('text', ''))[:180]}".strip()
+    source_type = str(doc.get("source_type") or "")
+    card_name = str(metadata.get("card_name") or "").strip()
+    deck_name = str(metadata.get("deck_name") or "").strip()
+    opponent_deck = str(metadata.get("opponent_deck_name") or "").strip()
+    archetype = str(metadata.get("archetype") or "").strip()
+    cards = metadata.get("cards") if isinstance(metadata.get("cards"), list) else []
+    if source_type == "snapshot":
+        return "current Clash Royale environment official sample overview"
+    if source_type == "card":
+        return f"{card_name} usage rate win rate sample appearances"
+    if source_type == "deck":
+        return f"{deck_name} deck cards sample games win rate"
+    if source_type == "matchup":
+        return f"{deck_name} versus {opponent_deck} matchup win rate"
+    if source_type == "card_profile":
+        return f"{card_name} common teammates opponents card profile"
+    if source_type == "deck_profile":
+        return f"{deck_name} common opposing decks performance"
+    if source_type == "archetype":
+        return f"{archetype} archetype usage win rate matchups"
+    if source_type == "card_pair":
+        return f"{' and '.join(str(card) for card in cards)} synergy win rate"
+    if source_type == "counter":
+        return f"{card_name} against {metadata.get('opponent_card_name', '')} counter matchup"
+    labels = [card_name, deck_name, opponent_deck, archetype, *[str(card) for card in cards]]
+    return " ".join(value for value in labels if value) or source_type
 
 
 def evaluate_rag_quality(
@@ -244,6 +326,9 @@ def evaluate_rag_quality(
         failures.append("snapshot_mismatch")
     if not all(doc_ids) or len(set(doc_ids)) != len(doc_ids):
         failures.append("invalid_or_duplicate_doc_ids")
+    invalid_evidence_doc_ids = _invalid_evidence_doc_ids(docs)
+    if invalid_evidence_doc_ids:
+        failures.append("invalid_evidence_fields")
 
     probe_docs: list[dict[str, Any]] = []
     documents_by_source: dict[str, list[dict[str, Any]]] = {}
@@ -294,13 +379,17 @@ def evaluate_rag_quality(
     )
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "snapshot_id": snapshot_id,
+        "docs_fingerprint": hashlib.sha256(
+            json.dumps(docs, ensure_ascii=True, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "passed": not failures,
         "failures": failures,
         "document_count": len(docs),
         "source_types": sorted(source_types),
+        "invalid_evidence_doc_ids": invalid_evidence_doc_ids,
         "probe_count": len(probe_docs),
         "probe_hits_at_5": hits,
         "probe_recall_at_5": round(probe_recall, 6),

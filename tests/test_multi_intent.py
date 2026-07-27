@@ -62,6 +62,29 @@ class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["intent"] for item in parsed["subqueries"]].count("card_query"), 2)
         self.assertEqual({item.get("card_name") for item in parsed["subqueries"]}, {None, "Fireball", "Poison"})
 
+    def test_environment_deck_and_metrics_keep_three_bound_subqueries_in_user_order(self):
+        parsed = fallback_parse_multi_intent(
+            "\u73b0\u5728\u7684\u73af\u5883\u662f\u600e\u6837\u7684\uff1f"
+            "\u96f7\u7535\u5de8\u4eba\u5361\u7ec4\u914d\u7f6e\u662f\u600e\u6837\u7684\uff1f"
+            "\u4f7f\u7528\u7387\u548c\u80dc\u7387\u5462\uff1f",
+            self.card_data,
+        )
+
+        self.assertEqual(parsed["intent"], "multi_intent")
+        self.assertEqual(
+            [item["intent"] for item in parsed["subqueries"]],
+            ["meta_analysis_query", "deck_query", "card_query"],
+        )
+        self.assertEqual(parsed["subqueries"][1]["card_name"], "Electro Giant")
+        self.assertEqual(parsed["subqueries"][2]["card_name"], "Electro Giant")
+        self.assertEqual(parsed["subqueries"][2]["metrics"], ["usage_rate", "win_rate"])
+        self.assertFalse(
+            any(
+                item["intent"] == "card_query" and item.get("card_name") is None
+                for item in parsed["subqueries"]
+            )
+        )
+
     def test_two_named_card_metrics_create_one_direct_subquery_per_card(self):
         parsed = fallback_parse_multi_intent("火球和毒药的使用率分别是多少？", self.card_data)
 
