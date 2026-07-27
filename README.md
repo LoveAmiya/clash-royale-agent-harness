@@ -128,6 +128,12 @@ Example questions:
 - 帮我根据下一轮对手做备战建议。
 - 雷电巨人的使用率、胜率，还有当前环境主流卡组。
 
+The end-to-end restart and acceptance checklist is maintained in
+[`00_START_HERE.md`](00_START_HERE.md). It covers readiness and snapshot/RAG
+alignment, Chinese and English aliases, multi-intent ordering, raw SSE events,
+model stream fallback, feedback, retrieval evaluation, two-instance Redis load
+tests, and the Prometheus-to-Alertmanager notification drill.
+
 ### API Usage
 
 ```powershell
@@ -189,8 +195,8 @@ later external failure does not erase earlier evidence.
 
 ```powershell
 $env:RUN_LIVE_API_SMOKE = "true"
-$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
-.\run_tests.ps1
+$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8091"
+powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
 
 ### Docker

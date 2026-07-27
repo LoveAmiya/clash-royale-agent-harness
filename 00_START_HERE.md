@@ -54,7 +54,7 @@ credentials and port, then start normally:
 cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
 $env:SUPERCELL_LIVE_DATA_ENABLED = "true"
 $env:EXTERNAL_API_REQUIRED = "true"
-$env:RUNTIME_PORT = "8095"
+$env:RUNTIME_PORT = "8091"
 powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 ```
 
@@ -164,9 +164,72 @@ powershell -ExecutionPolicy Bypass -File .\run_web.ps1
 
 前端会用 SSE 实时显示默认展开的“执行说明”：已验证的解析结论、实际 Skill 路由、官方快照、RAG 检索和模型生成状态。它不展示模型私有思维链。结构化结果按标题、指标、数据边界和来源分块输出；RAG 回答会转发模型的公开文本增量。上游不支持 token 流时，执行说明会标记“模型未提供 token 流”，并以完成后结果分段输出；Trace 的 `metadata.model_stream` 会明确标为 `streaming`、`fallback_chunked` 或 `unavailable`。面试讲解链路：`Query Parser -> Router -> Official Snapshot 或 RAG -> Model Synthesis -> Execution Events + Trace -> SSE UI`。
 
+## 重启与完整验收
+
+正常重启时，在运行后端和前端的两个 PowerShell 窗口分别按 `Ctrl+C`，然后先运行 `run_backend.ps1`，确认 `/ready` 后再运行 `run_web.ps1`。如果终端已经关闭，先检查端口对应的进程，确认命令行是本项目的 `runtime_multi.py` 或 `web_app.py` 后再结束进程，不要仅按端口盲目终止其他程序：
+
+```powershell
+$listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+  Where-Object { $_.LocalPort -in 8080,8091 }
+$listeners | Select-Object LocalAddress,LocalPort,OwningProcess
+$pids = $listeners | Select-Object -ExpandProperty OwningProcess -Unique
+Get-CimInstance Win32_Process |
+  Where-Object { $pids -contains $_.ProcessId } |
+  Select-Object ProcessId,Name,CommandLine
+```
+
+重启后先执行只读探针，不要通过测试请求触发快照刷新：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8091/health
+Invoke-RestMethod http://127.0.0.1:8091/ready
+Invoke-RestMethod http://127.0.0.1:8091/snapshot/status
+Invoke-RestMethod http://127.0.0.1:8091/model/status
+Invoke-WebRequest http://127.0.0.1:8091/metrics -UseBasicParsing
+```
+
+可回答的完整状态应满足：`/health.status=healthy`、`/ready.status=ready` 或有旧快照时可解释的 `degraded`、`sample_battles=target_battles=20000`、`rag_status=ready` 或 `bm25_only`、快照 ID 与 RAG ID 一致、三个 `docs_fingerprint` 一致、`quality.passed=true`、`invalid_document_count=0`。统计数值会随每日快照变化，测试不得断言固定百分比。
+
+前端在 `http://127.0.0.1:8080` 依次测试以下问题：
+
+```text
+骷髅的使用率和胜率是多少？
+火球和毒药的使用率分别是多少？
+雷电巨人的使用率、胜率，以及当前环境主流卡组有哪些？
+当前环境里雷电巨人常见搭配、克制关系和不利对局是什么？
+Hog Rider and Royal Giant usage and win rates, plus current meta decks.
+我们第五轮打谁？
+```
+
+验收时确认中英文和别名映射正确；复合问题显示独立 `q1/q2`；结构化数值没有 `None%`；RAG 引用属于当前快照并包含样本数、采集时间和非全局环境边界；最终分区保持提问顺序。`有帮助/需改进` 只接受服务器签发的 `request_id`，反馈写入 SQLite，不会自动污染正式评测集。
+
+需要直接查看 SSE 合约时执行：
+
+```powershell
+curl.exe -N http://127.0.0.1:8091/process `
+  -H "Content-Type: application/json" `
+  -H "X-Request-ID: manual-sse-test" `
+  --data-raw '{"session_id":"manual","input":[{"role":"user","content":[{"type":"text","text":"Electro Giant usage and win rate, plus current meta decks"}]}]}'
+```
+
+应先收到 `execution`，随后收到一个或多个 `content`，最后收到 `trace completed`，且所有事件的 `request_id` 一致。`model_stream=streaming` 表示上游提供真实文本 delta；`fallback_chunked` 表示模型成功但上游没有提供 delta；`unavailable` 才表示模型流不可用。系统不会把整块结果伪装成 token 流。
+
+完整离线质量、真实 API、多实例 Redis、请求体限制、压测和告警链路分别使用以下命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1
+.\.venv\Scripts\python.exe -m evaluation.retrieval_benchmark --report evaluation/reports/manual-retrieval.json
+powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile smoke
+powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile load
+powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile soak -SoakDuration 5m
+powershell -ExecutionPolicy Bypass -File .\test_alert_pipeline.ps1
+```
+
+`run_tests.ps1` 会运行单元/集成测试、348 条确定性评测、引用一致性和故障注入；真实外部 API smoke test 仅在显式设置 `RUN_LIVE_API_SMOKE=true` 时运行。k6 测试经过 Caddy 请求两个 API 实例并共享 Redis，但关闭外部模型和 Supercell 调用。告警演练验证 `Prometheus -> Alertmanager -> 持久化 webhook`，成功和失败报告都会保留。生产演示的具体阈值、报告路径和回滚边界见 `docs/production-demo.md`。
+
 ## 模型何时调用
 
-赛程、固定排名、单卡胜率等高置信度问题会直接读取本地 JSON，不会消耗模型调用。开放式环境分析和备战问题强制进入 RAG，再调用 OpenAI 模型综合证据；Ollama embedding 不可用时会在 10 秒后自动降级为 BM25。解析器和模型调用分别有 45 秒、120 秒上限，超时会返回明确错误。模型 Key 只从当前进程的 `OPENAI_API_KEY` 环境变量读取。
+严格模式下所有用户问题都先由模型 API 解析，模型不可用时不会把本地规则伪装成模型解析成功。赛程、固定排名和单卡指标在解析完成后直接读取赛程数据或官方完整快照，结构化数值不再交给模型改写，因此通常只消耗解析调用。开放式环境分析和备战问题还会进入 RAG，并再次调用模型综合证据；Ollama embedding 不可用时会在 10 秒后自动降级为 BM25。解析器和模型合成分别有 45 秒、120 秒上限，超时会返回明确错误。模型 Key 只从当前进程的 `OPENAI_API_KEY` 环境变量读取。
 
 ## 失败先查
 
@@ -276,7 +339,7 @@ Invoke-RestMethod http://127.0.0.1:8091/health
 
 ```powershell
 cd "F:\All projects\agentscope-doc-qa-rescue-codex-crash"
-$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
+$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8091"
 .\.venv\Scripts\python.exe evaluation\run_live_api_smoke.py
 ```
 
@@ -286,7 +349,7 @@ $env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
 
 ```powershell
 $env:RUN_LIVE_API_SMOKE = "true"
-$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
+$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8091"
 powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
 
