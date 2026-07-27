@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted; multi-instance admission control superseded by ADR-006.
 
 ## Date
 
@@ -41,6 +41,6 @@ and CI that never consumes credentials on ordinary pull requests.
 - Operators can distinguish a live process from an answer-ready service and can
   correlate an SSE response to logs and trace metadata without logging questions.
 - Public endpoints reject abusive inputs before model work starts.
-- The rate limiter is intentionally not distributed. It must be replaced or
-  complemented by gateway enforcement before horizontal scaling.
+- Local mode retains the in-memory limiter. ADR-006 replaces it with Redis-backed
+  shared admission control for the two-instance production topology.
 - Dependency refreshes require regenerating and reviewing the lock file.

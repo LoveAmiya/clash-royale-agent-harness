@@ -97,7 +97,7 @@ deck, archetype, pair, counter, and matchup documents and refuses to call a
 BM25-only result hybrid retrieval.
 
 ```powershell
-.\.venv\Scripts\python.exe evaluation\retrieval_benchmark.py --report evaluation\reports\retrieval-benchmark.json
+.\.venv\Scripts\python.exe -m evaluation.retrieval_benchmark --report evaluation\reports\retrieval-benchmark.json
 ```
 
 The default suite performs no external API calls. To add the real complete-chain
@@ -225,6 +225,19 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 受控采集默认每秒最多 2 个官方请求、严格按排行榜顺序逐名读取 battle log、遵守 `429` 响应的 `Retry-After`，刷新预算默认 60 分钟。`SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS` 可在 60 秒到 7200 秒之间调整；生产建议保持 3600，网络较慢时可设为 7200。未达到 20,000 场的结果会被丢弃并进入 5/15/30 分钟递增冷却，期间继续服务上一次完整快照，不会立即重复抓取。
 
 ## 质量、反馈与生产拓扑
+
+生产演示分支已经把两个 API 实例的进程内限流升级为 Redis 原子共享配额，并为并发槽使用带 TTL 的租约；Redis 不可用时默认 fail-closed。请求体上限会按 ASGI 实际接收字节计算，因此没有 `Content-Length` 的 chunked 请求同样会在进入业务逻辑前返回 413。
+
+压测与告警验收命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile smoke
+powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile load
+powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile soak -SoakDuration 30m
+powershell -ExecutionPolicy Bypass -File .\test_alert_pipeline.ps1
+```
+
+k6 会经过 Caddy 请求两个真实 API 实例并共享同一个 Redis；测试关闭外部模型与 Supercell 调用，不消耗额度。告警演练覆盖 `Prometheus -> Alertmanager -> 持久化 webhook`，成功和失败都会保留 JSON 报告。完整配置、实测指标和边界见 `docs/production-demo.md`。
 
 每次 RAG 预热会先执行同一 `snapshot_id` 的离线质量门槛：文档数量、证据类型覆盖、文档 ID 唯一性，以及每种证据默认均匀抽取 3 条的 Recall@5。`RAG_PROBES_PER_SOURCE` 可在 1-20 间调整；报告包含总体和分证据类型召回率并写入 `data/rag_quality/`，严格模式下未通过时不会切换 active retriever。RAG 最终回答还会校验引用文档 ID，并把带单位数值绑定到指标和已知卡牌实体；证据中 Poison 的数值不能被错配给 Electro Giant，失败时不输出未经支撑的开放结论。
 

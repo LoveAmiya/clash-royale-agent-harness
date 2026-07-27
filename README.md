@@ -175,7 +175,7 @@ snapshot's card, deck, archetype, pair, counter, and matchup evidence; it
 refuses to label a BM25-only run as hybrid retrieval.
 
 ```powershell
-python evaluation/retrieval_benchmark.py --report evaluation/reports/retrieval-benchmark.json
+python -m evaluation.retrieval_benchmark --report evaluation/reports/retrieval-benchmark.json
 ```
 
 The optional live smoke test is a separate external-system gate. It requires a
@@ -291,7 +291,10 @@ curated assertions instead of resetting them to pending.
 The production Compose topology runs one Supercell collector and two read-only
 API processes. Caddy load-balances the APIs and terminates local HTTPS;
 Prometheus/Grafana persist metrics and Loki/Promtail centralize structured JSON
-logs. Grafana provisions an operations dashboard at `http://127.0.0.1:3000`;
+logs. Both API instances share an atomic Redis rate/concurrency quota with
+expiring leases, and raw ASGI body bytes are bounded even for chunked requests.
+Prometheus routes alerts through Alertmanager to a persistent, rotating webhook
+receiver. Grafana provisions an operations dashboard at `http://127.0.0.1:3000`;
 Prometheus retains 30 days, Loki retains 7 days, and symptom alerts cover request
 failure rate, snapshot/RAG misalignment, and an open model circuit. Set a strong
 `GRAFANA_ADMIN_PASSWORD` before deployment. Validate and launch it with:
@@ -300,6 +303,12 @@ failure rate, snapshot/RAG misalignment, and an open model circuit. Set a strong
 docker compose -f compose.production.yml config --quiet
 docker compose -f compose.production.yml up --build -d
 ```
+
+Reproducible two-instance k6 smoke/load/soak profiles and the complete
+Prometheus-to-Alertmanager delivery drill are documented in
+[`docs/production-demo.md`](docs/production-demo.md). Run them with
+`run_load_test.ps1` and `test_alert_pipeline.ps1`; timestamped reports are kept
+even when a threshold or delivery check fails.
 
 Only run the containerized collector when its stable public egress IP is in the
 Supercell key allowlist. On this project's Windows setup, native collection plus
