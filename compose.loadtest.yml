@@ -1,0 +1,66 @@
+x-load-api: &load-api
+  build: .
+  command: ["uvicorn", "runtime_multi:app", "--host", "0.0.0.0", "--port", "8091", "--workers", "1"]
+  environment:
+    OPENAI_API_KEY: ""
+    EXTERNAL_API_REQUIRED: "false"
+    SUPERCELL_LIVE_DATA_ENABLED: "false"
+    RUNTIME_ROLE: all
+    RAG_INDEX_MODE: memory
+    RUNTIME_HOST: 0.0.0.0
+    RUNTIME_PORT: 8091
+    PROCESS_MAX_CONCURRENT: ${LOAD_PROCESS_MAX_CONCURRENT:-64}
+    PROCESS_RATE_LIMIT_PER_MINUTE: ${LOAD_PROCESS_RATE_LIMIT_PER_MINUTE:-100000}
+    PROCESS_QUOTA_BACKEND: redis
+    PROCESS_QUOTA_FAIL_MODE: closed
+    PROCESS_QUOTA_KEY_PREFIX: cr-agent:loadtest
+    REDIS_URL: redis://redis:6379/0
+  depends_on:
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3)"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  api-1:
+    <<: *load-api
+
+  api-2:
+    <<: *load-api
+
+  proxy:
+    image: caddy:2.8-alpine
+    ports:
+      - "127.0.0.1:18091:80"
+    volumes:
+      - ./deploy/Caddyfile.loadtest:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api-1:
+        condition: service_healthy
+      api-2:
+        condition: service_healthy
+
+  k6:
+    image: grafana/k6:1.0.0
+    profiles: ["loadtest"]
+    environment:
+      BASE_URL: http://proxy
+      K6_SUMMARY_TREND_STATS: avg,min,med,max,p(90),p(95),p(99)
+    volumes:
+      - ./load/k6:/scripts:ro
+      - ./load/reports:/reports
+    depends_on:
+      proxy:
+        condition: service_started

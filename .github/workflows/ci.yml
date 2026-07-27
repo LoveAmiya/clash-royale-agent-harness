@@ -18,6 +18,18 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://127.0.0.1:6379/15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,12 +60,14 @@ jobs:
 
   container:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: quality
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag clash-royale-agent:${{ github.sha }} .
       - run: docker compose -f compose.production.yml config --quiet
+      - run: docker compose -f compose.loadtest.yml config --quiet
+      - run: docker compose -f compose.production.yml -f compose.alert-drill.yml config --quiet
       - run: >
           docker run --detach --rm --name clash-royale-agent-ci --publish 8091:8091
           --env EXTERNAL_API_REQUIRED=false --env SUPERCELL_LIVE_DATA_ENABLED=false
@@ -66,6 +80,26 @@ jobs:
           done
           docker logs clash-royale-agent-ci
           exit 1
+      - name: Run two-instance k6 smoke test
+        run: |
+          docker compose -f compose.loadtest.yml up --build -d redis api-1 api-2 proxy
+          docker compose -f compose.loadtest.yml --profile loadtest run --rm \
+            -e SUMMARY_PATH=/reports/ci-smoke.json k6 run /scripts/smoke.js
+      - name: Run Prometheus to Alertmanager notification drill
+        shell: pwsh
+        run: ./test_alert_pipeline.ps1
+      - name: Upload deployment reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-reports
+          path: |
+            load/reports/
+            evaluation/reports/alert-drill-*.json
+          if-no-files-found: warn
+      - name: Stop deployment test stacks
+        if: always()
+        run: docker compose -f compose.loadtest.yml down --volumes || true
       - name: Stop container
         if: always()
         run: docker stop clash-royale-agent-ci || true

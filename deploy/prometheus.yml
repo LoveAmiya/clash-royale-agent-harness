@@ -4,6 +4,11 @@ global:
 rule_files:
   - /etc/prometheus/prometheus-alerts.yml
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: clash-royale-agent
     metrics_path: /metrics
@@ -13,3 +18,7 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["collector:8092"]
+  - job_name: clash-royale-alert-receiver
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["alert-webhook:8094"]

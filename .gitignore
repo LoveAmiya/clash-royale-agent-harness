@@ -38,6 +38,7 @@ data/official_daily_snapshot.json
 data/rag_quality/
 evaluation/feedback_candidates.jsonl
 evaluation/reports/
+load/reports/*.json
 evaluation/live_*.json
 evaluation/live_*.txt
 evaluation/manual_*.txt

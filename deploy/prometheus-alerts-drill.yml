@@ -1,0 +1,11 @@
+groups:
+  - name: notification-pipeline-drill
+    interval: 1s
+    rules:
+      - alert: ClashRoyalePrometheusPipelineDrill
+        expr: vector(1)
+        for: 0s
+        labels:
+          severity: info
+        annotations:
+          summary: Operator-triggered Prometheus to Alertmanager pipeline drill

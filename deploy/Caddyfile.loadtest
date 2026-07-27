@@ -1,0 +1,9 @@
+:80 {
+	encode zstd gzip
+	reverse_proxy api-1:8091 api-2:8091 {
+		lb_policy round_robin
+		health_uri /health
+		health_interval 5s
+	}
+}
+

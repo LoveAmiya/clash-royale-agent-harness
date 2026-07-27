@@ -92,6 +92,36 @@ services:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus-alerts.yml:/etc/prometheus/prometheus-alerts.yml:ro
       - prometheus_data:/prometheus
+    depends_on: [alertmanager]
+    restart: unless-stopped
+
+  alert-webhook:
+    build: .
+    command: ["uvicorn", "alert_receiver:app", "--host", "0.0.0.0", "--port", "8094", "--workers", "1"]
+    environment:
+      ALERT_STORE_FILE: /var/lib/alert-receiver/alerts.jsonl
+    volumes:
+      - alert_notifications:/var/lib/alert-receiver
+    ports:
+      - "127.0.0.1:8094:8094"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8094/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ./deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    depends_on:
+      alert-webhook:
+        condition: service_healthy
     restart: unless-stopped
 
   loki:
@@ -133,3 +163,5 @@ volumes:
   loki_data:
   promtail_positions:
   grafana_data:
+  alertmanager_data:
+  alert_notifications:
