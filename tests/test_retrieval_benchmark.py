@@ -1,9 +1,30 @@
 import unittest
 
-from evaluation.retrieval_benchmark import build_cases, default_benchmark_index_path, score_ranking
+from evaluation.retrieval_benchmark import (
+    attach_corpus_identity,
+    bootstrap_mean_ci,
+    build_cases,
+    compare_paired_rankings,
+    default_benchmark_index_path,
+    evaluate_cases,
+    paired_cohens_d,
+    score_ranking,
+)
 
 
 class RetrievalBenchmarkTests(unittest.TestCase):
+    def test_quality_report_is_bound_to_snapshot_and_document_fingerprint(self):
+        retriever = type(
+            "RetrieverIdentity",
+            (),
+            {"snapshot_id": "official-1", "docs_fingerprint": "fingerprint-1"},
+        )()
+
+        report = attach_corpus_identity({"case_count": 1}, retriever)
+
+        self.assertEqual(report["snapshot_id"], "official-1")
+        self.assertEqual(report["docs_fingerprint"], "fingerprint-1")
+
     def test_default_index_is_isolated_from_the_runtime_qdrant_directory(self):
         docs = [{"metadata": {"snapshot_id": "official-1"}}]
 
@@ -25,6 +46,108 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["hits_at_k"], 1)
         self.assertEqual(metrics["recall_at_k"], 0.5)
         self.assertEqual(metrics["mrr_at_k"], 0.25)
+        self.assertEqual(
+            metrics["case_scores"],
+            [
+                {"case_id": "one", "recall_at_k": 1, "reciprocal_rank": 0.5},
+                {"case_id": "two", "recall_at_k": 0, "reciprocal_rank": 0.0},
+            ],
+        )
+
+    def test_bootstrap_confidence_interval_is_deterministic(self):
+        first = bootstrap_mean_ci([0.0, 0.5, 1.0, 1.0], iterations=500, seed=73)
+        second = bootstrap_mean_ci([0.0, 0.5, 1.0, 1.0], iterations=500, seed=73)
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["seed"], 73)
+        self.assertEqual(first["iterations"], 500)
+        self.assertLessEqual(first["lower"], first["mean"])
+        self.assertGreaterEqual(first["upper"], first["mean"])
+
+    def test_paired_comparison_uses_aligned_case_scores(self):
+        baseline = [
+            {"case_id": "a", "recall_at_k": 0, "reciprocal_rank": 0.0},
+            {"case_id": "b", "recall_at_k": 1, "reciprocal_rank": 0.5},
+            {"case_id": "c", "recall_at_k": 0, "reciprocal_rank": 0.0},
+        ]
+        treatment = [
+            {"case_id": "c", "recall_at_k": 1, "reciprocal_rank": 1.0},
+            {"case_id": "a", "recall_at_k": 1, "reciprocal_rank": 0.5},
+            {"case_id": "b", "recall_at_k": 1, "reciprocal_rank": 1.0},
+        ]
+
+        report = compare_paired_rankings(baseline, treatment, iterations=500, seed=19)
+
+        self.assertEqual(report["case_count"], 3)
+        self.assertAlmostEqual(report["recall_at_k"]["mean_delta"], 2 / 3)
+        self.assertAlmostEqual(report["reciprocal_rank"]["mean_delta"], 2 / 3)
+        self.assertIsNotNone(report["recall_at_k"]["paired_cohens_d"])
+        self.assertEqual(report["recall_at_k"]["ci95"]["seed"], 19)
+        self.assertEqual(
+            report["case_scores"][0],
+            {
+                "case_id": "a",
+                "baseline_recall_at_k": 0.0,
+                "treatment_recall_at_k": 1.0,
+                "recall_at_k_delta": 1.0,
+                "baseline_reciprocal_rank": 0.0,
+                "treatment_reciprocal_rank": 0.5,
+                "reciprocal_rank_delta": 0.5,
+            },
+        )
+
+    def test_paired_cohens_d_reports_zero_for_identical_pairs(self):
+        self.assertEqual(paired_cohens_d([1.0, 0.0], [1.0, 0.0]), 0.0)
+
+    def test_evaluate_cases_reports_all_ablation_variants_and_paired_comparisons(self):
+        relevant = {
+            "doc_id": "card-1",
+            "source_type": "card_profile",
+            "text": "Electro Giant usage profile",
+            "metadata": {"card_name": "Electro Giant"},
+        }
+        distractor = {
+            "doc_id": "card-2",
+            "source_type": "card_profile",
+            "text": "another card",
+            "metadata": {"card_name": "Other"},
+        }
+
+        class FakeRetriever:
+            dense_available = True
+
+            def bm25_search(self, *_args, **_kwargs):
+                return [{"doc": distractor, "score": 1.0}, {"doc": relevant, "score": 0.5}]
+
+            def hybrid_search(self, *_args, **_kwargs):
+                return [
+                    {"doc": distractor, "final_score": 0.7},
+                    {"doc": relevant, "final_score": 0.6},
+                ]
+
+        report = evaluate_cases(
+            FakeRetriever(),
+            [
+                {
+                    "case_id": "one",
+                    "query": "Electro Giant usage profile",
+                    "parsed": {"card_name": "Electro Giant"},
+                    "relevant_doc_id": "card-1",
+                    "source_type": "card_profile",
+                }
+            ],
+            k=1,
+            bootstrap_iterations=100,
+            bootstrap_seed=7,
+        )
+
+        self.assertEqual(set(report["methods"]), {"bm25", "hybrid", "hybrid_rerank"})
+        self.assertTrue(report["ablation"]["hybrid_rerank_includes_metadata_bonus"])
+        self.assertEqual(
+            set(report["paired_comparisons"]),
+            {"hybrid_vs_bm25", "hybrid_rerank_vs_hybrid", "hybrid_rerank_vs_bm25"},
+        )
+        self.assertEqual(report["methods"]["hybrid_rerank"]["metrics"]["recall_at_k"], 1.0)
 
     def test_ignores_results_beyond_cutoff(self):
         metrics = score_ranking(

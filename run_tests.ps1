@@ -34,6 +34,28 @@ try {
         exit $LASTEXITCODE
     }
 
+    & $pythonExe -m evaluation.citation_benchmark `
+        --documents data\rag_documents.json `
+        --report evaluation\reports\citation-latest.json
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    & $pythonExe -m evaluation.run_fault_injection `
+        --scenarios evaluation\fault_scenarios.jsonl `
+        --report evaluation\reports\fault-injection-latest.json
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    if ($env:RUN_RAG_RETRIEVAL_BENCHMARK -eq "true") {
+        & $pythonExe -m evaluation.retrieval_benchmark `
+            --report evaluation\reports\retrieval-latest.json
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
+
     if ($env:RUN_LIVE_API_SMOKE -eq "true") {
         $env:SUPERCELL_LIVE_DATA_ENABLED = if ($null -eq $originalLiveDataEnabled) { "true" } else { $originalLiveDataEnabled }
         $env:EXTERNAL_API_REQUIRED = if ($null -eq $originalExternalApiRequired) { "true" } else { $originalExternalApiRequired }

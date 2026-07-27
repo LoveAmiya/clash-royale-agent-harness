@@ -21,6 +21,13 @@ PROCESS_URL = f"{BACKEND_URL}/process"
 HEALTH_URL = f"{BACKEND_URL}/health"
 
 
+def persist_report(report_path: Path | None, report: dict) -> None:
+    if report_path is None:
+        return
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def request_answer(client: httpx.Client, question: str) -> tuple[str, dict, list[dict]]:
     payload = {
         "session_id": f"live-api-smoke-{uuid.uuid4().hex[:8]}",
@@ -90,9 +97,7 @@ def main(report_path: Path | None = None) -> int:
 
         ranking_answer, ranking_trace, ranking_events = request_answer(client, "当前实时使用率前十的卡牌有哪些？")
         report["ranking"] = {"question": "当前实时使用率前十的卡牌有哪些？", "answer": ranking_answer, "trace": ranking_trace}
-        if report_path is not None:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        persist_report(report_path, report)
         assert ranking_trace.get("parsed", {}).get("parse_source") == "llm_parser", ranking_trace
         assert ranking_trace.get("selected_skill") == "CardMetaSkill", ranking_trace
         assert ranking_trace.get("mode") == "direct", ranking_trace
@@ -104,6 +109,7 @@ def main(report_path: Path | None = None) -> int:
         question = "雷电巨人的使用率、胜率，还有当前环境主流卡组"
         answer, trace, events = request_answer(client, question)
         report["multi_intent"] = {"question": question, "answer": answer, "trace": trace}
+        persist_report(report_path, report)
         assert trace.get("parsed", {}).get("intent") == "multi_intent", trace
         assert trace.get("parsed", {}).get("parse_source") == "llm_parser", trace
         assert trace.get("selected_skill") == "MultiIntentOrchestrator", trace
@@ -125,9 +131,26 @@ def main(report_path: Path | None = None) -> int:
         rag_stream = (rag.get("metadata") or {}).get("model_stream")
         assert rag_stream in {"streaming", "fallback_chunked", "unavailable"}, rag
 
-    if report_path is not None:
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        rag_question = "当前环境主流卡组有哪些？"
+        rag_answer, rag_trace, rag_events = request_answer(client, rag_question)
+        report["rag"] = {"question": rag_question, "answer": rag_answer, "trace": rag_trace}
+        persist_report(report_path, report)
+        assert rag_trace.get("parsed", {}).get("intent") == "meta_analysis_query", rag_trace
+        assert rag_trace.get("parsed", {}).get("parse_source") == "llm_parser", rag_trace
+        assert rag_trace.get("selected_skill") == "EvidenceSynthesisSkill", rag_trace
+        assert rag_trace.get("mode") == "rag_synthesis", rag_trace
+        assert_api_metadata(rag_trace)
+        rag_metadata = rag_trace.get("metadata") or {}
+        assert rag_metadata.get("model_generation") == "api", rag_metadata
+        assert rag_metadata.get("model_stream") in {"streaming", "fallback_chunked"}, rag_metadata
+        grounding = rag_metadata.get("grounding_validation") or {}
+        assert grounding.get("passed") is True, grounding
+        assert not grounding.get("unknown_citations"), grounding
+        assert not grounding.get("unsupported_numeric_claims"), grounding
+        assert "Supercell API live sample" in rag_answer, rag_answer
+        assert_streaming_contract(rag_events)
+
+    persist_report(report_path, report)
     print("LIVE_API_SMOKE_OK")
     return 0
 
