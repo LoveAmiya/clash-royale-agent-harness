@@ -25,6 +25,10 @@ and audit, not embedded one document per battle. Preheating sends these derived
 documents to Ollama in bounded batches (`EMBED_BATCH_SIZE`, default `32`) and
 writes matching batches to Qdrant.
 
+发布前会逐条校验全部卡牌和全部 `top_decks` 卡组切片：数值必须与结构化快照一致，完整卡组必须恰好八张不同卡，任何 `None%`、null、重复文档 ID 或来源缺失都会阻止发布。对局 matchup 只有样本数至少 5 场才进入 RAG，但低样本明细仍保留在 `official_daily_snapshot.json` 供审计。卡牌搭配与克制聚合至少需要 20 场。
+
+索引复用同时检查 `snapshot_id` 与 `docs_fingerprint`。新快照、RAG 文档和新索引通过验证后才一起切换；失败时继续服务上一份完整快照和索引。`/snapshot/status` 与 `/ready` 会显示快照文档指纹、active RAG 指纹、索引指纹及是否一致。
+
 After a successful collection the backend atomically updates these files:
 
 - `data/official_daily_snapshot.json`: canonical raw/aggregated official data.
@@ -100,6 +104,9 @@ The default suite performs no external API calls. To add the real complete-chain
 smoke test after a strict backend is healthy, use the live API smoke-test command
 below. It verifies model parsing, official Supercell snapshot
 provenance, multi-intent execution, RAG model synthesis, SSE, and Trace data.
+The smoke test sends three requests: a structured card ranking, a mixed
+multi-intent question, and a pure open RAG question. With `--report`, completed
+stages are written immediately so an upstream failure remains auditable.
 
 ## 启动后端
 
@@ -221,6 +228,8 @@ powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
 
 每次 RAG 预热会先执行同一 `snapshot_id` 的离线质量门槛：文档数量、证据类型覆盖、文档 ID 唯一性，以及每种证据默认均匀抽取 3 条的 Recall@5。`RAG_PROBES_PER_SOURCE` 可在 1-20 间调整；报告包含总体和分证据类型召回率并写入 `data/rag_quality/`，严格模式下未通过时不会切换 active retriever。RAG 最终回答还会校验引用文档 ID，并把带单位数值绑定到指标和已知卡牌实体；证据中 Poison 的数值不能被错配给 Electro Giant，失败时不输出未经支撑的开放结论。
 
+质量探针只使用卡名、卡组名、对局双方和体系名等用户可见槽位，不会把目标 `doc_id` 或原文复制进查询。完整离线验收还会执行从当前快照自动抽样的引用/数值一致性基准和 28 个故障注入场景；需要真实 dense 消融时先启动 Ollama，再设置 `$env:RUN_RAG_RETRIEVAL_BENCHMARK = "true"` 后运行 `.\run_tests.ps1`。
+
 模型网关包含供应商熔断与能力探测。能力由真实模型调用返回的公开文本 delta 被动探测，不在启动时额外消耗一次 API；首次调用前为 `unknown`。查看 `GET /model/status` 的探测方式和最近观测时间；`GET /metrics` 包含模型调用结果、熔断状态、`streaming`/`fallback_chunked`/`unavailable` 分布，以及各模式的首内容延迟和总耗时。连续失败默认 3 次后熔断 60 秒，半开只允许一个探测请求。
 
 前端每条完成回答提供“有帮助/需改进”。反馈只接受服务器已完成回答的 `request_id`，存入 `data/feedback.sqlite3`，不会自动改写正式评测集。导出待审核的真实问题候选：
@@ -258,7 +267,7 @@ $env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8095"
 .\.venv\Scripts\python.exe evaluation\run_live_api_smoke.py
 ```
 
-该测试实际发出一个实时卡牌榜请求和一个多意图请求，并断言 Trace 中存在：`parser_api.status=api`、`live_data.source=supercell_api`、`static_card_fallback_count=0`、`MultiIntentOrchestrator`、两个成功的子任务，以及 RAG 子任务的 `model_generation=api`。通过时输出 `LIVE_API_SMOKE_OK`。
+该测试实际发出一个实时卡牌榜请求、一个多意图请求和一个纯开放 RAG 请求，并断言 Trace 中存在：`parser_api.status=api`、`live_data.source=supercell_api`、`static_card_fallback_count=0`、`MultiIntentOrchestrator`、成功的结构化/RAG 子任务、`model_generation=api`，以及通过的数值与引用校验。使用 `--report` 时会在每个阶段完成后立即保留结果。全部通过时输出 `LIVE_API_SMOKE_OK`。
 
 也可以把真实冒烟测试并入完整测试命令：
 

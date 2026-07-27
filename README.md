@@ -180,9 +180,12 @@ python evaluation/retrieval_benchmark.py --report evaluation/reports/retrieval-b
 
 The optional live smoke test is a separate external-system gate. It requires a
 running strict backend, a valid model API key, and a valid Supercell API token;
-it verifies the model parser, official snapshot provenance, multi-intent
-orchestration, RAG synthesis, SSE execution events, and final trace rather than
-substituting repository fixtures.
+it sends a structured ranking question, a mixed multi-intent question, and a
+pure open RAG question. It verifies the model parser, official snapshot
+provenance, multi-intent orchestration, RAG synthesis, grounding validation,
+SSE execution events, and final trace rather than substituting repository
+fixtures. With `--report`, each completed stage is persisted immediately so a
+later external failure does not erase earlier evidence.
 
 ```powershell
 $env:RUN_LIVE_API_SMOKE = "true"
@@ -251,6 +254,18 @@ each source type before it can replace the active retriever. Generated RAG
 answers validate cited document IDs and bind unit-bearing numeric claims to the
 matching metric and known card entity in retrieved evidence. Reports include
 overall and per-source recall under `data/rag_quality/` and are not committed.
+The probe query is generated from user-visible card, deck, matchup, and archetype
+slots; it never contains the target document ID or copies the target document
+body. The quality report records the exact evidence fingerprint.
+
+Every published snapshot validates the complete derived corpus before writing
+the canonical file. All `cards_meta` rows and all `top_decks` rows must have a
+matching RAG document with identical metrics. Decks must contain eight distinct
+cards. Matchups with at least five sampled games are all included; lower-sample
+matchups remain auditable in the canonical snapshot but are not promoted as RAG
+evidence. Aggregate pair/counter evidence requires at least 20 games. `None%`,
+null metrics, duplicate IDs, missing provenance, and any structured/RAG mismatch
+block publication.
 
 `/model/status` reports sanitized provider capabilities, passive live-call
 detection time, and circuit state. No synthetic startup call consumes model
@@ -292,9 +307,15 @@ containerized read-only API services remains the safer topology.
 
 For local runs, set `OPENAI_API_KEY` in the current PowerShell session before starting the backend. Do not put a real key in source code or commit it to Git. The default runtime uses the configured OpenAI-compatible relay with the Responses API, `gpt-5.5`, and `medium` reasoning effort for parsing and final synthesis.
 
-In strict production mode, card, deck, matchup, and environment answers all use the last complete official Supercell daily snapshot. The snapshot contains exactly 20,000 unique battle-log records, normalized raw battles, card/deck aggregates, and sampled deck matchups. Environment analysis retrieves documents generated from that same snapshot, then uses an LLM to synthesize a bounded answer with a snapshot ID, sample size, and collection time. The local Qdrant index is persistent and is reused after restart when the snapshot ID is unchanged.
+In strict production mode, card, deck, matchup, and environment answers all use the last complete official Supercell daily snapshot. The snapshot contains exactly 20,000 unique battle-log records, normalized raw battles, card/deck aggregates, and sampled deck matchups. Environment analysis retrieves documents generated from that same snapshot, then uses an LLM to synthesize a bounded answer with a snapshot ID, sample size, and collection time. The local Qdrant index is persistent and is reused after restart only when both `snapshot_id` and `docs_fingerprint` match.
 
-The RAG corpus is not one raw document per battle. It derives high-information evidence documents for card profiles, exact deck profiles, heuristic archetypes, card-pair observations, observed card-versus-card counter evidence, and deck matchups. On startup and after a new snapshot is published, indexing is preheated in the background. Requests only use an activated retriever matching the active snapshot; the UI reports `ready`, `bm25_only`, `building`, `not_ready`, or `failed` rather than charging the first user request with embedding work.
+The RAG corpus is not one raw document per battle. It derives high-information evidence documents for card profiles, exact deck profiles, heuristic archetypes, card-pair observations, observed card-versus-card counter evidence, and deck matchups. On startup and after a new snapshot is published, indexing is preheated in the background. A refreshed structured snapshot and its retriever switch together only after validation and the configured quality gate pass; a failed candidate keeps the previous snapshot/index pair active. Requests only use a retriever whose snapshot ID and document fingerprint both match the active snapshot. `/ready` and `/snapshot/status` expose the snapshot, corpus, and index fingerprints plus their alignment.
+
+Open RAG answers use one deterministic reference section. Structured snapshot
+sources are numbered first and retrieved document references continue from that
+number; any model-written source list is suppressed before the verified list is
+appended. Numeric facts and document IDs are validated before the answer is
+accepted.
 
 ### Daily Official Snapshot
 
@@ -308,6 +329,14 @@ SUPERCELL_LIVE_DATA_ENABLED=true
 ### Data Freshness and Sources
 
 `official_daily_snapshot.json` is the canonical data source. After a complete collection it regenerates `top_decks.json`, `cards_meta.json`, and `rag_documents.json` atomically. The runtime loads only a complete snapshot and checks its age on every restart; it does not answer production data questions from the old repository fixtures.
+
+Run the deterministic corpus, snapshot-derived citation gate, and fault-injection
+gate with `run_tests.ps1`. Dense retrieval needs Ollama and is opt-in:
+
+```powershell
+$env:RUN_RAG_RETRIEVAL_BENCHMARK = "true"
+.\run_tests.ps1
+```
 
 `schedule.json` is intentionally separate and remains available for schedule-only
 questions while the first game-data snapshot is collecting. In strict mode,
