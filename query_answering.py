@@ -21,6 +21,7 @@ from app_config import (
     RETRIEVAL_TOP_K_DENSE,
     OPENAI_CLIENT_KWARGS,
     OPENAI_MODEL,
+    OPENAI_REVIEW_MODEL,
     OPENAI_REASONING_EFFORT,
     SYNTHESIS_REASONING_EFFORT,
     OPENAI_WIRE_API,
@@ -48,6 +49,17 @@ from skills.registry import build_default_registry
 
 logger = logging.getLogger(__name__)
 FALLBACK_CONTENT_INTERVAL_SECONDS = 0.12
+DATA_ANALYSIS_SYSTEM_PROMPT = (
+    "你是皇室战争数据分析助手，使用中文回答。\n"
+    "所有卡牌名必须使用系统标准中文名，不得直接输出英文卡牌名。\n"
+    "输出必须是适合纯文本前端的自然中文：不要使用 Markdown 标题井号、星号粗体或英文占位标题。\n"
+    "数据结论只能来自提供的结构化证据或当前快照 RAG 检索证据，不得虚构统计、日期、来源、卡组或对手信息。\n"
+    "涉及使用率、胜率、场次等数字时必须原样引用证据，不得自行四舍五入、改写精度或推算新数值。\n"
+    "可以给出由使用率、胜率、样本量、常见搭配和对阵数据支持的配卡分析，但必须明确区分观测与推断。\n"
+    "当前数据不支持未来预测、精确概率或因果效果；只有检索到同口径 meta_delta 证据时才可报告相邻七天分段的观测变化，不能用当前排名或样本比例冒充历史趋势。\n"
+    "不得提供战队赛赛程或战队备战建议。不得提供具体打法；问题超出数据证据时要清楚说明边界。\n"
+    "不要展示内部推理过程。"
+)
 
 
 class RequiredExternalAPIError(RuntimeError):
@@ -68,7 +80,7 @@ class AnswerResult:
 
 def build_reviewer_model(api_key: str) -> OpenAIChatModel | OpenAIResponseModel:
     common_kwargs = {
-        "model_name": OPENAI_MODEL,
+        "model_name": OPENAI_REVIEW_MODEL,
         "api_key": api_key,
         "stream": False,
         "client_kwargs": OPENAI_CLIENT_KWARGS,
@@ -151,8 +163,10 @@ async def build_rag_answer(
         final_top_k=RETRIEVAL_FINAL_TOP_K,
         alpha=RETRIEVAL_ALPHA,
         source_type=source_type,
+        dataset_scope=(metadata or {}).get("dataset_scope"),
+        deck_mode=(metadata or {}).get("deck_mode"),
+        entity_mode=(metadata or {}).get("entity_mode"),
     )
-
     if event_sink is not None:
         await event_sink.execution(
             step_id=f"{subquery_id}.retrieve",
@@ -166,12 +180,30 @@ async def build_rag_answer(
     if not results:
         return "我不知道，当前数据里没有检索到足够相关的信息。\n参考来源：无"
 
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.rerank",
+            phase="rerank",
+            status="running",
+            subquery_id=subquery_id,
+            title="正在重排序证据",
+            detail="按问题相关性对候选证据进行确定性重排序。",
+        )
     reranked = rerank_results(
         question=user_text,
         parsed=parsed,
         results=results,
         top_n=RERANK_TOP_N,
     )
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.rerank",
+            phase="rerank",
+            status="completed",
+            subquery_id=subquery_id,
+            title="已重排序证据",
+            detail=f"保留 {len(reranked)} 条高相关候选证据。",
+        )
 
     if not reranked:
         return "我不知道，当前数据里没有足够高相关的候选结果。\n参考来源：无"
@@ -187,6 +219,15 @@ async def build_rag_answer(
 
     retrieved_context, refs_text = build_context_and_refs(compressed)
     allowed_doc_ids = {str(item["doc"].get("doc_id")) for item in compressed}
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.review",
+            phase="review",
+            status="completed",
+            subquery_id=subquery_id,
+            title="已审查证据边界",
+            detail=f"确认 {len(allowed_doc_ids)} 条可引用证据并锁定引用范围。",
+        )
 
     reviewer_instructions = """你是一个严格基于检索证据回答问题的助手。
 规则：
@@ -279,6 +320,14 @@ async def build_rag_answer(
                     reference_suffix = f"\n\n参考来源：\n{refs_text}"
                     answer += reference_suffix
                     await event_sink.content(reference_suffix, delta=True)
+                await event_sink.execution(
+                    step_id=f"{subquery_id}.validate",
+                    phase="validate",
+                    status="running",
+                    subquery_id=subquery_id,
+                    title="正在校验回答",
+                    detail="检查引用标识和数值事实是否受证据支持。",
+                )
                 validation = validate_answer_grounding(
                     answer,
                     retrieved_context,
@@ -288,6 +337,14 @@ async def build_rag_answer(
                 if metadata is not None:
                     metadata["model_stream"] = "streaming"
                     metadata["grounding_validation"] = validation
+                await event_sink.execution(
+                    step_id=f"{subquery_id}.validate",
+                    phase="validate",
+                    status="completed",
+                    subquery_id=subquery_id,
+                    title="回答校验通过",
+                    detail="引用和数值事实均通过证据边界校验。",
+                )
                 await event_sink.execution(
                     step_id=f"{subquery_id}.generate",
                     phase="generate",
@@ -318,6 +375,15 @@ async def build_rag_answer(
                 metadata["model_stream"] = "fallback_chunked"
         if allowed_doc_ids and not any(doc_id in answer for doc_id in allowed_doc_ids):
             answer = f"{answer}\n\n参考来源：\n{refs_text}"
+        if event_sink is not None:
+            await event_sink.execution(
+                step_id=f"{subquery_id}.validate",
+                phase="validate",
+                status="running",
+                subquery_id=subquery_id,
+                title="正在校验回答",
+                detail="检查引用标识和数值事实是否受证据支持。",
+            )
         validation = validate_answer_grounding(
             answer,
             retrieved_context,
@@ -326,6 +392,15 @@ async def build_rag_answer(
         )
         if metadata is not None:
             metadata["grounding_validation"] = validation
+        if event_sink is not None:
+            await event_sink.execution(
+                step_id=f"{subquery_id}.validate",
+                phase="validate",
+                status="completed",
+                subquery_id=subquery_id,
+                title="回答校验通过",
+                detail="引用和数值事实均通过证据边界校验。",
+            )
         if event_sink is not None and stream_content:
             chunks = [answer[start : start + 80] for start in range(0, len(answer), 80)]
             for index, chunk in enumerate(chunks):
@@ -376,18 +451,18 @@ async def build_evidence_synthesis_answer(
     stream_content: bool = True,
 ) -> str:
     """通过 RAG 检索和静态快照完成可追溯的开放问题综合。"""
-    # A pure meta question should not leak the team's local match schedule into
-    # an otherwise game-wide analysis. Match preparation remains schedule-aware.
-    evidence_schedule_data = schedule_data if parsed.get("intent") == "match_preparation_query" else []
+    # Clan-war data is outside the active product boundary. Meta synthesis is
+    # grounded only in official game-data evidence.
+    evidence_schedule_data = []
     evidence, sources = build_meta_evidence_pack(
         evidence_schedule_data,
         top_decks_data,
         cards_meta_data,
-        include_schedule=parsed.get("intent") == "match_preparation_query",
+        include_schedule=False,
     )
     # Strict production retrieval is generated from the active official daily
     # snapshot. It intentionally has no static strategy or stale snapshot set.
-    retrieval_source_type = None
+    retrieval_source_type = "meta_delta" if parsed.get("analysis_type") == "meta_delta" else None
     subquery_id = str((metadata or {}).get("subquery_id") or "q")
     if event_sink is not None:
         await event_sink.execution(
@@ -405,7 +480,18 @@ async def build_evidence_synthesis_answer(
         final_top_k=RETRIEVAL_FINAL_TOP_K,
         alpha=RETRIEVAL_ALPHA,
         source_type=retrieval_source_type,
+        dataset_scope=(metadata or {}).get("dataset_scope"),
+        deck_mode=(metadata or {}).get("deck_mode"),
+        entity_mode=(metadata or {}).get("entity_mode"),
     )
+    if parsed.get("analysis_type") == "meta_delta":
+        selected_scope = str((metadata or {}).get("dataset_scope") or "")
+        results = [
+            item
+            for item in results
+            if str(item.get("doc", {}).get("metadata", {}).get("baseline_scope") or "")
+            and str(item.get("doc", {}).get("metadata", {}).get("baseline_scope")) != selected_scope
+        ]
     if metadata is not None:
         metadata["retrieval_mode"] = results[0].get("retrieval_mode", "none") if results else "none"
         metadata["retrieved_doc_ids"] = [item["doc"].get("doc_id") for item in results]
@@ -420,7 +506,25 @@ async def build_evidence_synthesis_answer(
             title="已检索环境证据",
             detail=f"找到 {len(results)} 条候选证据，正在生成受证据约束的回答。",
         )
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.rerank",
+            phase="rerank",
+            status="running",
+            subquery_id=subquery_id,
+            title="正在重排序环境证据",
+            detail="按问题相关性对环境候选证据进行确定性重排序。",
+        )
     reranked = rerank_results(user_text, parsed, results, top_n=RERANK_TOP_N)
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.rerank",
+            phase="rerank",
+            status="completed",
+            subquery_id=subquery_id,
+            title="已重排序环境证据",
+            detail=f"保留 {len(reranked)} 条高相关候选证据。",
+        )
     compressed = compress_results(
         reranked,
         max_items=COMPRESS_MAX_ITEMS,
@@ -439,19 +543,26 @@ async def build_evidence_synthesis_answer(
     )
     allowed_doc_ids = {str(item["doc"].get("doc_id")) for item in compressed}
     grounding_evidence = f"{evidence}\n{retrieved_context}"
-    reviewer_instructions = """你是皇室战争战队赛分析助手，使用中文回答。
-数据结论只能来自证据包或检索证据；策略建议只能基于检索到的通用战术原则，且必须标为推演。
-禁止虚构具体胜率、使用率、对手真实卡组、更新日期、卡牌组件或数据来源。
-未出现在证据包的卡牌要明确说明没有快照统计；用户假设的对手体系只能称为训练假设。
-按“结论、数据依据、训练/对局建议、数据边界”组织回答，不要展示内部推理过程。"""
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.review",
+            phase="review",
+            status="completed",
+            subquery_id=subquery_id,
+            title="已审查环境证据边界",
+            detail=f"确认 {len(allowed_doc_ids)} 条 RAG 证据和结构化证据可用于综合。",
+        )
+    reviewer_instructions = (
+        DATA_ANALYSIS_SYSTEM_PROMPT
+        + "\n可按‘结论、数据依据、配卡分析、数据边界’组织回答，小标题直接写中文，不添加井号或星号。"
+    )
     evidence_label = "Supercell API 实时样本（有限战斗日志）" if EXTERNAL_API_REQUIRED else "本地快照证据包"
     if parsed.get("intent") == "meta_analysis_query":
         reviewer_instructions = (
-            "You are a Clash Royale meta analyst. Answer in Chinese using only supplied evidence. "
-            "Use exactly these sections: conclusion, data evidence, data boundaries. "
-            "Do not add training advice, match advice, opponent scouting, Bo3 preparation, schedules, or recommendations "
-            "unless the user explicitly asks for them. Do not invent statistics, dates, sources, decks, or opponent information. "
-            "Do not write a references or source-list section; the runtime appends verified references."
+            DATA_ANALYSIS_SYSTEM_PROMPT
+            + "\n只使用提供的证据分析环境。可使用‘结论、数据依据、数据边界’三个中文纯文本小标题，"
+            "但小标题前不要加井号，不要使用星号强调。除非用户明确要求，否则不要加入训练建议、具体打法、"
+            "对手侦察、三局两胜备战、赛程或推荐。不要输出参考来源标题或来源列表，运行时会追加已校验来源。"
         )
     strict_live_instruction = (
         "\n当前证据包来自 Supercell API 的有限实时战斗日志：不得称其为本地快照或全局环境统计；"
@@ -461,16 +572,7 @@ async def build_evidence_synthesis_answer(
     )
     reviewer_agent = ReActAgent(
         name="MetaEvidenceReviewer",
-        sys_prompt=(
-            "你是皇室战争战队赛分析助手，使用中文回答。\n"
-            "你必须区分‘数据结论’与‘策略建议’：数据结论只能来自证据包或检索证据；策略建议只能"
-            "基于检索到的通用战术原则，且必须标为推演，不能假装成当前版本统计。\n"
-            "禁止虚构具体胜率、使用率、对手真实卡组、更新日期、卡牌组件或数据来源。\n"
-            "如果提问的卡牌不在证据包，明确说明没有该卡的快照统计，再给出有限的通用建议。\n"
-            "如果用户假设对手会使用某一类体系，称其为训练假设，不要称为对手情报。\n"
-            "回答用以下结构：结论、数据依据、训练/对局建议、数据边界。不要展示内部推理过程。"
-            + strict_live_instruction
-        ),
+        sys_prompt=DATA_ANALYSIS_SYSTEM_PROMPT + strict_live_instruction,
         model=build_reviewer_model(api_key),
         formatter=OpenAIChatFormatter(),
         memory=InMemoryMemory(),
@@ -487,6 +589,7 @@ async def build_evidence_synthesis_answer(
     )
     answer = ""
     model_streamed = False
+    dropped_sentence_count = 0
     try:
         if uses_responses_api() and stream_content and event_sink is not None:
             await event_sink.execution(
@@ -503,6 +606,7 @@ async def build_evidence_synthesis_answer(
                 grounding_evidence,
                 allowed_doc_ids,
                 stop_markers=("参考来源：", "参考来源:", "References:", "Sources:"),
+                drop_unsupported=True,
             )
             try:
                 async with asyncio.timeout(MODEL_CALL_TIMEOUT_SECONDS):
@@ -521,7 +625,8 @@ async def build_evidence_synthesis_answer(
                     await event_sink.content(validated_chunk, delta=True)
                 answer = "".join(public_chunks).strip()
                 if not answer:
-                    raise RuntimeError("model stream returned no public text")
+                    answer = "模型生成的数值结论未通过证据校验，因此没有输出不可靠数据。"
+                dropped_sentence_count = stream_buffer.dropped_count
                 model_streamed = True
                 if metadata is not None:
                     metadata["model_stream"] = "streaming"
@@ -598,15 +703,66 @@ async def build_evidence_synthesis_answer(
             raise RequiredExternalAPIError(f"RAG model API call failed: {type(exc).__name__}") from exc
         answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
     answer = strip_generated_reference_section(answer)
+    if not model_streamed:
+        completed_buffer = GroundedStreamBuffer(
+            grounding_evidence,
+            allowed_doc_ids,
+            drop_unsupported=True,
+        )
+        validated_parts = completed_buffer.push(answer)
+        validated_parts += completed_buffer.finish()
+        answer = "".join(validated_parts).strip()
+        dropped_sentence_count = completed_buffer.dropped_count
+        if not answer:
+            answer = "模型生成的数值结论未通过证据校验，因此没有输出不可靠数据。"
+    if dropped_sentence_count:
+        boundary_notice = "\n\n数据边界：模型生成的部分数值句未通过证据校验，相关内容已省略。"
+        answer += boundary_notice
+        if metadata is not None:
+            metadata["grounding_sentences_dropped"] = dropped_sentence_count
+        if event_sink is not None and model_streamed:
+            await event_sink.content(boundary_notice, delta=True)
     final_answer = f"{answer}\n\n参考来源：\n{sources}\n{retrieval_refs}"
-    grounding_validation = validate_answer_grounding(
-        final_answer,
-        grounding_evidence,
-        allowed_doc_ids,
-        raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
-    )
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.validate",
+            phase="validate",
+            status="running",
+            subquery_id=subquery_id,
+            title="正在校验环境回答",
+            detail="检查引用标识和数值事实是否受当前范围证据支持。",
+        )
+    try:
+        grounding_validation = validate_answer_grounding(
+            final_answer,
+            grounding_evidence,
+            allowed_doc_ids,
+            raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
+        )
+    except GroundingValidationError as exc:
+        logger.warning("final evidence grounding validation failed detail=%s", str(exc)[:1000])
+        if metadata is not None:
+            metadata["grounding_validation_error"] = str(exc)[:1000]
+            metadata["grounding_fallback"] = "validated_refusal"
+        answer = "模型生成的环境结论未通过最终证据校验，因此没有输出不可靠内容。"
+        final_answer = f"{answer}\n\n参考来源：\n{sources}\n{retrieval_refs}"
+        grounding_validation = validate_answer_grounding(
+            final_answer,
+            grounding_evidence,
+            allowed_doc_ids,
+            raise_on_failure=False,
+        )
     if metadata is not None:
         metadata["grounding_validation"] = grounding_validation
+    if event_sink is not None:
+        await event_sink.execution(
+            step_id=f"{subquery_id}.validate",
+            phase="validate",
+            status="completed",
+            subquery_id=subquery_id,
+            title="环境回答校验通过",
+            detail="回答通过当前数据范围的证据边界校验。",
+        )
     if event_sink is not None and stream_content:
         if not model_streamed:
             chunks = [answer[start : start + 80] for start in range(0, len(answer), 80)]
@@ -637,11 +793,13 @@ RULE_BASED_PLANNER = RuleBasedPlanner()
 
 def subquery_needs_rag(parsed: dict) -> bool:
     intent = parsed.get("intent")
-    if intent in {"meta_analysis_query", "match_preparation_query"}:
+    if intent == "meta_analysis_query":
         return True
     if intent == "deck_query":
         return parsed.get("rank") is None and parsed.get("top_n") is None
     if intent == "card_query":
+        if parsed.get("entity_mode") == "loadout_entity":
+            return True
         return (
             parsed.get("card_name") is None
             and parsed.get("rank") is None
@@ -657,13 +815,13 @@ def subquery_title(parsed: dict) -> str:
     if intent == "meta_analysis_query":
         return "环境分析：当前主流卡组"
     if intent == "match_preparation_query":
-        return "备战分析"
+        return "已移除的战队备战功能"
     if intent == "deck_query":
         if parsed.get("card_name"):
             return f"{parsed['card_name']} 卡组"
         return "热门卡组"
     if intent == "schedule_query":
-        return "赛程查询"
+        return "已移除的战队赛程功能"
     return "子问题结果"
 
 
@@ -672,7 +830,7 @@ def subquery_user_text(parsed: dict, original_text: str) -> str:
     if intent == "meta_analysis_query":
         return "当前环境主流卡组与构筑分析"
     if intent == "match_preparation_query":
-        return "下一轮备战分析"
+        return "已移除的战队备战功能"
     if (
         intent == "deck_query"
         and parsed.get("card_name") is None
@@ -680,6 +838,9 @@ def subquery_user_text(parsed: dict, original_text: str) -> str:
         and parsed.get("top_n") is None
     ):
         return "当前热门卡组分析"
+    if intent == "card_query" and parsed.get("entity_mode") == "loadout_entity":
+        state = parsed.get("special_state") or "ordinary"
+        return f"{state} {parsed.get('entity_name') or parsed.get('card_name') or ''} {' '.join(parsed.get('metrics') or [])}"
     if intent == "card_query" and parsed.get("card_name"):
         return f"{parsed['card_name']} {' '.join(parsed.get('metrics') or [])}"
     return original_text
@@ -938,11 +1099,10 @@ async def answer_query(
     logger.info("answer route intent=reject mode=fallback")
     fallback_answer = (
         "当前系统主要支持：\n"
-        "- 赛程查询\n"
-        "- 下一轮对战/谁上场查询\n"
-        "- 热门卡组查询\n"
         "- 单卡使用率/胜率查询\n"
-        "- 卡牌排行榜查询"
+        "- 卡牌比较与排行榜查询\n"
+        "- 热门卡组查询\n"
+        "- 基于证据的环境分析"
     )
     if include_metadata:
         return AnswerResult(

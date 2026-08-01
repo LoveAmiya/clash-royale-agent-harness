@@ -104,3 +104,44 @@ def summarize_results(results: list[dict]) -> dict:
         "multi_subquery_accuracy": multi_subquery_accuracy(results),
         "categories": category_summary(results),
     }
+
+
+def _ratio(results: list[dict], numerator: str, denominator: str) -> float:
+    total_denominator = sum(max(0, int(item.get(denominator) or 0)) for item in results)
+    if total_denominator <= 0:
+        return 0.0
+    total_numerator = sum(max(0, int(item.get(numerator) or 0)) for item in results)
+    return total_numerator / total_denominator
+
+
+def _mean(results: list[dict], field: str) -> float:
+    values = [float(item[field]) for item in results if item.get(field) is not None]
+    return sum(values) / len(values) if values else 0.0
+
+
+def build_scorecard(results: list[dict], *, dimensions: dict | None = None) -> dict:
+    """Aggregate existing benchmark outputs into one regression-comparable scorecard."""
+    comparable = [item for item in results if not item.get("skipped")]
+    refusal_values = [bool(item["refusal_correct"]) for item in comparable if "refusal_correct" in item]
+    boundary_cases = [item for item in comparable if "boundary_violations" in item]
+    return {
+        "case_count": len(comparable),
+        "retrieval_recall": _ratio(comparable, "retrieval_relevant", "retrieval_expected"),
+        "assertion_support_rate": _ratio(comparable, "assertions_supported", "assertions_total"),
+        "citation_precision": _ratio(comparable, "citations_correct", "citations_total"),
+        "refusal_accuracy": (
+            sum(refusal_values) / len(refusal_values) if refusal_values else 0.0
+        ),
+        "boundary_violation_rate": (
+            sum(int(item.get("boundary_violations") or 0) > 0 for item in boundary_cases)
+            / len(boundary_cases)
+            if boundary_cases else 0.0
+        ),
+        "first_token_latency_ms": _mean(comparable, "first_token_latency_ms"),
+        "total_latency_ms": _mean(comparable, "total_latency_ms"),
+        "token_count": sum(max(0, int(item.get("token_count") or 0)) for item in comparable),
+        "estimated_cost": round(
+            sum(max(0.0, float(item.get("estimated_cost") or 0.0)) for item in comparable), 8
+        ),
+        "dimensions": dict(dimensions or {}),
+    }

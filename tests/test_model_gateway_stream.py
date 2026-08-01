@@ -24,6 +24,7 @@ class _AsyncEvents:
 class ModelGatewayStreamTests(unittest.IsolatedAsyncioTestCase):
     async def test_responses_stream_yields_only_public_text_deltas(self):
         captured = {}
+        client_options = {}
         events = _AsyncEvents(
             [
                 types.SimpleNamespace(type="response.created"),
@@ -39,7 +40,8 @@ class ModelGatewayStreamTests(unittest.IsolatedAsyncioTestCase):
                 return events
 
         class FakeClient:
-            def __init__(self, **_kwargs):
+            def __init__(self, **kwargs):
+                client_options.update(kwargs)
                 self.responses = FakeResponses()
 
         fake_openai = types.SimpleNamespace(AsyncOpenAI=FakeClient)
@@ -57,6 +59,7 @@ class ModelGatewayStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks, ["第一段", "第二段"])
         self.assertTrue(captured["stream"])
         self.assertEqual(captured["reasoning"], {"effort": "low"})
+        self.assertEqual(client_options["max_retries"], 0)
 
     async def test_empty_public_stream_is_capability_fallback_not_provider_failure(self):
         class FakeResponses:

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import time
 from pathlib import Path
 
 from model_gateway import generate_model_text
+from app_config import OPENAI_MODEL
+from evaluation.scorecard import attach_scorecard
 from query_parser import PARSER_SYSTEM_PROMPT, extract_json_block, normalize_parsed_query
 from skills.base import SkillContext
 from skills.registry import build_default_registry
@@ -46,6 +49,10 @@ CASES = [
 
 async def evaluate_case(index: int, expected_intent: str, question: str, cards: list[dict], registry, api_key: str, semaphore: asyncio.Semaphore, timeout_seconds: float) -> dict:
     started = time.perf_counter()
+    question_identity = {
+        "question_hash": hashlib.sha256(question.encode("utf-8")).hexdigest(),
+        "question_length": len(question),
+    }
     async with semaphore:
         try:
             text = await asyncio.wait_for(
@@ -58,14 +65,14 @@ async def evaluate_case(index: int, expected_intent: str, question: str, cards: 
             parsed = normalize_parsed_query(parsed_raw, question, cards)
             skill = registry.select(SkillContext(user_text=question, parsed=parsed, schedule_data=[], top_decks_data=[], cards_meta_data=cards, metadata={}))
             actual = parsed.get("intent")
-            return {"id": index, "question": question, "expected_intent": expected_intent, "parsed_intent": actual, "selected_skill": skill.name if skill else None, "success": actual == expected_intent, "error": None, "elapsed_seconds": round(time.perf_counter() - started, 3)}
+            return {"id": index, **question_identity, "expected_intent": expected_intent, "parsed_intent": actual, "selected_skill": skill.name if skill else None, "success": actual == expected_intent, "error": None, "elapsed_seconds": round(time.perf_counter() - started, 3)}
         except Exception as exc:
-            return {"id": index, "question": question, "expected_intent": expected_intent, "parsed_intent": None, "selected_skill": None, "success": False, "error": f"{type(exc).__name__}: {exc}", "elapsed_seconds": round(time.perf_counter() - started, 3)}
+            return {"id": index, **question_identity, "expected_intent": expected_intent, "parsed_intent": None, "selected_skill": None, "success": False, "error": f"{type(exc).__name__}: {exc}", "elapsed_seconds": round(time.perf_counter() - started, 3)}
 
 
 def build_report(results: list[dict], case_count: int, args: argparse.Namespace, status: str) -> dict:
     passed = sum(item["success"] for item in results)
-    return {
+    report = {
         "benchmark": "Live structured-query parser",
         "status": status,
         "case_count": case_count,
@@ -77,6 +84,15 @@ def build_report(results: list[dict], case_count: int, args: argparse.Namespace,
         "concurrency": args.concurrency,
         "results": results,
     }
+    attach_scorecard(
+        report,
+        dimensions={
+            "model": OPENAI_MODEL,
+            "prompt_hash": hashlib.sha256(PARSER_SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+        },
+        source="live_llm_parser",
+    )
+    return report
 
 
 def write_report(report_path: Path, results: list[dict], case_count: int, args: argparse.Namespace, status: str) -> dict:
@@ -98,7 +114,12 @@ async def run(args: argparse.Namespace, report_path: Path) -> dict:
         previous = json.loads(report_path.read_text(encoding="utf-8"))
         for result in previous.get("results", []):
             if isinstance(result.get("id"), int):
-                results_by_id[result["id"]] = result
+                sanitized = dict(result)
+                prior_question = sanitized.pop("question", None)
+                if isinstance(prior_question, str):
+                    sanitized.setdefault("question_hash", hashlib.sha256(prior_question.encode("utf-8")).hexdigest())
+                    sanitized.setdefault("question_length", len(prior_question))
+                results_by_id[result["id"]] = sanitized
 
     semaphore = asyncio.Semaphore(args.concurrency)
     for index, (intent, question) in enumerate(cases, 1):

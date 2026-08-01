@@ -8,7 +8,7 @@ from support import install_test_stubs
 install_test_stubs()
 
 import runtime_multi
-from snapshot_store import build_snapshot_rag_documents, compute_rag_docs_fingerprint
+from snapshot_store import DAILY_TARGET_BATTLES, build_snapshot_rag_documents, compute_rag_docs_fingerprint
 from skills.base import SkillContext
 from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
 
@@ -17,8 +17,8 @@ def active_snapshot(snapshot_id="official-new"):
     return {
         "snapshot_id": snapshot_id,
         "fetched_at": "2026-07-25T00:00:00+00:00",
-        "sample_battles": 20_000,
-        "target_battles": 20_000,
+        "sample_battles": DAILY_TARGET_BATTLES,
+        "target_battles": DAILY_TARGET_BATTLES,
         "shortfall_battles": 0,
         "cards_meta": [
             {
@@ -324,7 +324,7 @@ class RAGPreheatTests(unittest.TestCase):
         self.assertEqual(status["rag"]["status"], "not_ready")
         self.assertEqual(status["rag_status"], "not_ready")
         self.assertEqual(status["data_sources"]["cards"], "not_available")
-        self.assertEqual(status["data_sources"]["schedule"], "local_schedule_json")
+        self.assertEqual(status["data_sources"]["schedule"], "disabled_clan_war_feature")
 
 
 class RAGAvailabilityMessageTests(unittest.IsolatedAsyncioTestCase):

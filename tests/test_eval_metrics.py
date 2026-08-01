@@ -8,6 +8,7 @@ from evaluation.metrics import (
     parser_intent_accuracy,
     skill_routing_accuracy,
     summarize_results,
+    build_scorecard,
 )
 
 
@@ -89,3 +90,56 @@ class EvalMetricsTests(unittest.TestCase):
         ]
 
         self.assertEqual(multi_subquery_accuracy(results), 0.5)
+
+    def test_scorecard_unifies_quality_latency_token_and_cost_metrics(self):
+        reports = [
+            {
+                "retrieval_relevant": 4,
+                "retrieval_expected": 5,
+                "assertions_supported": 8,
+                "assertions_total": 10,
+                "citations_correct": 3,
+                "citations_total": 4,
+                "refusal_correct": True,
+                "boundary_violations": 0,
+                "first_token_latency_ms": 300,
+                "total_latency_ms": 1200,
+                "token_count": 500,
+                "estimated_cost": 0.02,
+            },
+            {
+                "retrieval_relevant": 1,
+                "retrieval_expected": 5,
+                "assertions_supported": 1,
+                "assertions_total": 2,
+                "citations_correct": 1,
+                "citations_total": 1,
+                "refusal_correct": False,
+                "boundary_violations": 1,
+                "first_token_latency_ms": 500,
+                "total_latency_ms": 1800,
+                "token_count": 700,
+                "estimated_cost": 0.03,
+            },
+        ]
+        dimensions = {
+            "snapshot_group_id": "group-1",
+            "dataset_scope": "7d_all",
+            "deck_mode": "base8",
+            "entity_mode": "base8",
+            "model": "gpt-5.5",
+            "prompt_hash": "abc",
+        }
+
+        scorecard = build_scorecard(reports, dimensions=dimensions)
+
+        self.assertEqual(scorecard["retrieval_recall"], 0.5)
+        self.assertEqual(scorecard["assertion_support_rate"], 0.75)
+        self.assertEqual(scorecard["citation_precision"], 0.8)
+        self.assertEqual(scorecard["refusal_accuracy"], 0.5)
+        self.assertEqual(scorecard["boundary_violation_rate"], 0.5)
+        self.assertEqual(scorecard["first_token_latency_ms"], 400.0)
+        self.assertEqual(scorecard["total_latency_ms"], 1500.0)
+        self.assertEqual(scorecard["token_count"], 1200)
+        self.assertEqual(scorecard["estimated_cost"], 0.05)
+        self.assertEqual(scorecard["dimensions"], dimensions)

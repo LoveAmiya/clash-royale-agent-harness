@@ -4,16 +4,651 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
+import json
+import logging
+from pathlib import Path
+import shutil
+import sqlite3
 import threading
 import time
+from typing import Callable, Iterator
 from urllib.parse import quote
 
 import requests
+
+from battle_loadout import LOADOUT_SCHEMA_VERSION, normalize_side_loadout
 
 
 SUPERCELL_API_BASE_URL = "https://api.clashroyale.com/v1"
 SUPERCELL_SOURCE_URL = "https://developer.clashroyale.com/"
 CARD_DECK_VARIANTS_PER_CARD = 20
+MAX_PUBLISHED_DECK_MATCHUPS = 20_000
+MAX_SPECIAL_FIELD_PROBE_BATTLES = 100
+MAX_RESUMABLE_WORKSPACE_AGE_SECONDS = 14 * 24 * 60 * 60
+MAX_RANKING_SEED_LOCATIONS = 80
+PATH_OF_LEGEND_BATTLE_TYPE = "pathOfLegend"
+PATH_OF_LEGEND_COLLECTION_SCOPE = "path_of_legend"
+PATH_OF_LEGEND_SCOPE_CONTRACT = "path_of_legend_only_v1"
+logger = logging.getLogger(__name__)
+
+
+def _normalize_player_tag(value: object) -> str:
+    return value.strip().upper() if isinstance(value, str) and value.strip() else ""
+
+
+def _append_unique_player(players: list[dict], seen_tags: set[str], player: dict, *, source: str) -> bool:
+    tag = _normalize_player_tag(player.get("tag") if isinstance(player, dict) else None)
+    if not tag or tag in seen_tags:
+        return False
+    record = dict(player)
+    record["tag"] = tag
+    record.setdefault("seed_source", source)
+    seen_tags.add(tag)
+    players.append(record)
+    return True
+
+
+def is_path_of_legend_battle(battle: object) -> bool:
+    """Return whether an official battle-log item belongs to Path of Legend."""
+    if not isinstance(battle, dict):
+        return False
+    battle_type = battle.get("type")
+    return isinstance(battle_type, str) and battle_type.strip().casefold() == PATH_OF_LEGEND_BATTLE_TYPE.casefold()
+
+
+class JsonlRecordSequence:
+    """Re-iterable JSONL records that never materialize the corpus in memory."""
+
+    def __init__(self, path: Path, count: int):
+        self.path = Path(path)
+        self.count = max(0, int(count))
+
+    def __len__(self) -> int:
+        return self.count
+
+    def __iter__(self) -> Iterator[dict]:
+        with self.path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    record = json.loads(line)
+                    if isinstance(record, dict):
+                        yield record
+
+
+class DiskBackedSnapshotWorkspace:
+    """Transactional collection state with bounded Python memory usage."""
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        target_battles: int,
+        player_limit: int,
+        battles_per_player: int,
+        seed_player_limit: int | None = None,
+        collection_mode: str = "weekly_expanded",
+    ):
+        self.root = Path(root)
+        resolved_seed_limit = min(player_limit, seed_player_limit or 1000)
+        identity = (
+            f"{PATH_OF_LEGEND_SCOPE_CONTRACT}:{target_battles}:{player_limit}:"
+            f"{battles_per_player}:{resolved_seed_limit}:{collection_mode}"
+        )
+        self.path = self.root / ("collection-" + hashlib.sha256(identity.encode("ascii")).hexdigest()[:12])
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.database_path = self.path / "aggregates.sqlite"
+        self.raw_path = self.path / "raw_battles.jsonl"
+        self.players_path = self.path / "players.json"
+        self.connection = sqlite3.connect(self.database_path)
+        self.connection.execute("PRAGMA journal_mode=DELETE")
+        self.connection.execute("PRAGMA synchronous=NORMAL")
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS battles (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                battle_id TEXT NOT NULL UNIQUE,
+                payload TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS battle_observations (
+                battle_id TEXT NOT NULL,
+                observer_tag TEXT NOT NULL,
+                observer_rank INTEGER,
+                observer_source TEXT NOT NULL,
+                expansion_root_rank INTEGER,
+                PRIMARY KEY (battle_id, observer_tag, observer_source)
+            );
+            CREATE TABLE IF NOT EXISTS player_requests (
+                player_tag TEXT PRIMARY KEY,
+                observer_rank INTEGER,
+                observer_source TEXT NOT NULL,
+                expansion_root_rank INTEGER,
+                request_status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS card_stats (
+                card_name TEXT PRIMARY KEY,
+                appearances INTEGER NOT NULL,
+                wins INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS deck_stats (
+                deck_key TEXT PRIMARY KEY,
+                deck_json TEXT NOT NULL,
+                battles INTEGER NOT NULL,
+                wins INTEGER NOT NULL,
+                elixir_total REAL NOT NULL,
+                elixir_samples INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS deck_cards (
+                deck_key TEXT NOT NULL,
+                card_name TEXT NOT NULL,
+                PRIMARY KEY (deck_key, card_name)
+            );
+            CREATE TABLE IF NOT EXISTS matchup_stats (
+                deck_key TEXT NOT NULL,
+                opponent_key TEXT NOT NULL,
+                opponent_json TEXT NOT NULL,
+                games INTEGER NOT NULL,
+                wins INTEGER NOT NULL,
+                PRIMARY KEY (deck_key, opponent_key)
+            );
+            CREATE TABLE IF NOT EXISTS probe_battles (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload TEXT NOT NULL
+            );
+            """
+        )
+        expected = {
+            "schema_version": "6",
+            "collection_scope": PATH_OF_LEGEND_COLLECTION_SCOPE,
+            "scope_contract": PATH_OF_LEGEND_SCOPE_CONTRACT,
+            "target_battles": str(target_battles),
+            "player_limit": str(player_limit),
+            "battles_per_player": str(battles_per_player),
+            "seed_player_limit": str(resolved_seed_limit),
+            "collection_mode": collection_mode,
+        }
+        existing = dict(self.connection.execute("SELECT key, value FROM metadata"))
+        try:
+            workspace_age = time.time() - float(existing.get("started_at_epoch", time.time()))
+        except (TypeError, ValueError):
+            workspace_age = MAX_RESUMABLE_WORKSPACE_AGE_SECONDS + 1
+        try:
+            prior_rate_limited = int(existing.get("rate_limited", "0") or 0)
+        except (TypeError, ValueError):
+            prior_rate_limited = 1
+        if existing and (
+            any(existing.get(key) != value for key, value in expected.items())
+            or workspace_age > MAX_RESUMABLE_WORKSPACE_AGE_SECONDS
+            or prior_rate_limited > 0
+        ):
+            self.connection.close()
+            shutil.rmtree(self.path)
+            self.__init__(
+                root,
+                target_battles=target_battles,
+                player_limit=player_limit,
+                battles_per_player=battles_per_player,
+                seed_player_limit=resolved_seed_limit,
+                collection_mode=collection_mode,
+            )
+            return
+        self.connection.executemany(
+            "INSERT OR IGNORE INTO metadata(key, value) VALUES (?, ?)",
+            expected.items(),
+        )
+        self.connection.execute(
+            "INSERT OR IGNORE INTO metadata(key, value) VALUES ('started_at_epoch', ?)",
+            (str(time.time()),),
+        )
+        self.connection.commit()
+        self.max_in_memory_battle_records = 0
+
+    def close(self) -> None:
+        if self.connection is not None:
+            self.connection.close()
+            self.connection = None
+
+    def discard(self) -> None:
+        work_path = self.path.resolve()
+        root_path = self.root.resolve()
+        self.close()
+        if work_path.is_dir() and work_path.parent == root_path and work_path.name.startswith("collection-"):
+            shutil.rmtree(work_path)
+
+    def mark_rate_limited(self, count: int) -> None:
+        self.connection.execute(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('rate_limited', ?)",
+            (str(max(1, int(count))),),
+        )
+        self.connection.commit()
+
+    def load_players(self) -> list[dict] | None:
+        try:
+            payload = json.loads(self.players_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, list):
+            return None
+        tags = [_normalize_player_tag(item.get("tag")) for item in payload if isinstance(item, dict)]
+        if len(tags) != len(payload) or any(not isinstance(tag, str) or not tag.strip() for tag in tags):
+            return None
+        if len(set(tags)) != len(tags):
+            return None
+        for item, tag in zip(payload, tags):
+            item["tag"] = tag
+        return payload
+
+    def save_players(self, players: list[dict]) -> None:
+        temp_path = self.players_path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(players, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(self.players_path)
+
+    def metadata_int(self, key: str, default: int = 0) -> int:
+        row = self.connection.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
+        try:
+            return int(row[0]) if row else default
+        except (TypeError, ValueError):
+            return default
+
+    @property
+    def processed_players(self) -> int:
+        return self.metadata_int("processed_players")
+
+    @property
+    def battle_count(self) -> int:
+        return int(self.connection.execute("SELECT COUNT(*) FROM battles").fetchone()[0])
+
+    @property
+    def observation_count(self) -> int:
+        return int(self.connection.execute("SELECT COUNT(*) FROM battle_observations").fetchone()[0])
+
+    def failed_ranked_players(self) -> list[dict]:
+        return [
+            {"tag": row[0], "rank": row[1], "seed_source": "global_path_of_legend"}
+            for row in self.connection.execute(
+                """
+                SELECT player_tag, observer_rank FROM player_requests
+                WHERE observer_source='ranked_direct' AND request_status='failed'
+                ORDER BY observer_rank, player_tag
+                """
+            )
+        ]
+
+    @property
+    def failed_player_count(self) -> int:
+        return int(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM player_requests WHERE request_status='failed'"
+            ).fetchone()[0]
+        )
+
+    def record_player(
+        self,
+        *,
+        player_index: int,
+        player_tag: str,
+        battles: list[dict],
+        failed: bool,
+        target_battles: int,
+        observer_rank: int | None = None,
+        observer_source: str = "ranked_direct",
+        expansion_root_rank: int | None = None,
+    ) -> int:
+        self.max_in_memory_battle_records = max(self.max_in_memory_battle_records, len(battles))
+        accepted = 0
+        starting_battle_count = self.battle_count
+        probe_count = int(self.connection.execute("SELECT COUNT(*) FROM probe_battles").fetchone()[0])
+        if not failed:
+            for battle_index, battle in enumerate(battles):
+                record = normalize_battle_record(battle, player_tag)
+                if not record:
+                    continue
+                deck = tuple(record.get("team_deck") or ())
+                opponent_deck = tuple(record.get("opponent_deck") or ())
+                card_names = deck + opponent_deck
+                if (
+                    not 1 <= len(deck) <= 16
+                    or len(opponent_deck) > 16
+                    or any(not isinstance(name, str) or not name.strip() or len(name) > 128 for name in card_names)
+                ):
+                    continue
+                payload = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                battle_id = str(record.get("battle_id") or "")
+                storage_battle_id = battle_id or (
+                    f"missing-time:{player_index}:{battle_index}:"
+                    f"{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]}"
+                )
+                existing_fact = self.connection.execute(
+                    "SELECT 1 FROM battles WHERE battle_id=?",
+                    (storage_battle_id,),
+                ).fetchone()
+                if starting_battle_count + accepted >= target_battles and existing_fact is None:
+                    continue
+                cursor = self.connection.execute(
+                    "INSERT OR IGNORE INTO battles(battle_id, payload) VALUES (?, ?)",
+                    (storage_battle_id, payload),
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO battle_observations(
+                        battle_id, observer_tag, observer_rank, observer_source, expansion_root_rank
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(battle_id, observer_tag, observer_source) DO UPDATE SET
+                        observer_rank=CASE
+                            WHEN battle_observations.observer_rank IS NULL THEN excluded.observer_rank
+                            WHEN excluded.observer_rank IS NULL THEN battle_observations.observer_rank
+                            ELSE MIN(battle_observations.observer_rank, excluded.observer_rank)
+                        END,
+                        expansion_root_rank=CASE
+                            WHEN battle_observations.expansion_root_rank IS NULL THEN excluded.expansion_root_rank
+                            WHEN excluded.expansion_root_rank IS NULL THEN battle_observations.expansion_root_rank
+                            ELSE MIN(battle_observations.expansion_root_rank, excluded.expansion_root_rank)
+                        END
+                    """,
+                    (
+                        storage_battle_id,
+                        _normalize_player_tag(player_tag),
+                        int(observer_rank) if observer_rank is not None else None,
+                        str(observer_source),
+                        int(expansion_root_rank) if expansion_root_rank is not None else None,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                accepted += 1
+                won = int(bool(record.get("won")))
+                deck_json = json.dumps(deck, ensure_ascii=False, separators=(",", ":"))
+                opponent_json = json.dumps(opponent_deck, ensure_ascii=False, separators=(",", ":"))
+                team_cards = _team_cards(battle)
+                costs = [
+                    float(card["elixirCost"])
+                    for card in team_cards
+                    if isinstance(card.get("elixirCost"), (int, float))
+                ]
+                elixir_average = sum(costs) / len(costs) if costs else 0.0
+                self.connection.execute(
+                    """
+                    INSERT INTO deck_stats(deck_key, deck_json, battles, wins, elixir_total, elixir_samples)
+                    VALUES (?, ?, 1, ?, ?, ?)
+                    ON CONFLICT(deck_key) DO UPDATE SET
+                        battles = battles + 1,
+                        wins = wins + excluded.wins,
+                        elixir_total = elixir_total + excluded.elixir_total,
+                        elixir_samples = elixir_samples + excluded.elixir_samples
+                    """,
+                    (deck_json, deck_json, won, elixir_average, int(bool(costs))),
+                )
+                for card_name in deck:
+                    self.connection.execute(
+                        """
+                        INSERT INTO card_stats(card_name, appearances, wins) VALUES (?, 1, ?)
+                        ON CONFLICT(card_name) DO UPDATE SET
+                            appearances = appearances + 1,
+                            wins = wins + excluded.wins
+                        """,
+                        (card_name, won),
+                    )
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO deck_cards(deck_key, card_name) VALUES (?, ?)",
+                        (deck_json, card_name),
+                    )
+                if opponent_deck:
+                    self.connection.execute(
+                        """
+                        INSERT INTO matchup_stats(deck_key, opponent_key, opponent_json, games, wins)
+                        VALUES (?, ?, ?, 1, ?)
+                        ON CONFLICT(deck_key, opponent_key) DO UPDATE SET
+                            games = games + 1,
+                            wins = wins + excluded.wins
+                        """,
+                        (deck_json, opponent_json, opponent_json, won),
+                    )
+                if probe_count < MAX_SPECIAL_FIELD_PROBE_BATTLES:
+                    self.connection.execute(
+                        "INSERT INTO probe_battles(payload) VALUES (?)",
+                        (json.dumps(battle, ensure_ascii=False, separators=(",", ":")),),
+                    )
+                    probe_count += 1
+        self.connection.execute(
+            """
+            INSERT INTO player_requests(
+                player_tag, observer_rank, observer_source, expansion_root_rank, request_status, attempts
+            ) VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(player_tag) DO UPDATE SET
+                observer_rank=excluded.observer_rank,
+                observer_source=excluded.observer_source,
+                expansion_root_rank=excluded.expansion_root_rank,
+                request_status=excluded.request_status,
+                attempts=player_requests.attempts + 1
+            """,
+            (
+                _normalize_player_tag(player_tag),
+                int(observer_rank) if observer_rank is not None else None,
+                str(observer_source),
+                int(expansion_root_rank) if expansion_root_rank is not None else None,
+                "failed" if failed else "success",
+            ),
+        )
+        processed_players = max(self.processed_players, player_index + 1)
+        self.connection.execute(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('processed_players', ?)",
+            (str(processed_players),),
+        )
+        if accepted:
+            sampled_players = self.metadata_int("sampled_players") + 1
+            self.connection.execute(
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES ('sampled_players', ?)",
+                (str(sampled_players),),
+            )
+        if failed:
+            failed_players = self.metadata_int("failed_players") + 1
+            self.connection.execute(
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES ('failed_players', ?)",
+                (str(failed_players),),
+            )
+        self.connection.execute(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES ('max_in_memory_battle_records', ?)",
+            (str(max(self.metadata_int("max_in_memory_battle_records"), self.max_in_memory_battle_records)),),
+        )
+        self.connection.commit()
+        return accepted
+
+    def export_raw_records(self) -> JsonlRecordSequence:
+        with self.raw_path.open("w", encoding="utf-8", newline="\n") as handle:
+            for (payload,) in self.connection.execute("SELECT payload FROM battles ORDER BY sequence"):
+                handle.write(payload)
+                handle.write("\n")
+        return JsonlRecordSequence(self.raw_path, self.battle_count)
+
+    def build_snapshot(self, *, fetched_at: str, target_battles: int, collection_metadata: dict) -> dict:
+        total_battles = self.battle_count
+        if not total_battles:
+            raise ValueError("official API returned no usable battle-log decks")
+        cards_meta = []
+        distinct_cards = int(self.connection.execute("SELECT COUNT(*) FROM card_stats").fetchone()[0])
+        if distinct_cards > 256:
+            raise ValueError("official snapshot contains an unsafe number of distinct card names")
+        card_rows = self.connection.execute(
+            "SELECT card_name, appearances, wins FROM card_stats ORDER BY appearances DESC, card_name"
+        ).fetchall()
+        for rank, (card_name, appearances, wins) in enumerate(card_rows, start=1):
+            win_rate = round(wins / appearances * 100, 1) if appearances else 0.0
+            cards_meta.append(
+                {
+                    "rank": rank,
+                    "card_name": card_name,
+                    "rating": 0,
+                    "usage_rate": round(appearances / total_battles * 100, 1),
+                    "usage_delta": 0.0,
+                    "win_rate": win_rate,
+                    "win_delta": 0.0,
+                    "clean_win_rate": win_rate,
+                    "mode": "Official Path of Legend battle-log sample",
+                    "source": "Supercell API live sample",
+                    "source_url": SUPERCELL_SOURCE_URL,
+                    "fetched_at": fetched_at,
+                    "sample_battles": total_battles,
+                    "target_battles": target_battles,
+                    "appearance_count": appearances,
+                }
+            )
+
+        top_decks = []
+        deck_rows = self.connection.execute(
+            """
+            SELECT deck_json, battles, wins, elixir_total, elixir_samples
+            FROM deck_stats ORDER BY battles DESC, deck_json LIMIT 30
+            """
+        ).fetchall()
+        for rank, (deck_json, battles, wins, elixir_total, elixir_samples) in enumerate(deck_rows, start=1):
+            deck = json.loads(deck_json)
+            top_decks.append(
+                {
+                    "rank": rank,
+                    "player_name": "Global Path of Legend sample",
+                    "clan_name": "Official Supercell API",
+                    "deck_name": " / ".join(deck),
+                    "avg_elixir": round(elixir_total / elixir_samples, 1) if elixir_samples else None,
+                    "battles": battles,
+                    "trophies": None,
+                    "last_ladder_battle": fetched_at,
+                    "cards": deck,
+                    "sample_win_rate": round(wins / battles * 100, 1) if battles else 0.0,
+                    "source": "Supercell API live sample",
+                    "source_url": SUPERCELL_SOURCE_URL,
+                    "fetched_at": fetched_at,
+                    "sample_battles": total_battles,
+                    "target_battles": target_battles,
+                }
+            )
+
+        card_deck_stats: dict[str, list[dict]] = {}
+        for card_name, _, _ in card_rows:
+            variants = self.connection.execute(
+                """
+                SELECT decks.deck_json, decks.battles, decks.wins
+                FROM deck_cards AS cards
+                JOIN deck_stats AS decks ON decks.deck_key = cards.deck_key
+                WHERE cards.card_name = ?
+                ORDER BY decks.battles DESC, decks.deck_json
+                LIMIT ?
+                """,
+                (card_name, CARD_DECK_VARIANTS_PER_CARD),
+            ).fetchall()
+            card_deck_stats[card_name] = [
+                {
+                    "deck_name": " / ".join(deck := json.loads(deck_json)),
+                    "cards": deck,
+                    "battles": battles,
+                    "sample_win_rate": round(wins / battles * 100, 1),
+                    "source": "Supercell API live sample",
+                    "source_url": SUPERCELL_SOURCE_URL,
+                    "fetched_at": fetched_at,
+                    "sample_battles": total_battles,
+                    "target_battles": target_battles,
+                }
+                for deck_json, battles, wins in variants
+            ]
+
+        matchup_total = int(self.connection.execute("SELECT COUNT(*) FROM matchup_stats").fetchone()[0])
+        matchup_rows = self.connection.execute(
+            """
+            SELECT decks.deck_json, matchups.opponent_json, matchups.games, matchups.wins
+            FROM matchup_stats AS matchups
+            JOIN deck_stats AS decks ON decks.deck_key = matchups.deck_key
+            ORDER BY matchups.games DESC, decks.deck_json, matchups.opponent_json
+            LIMIT ?
+            """,
+            (MAX_PUBLISHED_DECK_MATCHUPS,),
+        ).fetchall()
+        deck_matchups = []
+        for deck_json, opponent_json, games, wins in matchup_rows:
+            deck = json.loads(deck_json)
+            opponent_deck = json.loads(opponent_json)
+            deck_matchups.append(
+                {
+                    "deck_name": " / ".join(deck),
+                    "opponent_deck_name": " / ".join(opponent_deck),
+                    "games": games,
+                    "wins": wins,
+                    "win_rate": round(wins / games * 100, 1) if games else 0.0,
+                    "source": "Supercell API live sample",
+                    "source_url": SUPERCELL_SOURCE_URL,
+                    "fetched_at": fetched_at,
+                    "sample_battles": total_battles,
+                    "target_battles": target_battles,
+                }
+            )
+
+        deck_profile_opponents: dict[str, list[dict]] = {}
+        profile_rows = self.connection.execute(
+            "SELECT deck_key, deck_json FROM deck_stats WHERE battles >= 20 ORDER BY battles DESC, deck_json LIMIT 150"
+        ).fetchall()
+        for deck_key, deck_json in profile_rows:
+            deck_name = " / ".join(sorted(json.loads(deck_json)))
+            opponent_rows = self.connection.execute(
+                """
+                SELECT opponent_json, games
+                FROM matchup_stats
+                WHERE deck_key = ?
+                ORDER BY games DESC, opponent_json
+                LIMIT 3
+                """,
+                (deck_key,),
+            ).fetchall()
+            deck_profile_opponents[deck_name] = [
+                {
+                    "opponent_deck_name": " / ".join(sorted(json.loads(opponent_json))),
+                    "games": games,
+                }
+                for opponent_json, games in opponent_rows
+            ]
+
+        probe_battles = [
+            json.loads(payload)
+            for (payload,) in self.connection.execute("SELECT payload FROM probe_battles ORDER BY sequence")
+        ]
+        raw_records = self.export_raw_records()
+        metrics = dict(collection_metadata)
+        metrics.update(
+            {
+                "streamed_to_disk": True,
+                "resumable_workspace": True,
+                "max_in_memory_battle_records": self.metadata_int("max_in_memory_battle_records"),
+                "exact_matchups_stored": matchup_total,
+                "observation_count": self.observation_count,
+                "published_matchups": len(deck_matchups),
+                "matchups_truncated": max(0, matchup_total - len(deck_matchups)),
+            }
+        )
+        return {
+            "cards_meta": cards_meta,
+            "top_decks": top_decks,
+            "card_deck_stats": card_deck_stats,
+            "deck_matchups": deck_matchups,
+            "deck_profile_opponents": deck_profile_opponents,
+            "raw_battles": raw_records,
+            "special_fields_probe": probe_official_special_fields(probe_battles),
+            "fetched_at": fetched_at,
+            "sample_battles": total_battles,
+            "target_battles": target_battles,
+            "shortfall_battles": max(target_battles - total_battles, 0),
+            "ranked_players": collection_metadata.get("ranked_players", 0),
+            "fetched_players": collection_metadata.get("fetched_players", self.processed_players),
+            "sampled_players": collection_metadata.get("sampled_players", 0),
+            "failed_players": collection_metadata.get("failed_players", 0),
+            "usable_battles": total_battles,
+            "collection_scope": collection_metadata.get("collection_scope", PATH_OF_LEGEND_COLLECTION_SCOPE),
+            "scope_contract": collection_metadata.get("scope_contract", PATH_OF_LEGEND_SCOPE_CONTRACT),
+            "scope_verified": bool(collection_metadata.get("scope_verified")),
+            "leaderboard_candidate_limit": collection_metadata.get("leaderboard_candidate_limit"),
+            "leaderboard_start_rank": collection_metadata.get("leaderboard_start_rank"),
+            "leaderboard_last_scanned_rank": collection_metadata.get("leaderboard_last_scanned_rank"),
+            "collection_metrics": metrics,
+            "_aggregate_store_path": str(self.database_path),
+            "_streaming_work_dir": str(self.path),
+        }
 
 
 class SupercellAPIClient:
@@ -101,21 +736,60 @@ class SupercellAPIClient:
             self.metrics["retry_wait_seconds"] += delay
             self.sleeper(delay)
 
-    def fetch_global_rankings(self, limit: int) -> list[dict]:
-        """Return the highest-ranked players first, following API cursors as needed."""
-        for path in (
-            "/locations/global/rankings/players",
-            "/locations/global/pathoflegend/players",
-        ):
+    def fetch_locations(self) -> list[dict]:
+        payload = self._get_json("/locations")
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("official API locations response has no items list")
+        return [item for item in items if isinstance(item, dict)]
+
+    def fetch_global_rankings(
+        self,
+        limit: int,
+        *,
+        include_locations: bool = False,
+        location_limit: int = MAX_RANKING_SEED_LOCATIONS,
+    ) -> list[dict]:
+        """Return unique Path of Legend player seeds from official leaderboard endpoints."""
+        players: list[dict] = []
+        seen_tags: set[str] = set()
+
+        def add_from_path(path: str, source: str) -> None:
+            if len(players) >= limit:
+                return
             try:
-                players = self._fetch_rankings_path(path, limit)
+                for player in self._fetch_rankings_path(path, limit - len(players)):
+                    if _append_unique_player(players, seen_tags, player, source=source) and len(players) >= limit:
+                        return
             except requests.HTTPError as exc:
                 if getattr(exc.response, "status_code", None) == 404:
-                    continue
+                    return
                 raise
-            if players:
-                return players
-        return []
+
+        add_from_path("/locations/global/pathoflegend/players", "global_path_of_legend")
+        if not include_locations or len(players) >= limit:
+            return players
+
+        try:
+            locations = self.fetch_locations()
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("official location seed expansion failed: %s", type(exc).__name__)
+            return players
+
+        scanned_locations = 0
+        for location in locations:
+            if len(players) >= limit or scanned_locations >= max(0, int(location_limit)):
+                break
+            location_id = location.get("id")
+            if location_id in (None, "", "global"):
+                continue
+            location_key = str(location_id).strip()
+            if not location_key:
+                continue
+            scanned_locations += 1
+            add_from_path(f"/locations/{quote(location_key, safe='')}/pathoflegend/players", "location_path_of_legend")
+        self.metrics["ranking_locations_scanned"] += scanned_locations
+        return players
 
     def _fetch_rankings_path(self, path: str, limit: int) -> list[dict]:
         """Fetch ranking pages without reordering or requesting lower ranks prematurely."""
@@ -140,7 +814,9 @@ class SupercellAPIClient:
                 if not normalized_tag or normalized_tag in seen_tags:
                     continue
                 seen_tags.add(normalized_tag)
-                players.append(item)
+                ranked_item = dict(item)
+                ranked_item.setdefault("rank", len(players) + 1)
+                players.append(ranked_item)
                 if len(players) >= limit:
                     return players
 
@@ -163,41 +839,140 @@ class SupercellAPIClient:
         *,
         target_battles: int = 400,
         player_limit: int = 1000,
+        seed_player_limit: int = 1000,
         battles_per_player: int = 25,
         concurrency: int = 8,
         fallback_player_tags: tuple[str, ...] = (),
         battle_log_cache: dict[str, tuple[float, list[dict]]] | None = None,
         battle_log_cache_ttl_seconds: float = 0.0,
         max_duration_seconds: float | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
+        progress_interval_seconds: float = 60.0,
+        spool_dir: Path | None = None,
+        collection_mode: str = "weekly_expanded",
+        expand_opponents: bool = True,
+        strict_battle_contract: bool = False,
+        ranked_tail_retry_rounds: int = 0,
     ) -> dict:
         if target_battles < 1:
             raise ValueError("target_battles must be at least 1")
         if player_limit < 1:
             raise ValueError("player_limit must be at least 1")
+        if seed_player_limit < 1:
+            raise ValueError("seed_player_limit must be at least 1")
         if battles_per_player < 1:
             raise ValueError("battles_per_player must be at least 1")
         if concurrency < 1:
             raise ValueError("concurrency must be at least 1")
+        if collection_mode not in {"daily_ranked", "weekly_expanded"}:
+            raise ValueError("collection_mode must be daily_ranked or weekly_expanded")
+        if collection_mode == "daily_ranked" and expand_opponents:
+            raise ValueError("daily_ranked collection cannot expand opponent tags")
 
         started_at = time.monotonic()
         self.metrics.clear()
-        players = self.fetch_global_rankings(player_limit)
-        if not players:
-            players = [{"tag": tag} for tag in fallback_player_tags]
-        battle_logs = {}
-        failed_players = 0
-        fetched_players = 0
-        sampled_players = 0
-        usable_battles = 0
-        seen_battle_ids: set[str] = set()
+        workspace = (
+            DiskBackedSnapshotWorkspace(
+                spool_dir,
+                target_battles=target_battles,
+                player_limit=player_limit,
+                battles_per_player=battles_per_player,
+                seed_player_limit=seed_player_limit,
+                collection_mode=collection_mode,
+            )
+            if spool_dir is not None
+            else None
+        )
+        players = workspace.load_players() if workspace is not None else None
+        if workspace is not None and players is None and workspace.processed_players:
+            workspace.discard()
+            workspace = DiskBackedSnapshotWorkspace(
+                spool_dir,
+                target_battles=target_battles,
+                player_limit=player_limit,
+                battles_per_player=battles_per_player,
+                seed_player_limit=seed_player_limit,
+                collection_mode=collection_mode,
+            )
+        if players is None:
+            players = self.fetch_global_rankings(min(player_limit, seed_player_limit), include_locations=False)
+            if not players:
+                players = [{"tag": tag} for tag in fallback_player_tags]
+            if workspace is not None:
+                workspace.save_players(players)
+        battle_logs = {} if workspace is None else None
+        failed_players = workspace.metadata_int("failed_players") if workspace is not None else 0
+        fetched_players = workspace.processed_players if workspace is not None else 0
+        sampled_players = workspace.metadata_int("sampled_players") if workspace is not None else 0
+        usable_battles = workspace.battle_count if workspace is not None else 0
+        seen_battle_ids: set[str] | None = set() if workspace is None else None
         selection_metrics: defaultdict[str, int] = defaultdict(int)
         refresh_budget_exhausted = False
+        expanded_players = sum(1 for player in players if player.get("seed_source") == "opponent_battlelog")
+        initial_seed_players = max(0, len(players) - expanded_players)
+        source_exhausted = False
+        queued_player_tags = {
+            _normalize_player_tag(player.get("tag"))
+            for player in players
+            if isinstance(player, dict) and _normalize_player_tag(player.get("tag"))
+        }
+        last_progress_at = started_at
 
-        for start in range(0, len(players), concurrency):
+        def report_progress(*, force: bool = False, final: bool = False) -> None:
+            nonlocal last_progress_at
+            if progress_callback is None:
+                return
+            progress_now = time.monotonic()
+            if not force and progress_now - last_progress_at < max(0.0, progress_interval_seconds):
+                return
+            last_progress_at = progress_now
+            if refresh_budget_exhausted:
+                status = "budget_exhausted"
+            elif usable_battles >= target_battles:
+                status = "complete"
+            elif source_exhausted:
+                status = "source_exhausted"
+            elif final:
+                status = "incomplete"
+            else:
+                status = "collecting"
+            try:
+                progress_callback(
+                    {
+                        "status": status,
+                        "target_battles": target_battles,
+                        "usable_battles": usable_battles,
+                        "fetched_players": fetched_players,
+                        "sampled_players": sampled_players,
+                        "candidate_players": len(players),
+                        "queued_players": len(players),
+                        "seed_players": initial_seed_players,
+                        "expanded_players": expanded_players,
+                        "failed_players": failed_players,
+                        "request_count": int(self.metrics["request_count"]),
+                        "rate_limited": int(self.metrics["rate_limited"]),
+                        "source_exhausted": source_exhausted,
+                        "elapsed_seconds": round(progress_now - started_at, 1),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+            except Exception:
+                # Progress reporting must never interrupt official collection.
+                logger.warning("snapshot progress callback failed", exc_info=True)
+
+        start = workspace.processed_players if workspace is not None else 0
+        while start < len(players):
             if max_duration_seconds is not None and time.monotonic() - started_at >= max_duration_seconds:
                 refresh_budget_exhausted = True
                 break
             batch = players[start : start + concurrency]
+            if not batch:
+                break
+            batch_positions = {
+                _normalize_player_tag(player.get("tag")): start + offset
+                for offset, player in enumerate(batch)
+                if isinstance(player, dict)
+            }
             cached = []
             to_fetch = []
             cache_now = time.monotonic()
@@ -233,6 +1008,19 @@ class SupercellAPIClient:
                 fetched_players += 1
                 if error is not None:
                     failed_players += 1
+                    if workspace is not None:
+                        player_index = batch_positions.get(_normalize_player_tag(player.get("tag")), start)
+                        is_expanded = player.get("seed_source") == "opponent_battlelog"
+                        workspace.record_player(
+                            player_index=player_index,
+                            player_tag=str(player.get("tag") or ""),
+                            battles=[],
+                            failed=True,
+                            target_battles=target_battles,
+                            observer_rank=None if is_expanded else _official_player_rank(player),
+                            observer_source="opponent_expansion" if is_expanded else "ranked_direct",
+                            expansion_root_rank=player.get("expansion_root_rank"),
+                        )
                     continue
                 selection_metrics["raw_battle_records"] += len(battles)
                 # Recent battle-log entries can be deckless event records. Filter first so
@@ -243,34 +1031,147 @@ class SupercellAPIClient:
                     seen_battle_ids=seen_battle_ids,
                     observer_tag=player.get("tag"),
                     selection_metrics=selection_metrics,
+                    path_of_legend_only=True,
+                    require_complete_decks_and_stable_id=strict_battle_contract,
                 )
-                if selected:
+                if workspace is not None:
+                    player_index = batch_positions.get(_normalize_player_tag(player.get("tag")), start)
+                    is_expanded = player.get("seed_source") == "opponent_battlelog"
+                    accepted = workspace.record_player(
+                        player_index=player_index,
+                        player_tag=str(player.get("tag") or ""),
+                        battles=selected,
+                        failed=error is not None,
+                        target_battles=target_battles,
+                        observer_rank=None if is_expanded else _official_player_rank(player),
+                        observer_source="opponent_expansion" if is_expanded else "ranked_direct",
+                        expansion_root_rank=player.get("expansion_root_rank"),
+                    )
+                    usable_battles += accepted
+                    sampled_players += int(accepted > 0)
+                elif selected:
                     if battle_log_cache is not None:
                         battle_log_cache[player["tag"]] = (time.monotonic(), battles)
                     sampled_players += 1
                     usable_battles += len(selected)
                     battle_logs[player["tag"]] = selected
+                if expand_opponents and selected and len(players) < player_limit:
+                    added = 0
+                    if player.get("seed_source") == "opponent_battlelog":
+                        expansion_root_rank = player.get("expansion_root_rank")
+                    else:
+                        expansion_root_rank = _official_player_rank(player)
+                    for opponent_tag in opponent_tags_from_battles(selected, observer_tag=player.get("tag")):
+                        if len(players) >= player_limit:
+                            break
+                        if opponent_tag in queued_player_tags:
+                            continue
+                        queued_player_tags.add(opponent_tag)
+                        players.append(
+                            {
+                                "tag": opponent_tag,
+                                "seed_source": "opponent_battlelog",
+                                "expansion_root_rank": expansion_root_rank,
+                            }
+                        )
+                        added += 1
+                    if added:
+                        expanded_players += added
+                        if workspace is not None:
+                            workspace.save_players(players)
+
+            report_progress()
+
+            if self.metrics["rate_limited"]:
+                if workspace is not None:
+                    workspace.mark_rate_limited(int(self.metrics["rate_limited"]))
+                break
 
             if usable_battles >= target_battles:
                 break
+            start += len(batch)
 
-        return build_live_snapshot(
-            players,
-            battle_logs,
-            target_battles=target_battles,
-            collection_metadata={
-                "ranked_players": len(players),
+        if workspace is not None and not self.metrics["rate_limited"]:
+            for _round in range(max(0, int(ranked_tail_retry_rounds))):
+                failed_ranked = workspace.failed_ranked_players()
+                if not failed_ranked:
+                    break
+                for player in failed_ranked:
+                    if max_duration_seconds is not None and time.monotonic() - started_at >= max_duration_seconds:
+                        refresh_budget_exhausted = True
+                        break
+                    try:
+                        battles = self.fetch_battle_log(player["tag"])
+                    except (requests.RequestException, ValueError):
+                        if self.metrics["rate_limited"]:
+                            workspace.mark_rate_limited(int(self.metrics["rate_limited"]))
+                            break
+                        continue
+                    selection_metrics["raw_battle_records"] += len(battles)
+                    selected = select_usable_battles(
+                        battles,
+                        battles_per_player,
+                        observer_tag=player["tag"],
+                        selection_metrics=selection_metrics,
+                        path_of_legend_only=True,
+                        require_complete_decks_and_stable_id=strict_battle_contract,
+                    )
+                    accepted = workspace.record_player(
+                        player_index=max(0, int(player.get("rank") or 1) - 1),
+                        player_tag=player["tag"],
+                        battles=selected,
+                        failed=False,
+                        target_battles=target_battles,
+                        observer_rank=player.get("rank"),
+                        observer_source="ranked_direct",
+                    )
+                    usable_battles += accepted
+                    sampled_players += int(accepted > 0)
+                    fetched_players += 1
+                    if self.metrics["rate_limited"]:
+                        workspace.mark_rate_limited(int(self.metrics["rate_limited"]))
+                        break
+                if refresh_budget_exhausted or self.metrics["rate_limited"]:
+                    break
+            failed_players = workspace.failed_player_count
+            report_progress(force=True)
+
+        source_exhausted = (
+            usable_battles < target_battles
+            and not refresh_budget_exhausted
+            and not self.metrics["rate_limited"]
+            and start >= len(players)
+        )
+
+        report_progress(force=True, final=True)
+
+        collection_metadata = {
+                "ranked_players": initial_seed_players,
                 "fetched_players": fetched_players,
                 "sampled_players": sampled_players,
                 "failed_players": failed_players,
                 "usable_battles": usable_battles,
-                "leaderboard_candidate_limit": player_limit,
+                "collection_mode": collection_mode,
+                "expand_opponents": bool(expand_opponents),
+                "collection_scope": PATH_OF_LEGEND_COLLECTION_SCOPE,
+                "scope_contract": PATH_OF_LEGEND_SCOPE_CONTRACT,
+                "scope_verified": bool(strict_battle_contract),
+                "seed_player_limit": min(player_limit, seed_player_limit),
+                "seed_players": initial_seed_players,
+                "queued_players": len(players),
+                "expanded_players": expanded_players,
+                "source_exhausted": source_exhausted,
+                "leaderboard_candidate_limit": min(player_limit, seed_player_limit),
+                "player_queue_capacity": player_limit,
                 "leaderboard_start_rank": _ranking_position(players, 0),
-                "leaderboard_last_scanned_rank": _ranking_position(players, fetched_players - 1),
+                "leaderboard_last_scanned_rank": _ranking_position(
+                    players, min(fetched_players, initial_seed_players) - 1
+                ),
                 "raw_battle_records": int(selection_metrics["raw_battle_records"]),
                 "inspected_battle_records": int(selection_metrics["inspected_battle_records"]),
                 "duplicates_skipped": int(selection_metrics["duplicates_skipped"]),
                 "deckless_or_invalid_records": int(selection_metrics["deckless_or_invalid_records"]),
+                "non_path_of_legend_records": int(selection_metrics["non_path_of_legend_records"]),
                 "collection_duration_seconds": round(time.monotonic() - started_at, 3),
                 "refresh_budget_exhausted": refresh_budget_exhausted,
                 "request_count": int(self.metrics["request_count"]),
@@ -282,7 +1183,21 @@ class SupercellAPIClient:
                 "throttle_wait_seconds": round(self.metrics["throttle_wait_seconds"], 3),
                 "retry_wait_seconds": round(self.metrics["retry_wait_seconds"], 3),
                 "ranking_pages": int(self.metrics["ranking_pages"]),
-            },
+            }
+        if workspace is not None:
+            try:
+                return workspace.build_snapshot(
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    target_battles=target_battles,
+                    collection_metadata=collection_metadata,
+                )
+            finally:
+                workspace.close()
+        return build_live_snapshot(
+            players,
+            battle_logs or {},
+            target_battles=target_battles,
+            collection_metadata=collection_metadata,
         )
 
 
@@ -294,6 +1209,16 @@ def _ranking_position(players: list[dict], index: int) -> int | None:
         return int(rank)
     except (TypeError, ValueError):
         return index + 1
+
+
+def _official_player_rank(player: object) -> int | None:
+    if not isinstance(player, dict):
+        return None
+    try:
+        rank = int(player.get("rank"))
+    except (TypeError, ValueError):
+        return None
+    return rank if rank > 0 else None
 
 
 def _team_member(value) -> dict | None:
@@ -363,6 +1288,8 @@ def normalize_battle_record(battle: dict, observer_tag: str | None = None) -> di
     team_tag = _side_tag(team) or (observer_tag.strip().upper() if isinstance(observer_tag, str) and observer_tag.strip() else None)
     opponent_tag = _side_tag(opponent)
     timestamp = str(battle.get("battleTime") or battle.get("battle_time") or "")
+    team_loadout = normalize_side_loadout(team)
+    opponent_loadout = normalize_side_loadout(opponent)
 
     # A player can appear in the global ranking alongside their opponent. The
     # same battle then appears twice with sides reversed, so the fingerprint is
@@ -383,15 +1310,39 @@ def normalize_battle_record(battle: dict, observer_tag: str | None = None) -> di
         battle_id = hashlib.sha256(fingerprint).hexdigest()[:24]
     return {
         "battle_id": battle_id,
+        "battle_type": battle.get("type"),
         "battle_time": timestamp or None,
         "team_tag": team_tag,
         "opponent_tag": opponent_tag,
         "team_deck": list(team_deck),
         "opponent_deck": list(opponent_deck),
+        "loadout_schema_version": LOADOUT_SCHEMA_VERSION,
+        "team_loadout": team_loadout,
+        "opponent_loadout": opponent_loadout,
         "team_crowns": _crowns(team),
         "opponent_crowns": _crowns(opponent),
         "won": _crowns(team) > _crowns(opponent),
     }
+
+
+def opponent_tags_from_battles(battles: list[dict], *, observer_tag: str | None = None) -> list[str]:
+    """Return unique opponent tags observed in selected battle-log records."""
+    observer = _normalize_player_tag(observer_tag)
+    tags: list[str] = []
+    seen: set[str] = set()
+    for battle in battles:
+        if not is_path_of_legend_battle(battle):
+            continue
+        record = normalize_battle_record(battle, observer)
+        if not record:
+            continue
+        for tag in (record.get("opponent_tag"), record.get("team_tag")):
+            normalized = _normalize_player_tag(tag)
+            if not normalized or normalized == observer or normalized in seen:
+                continue
+            seen.add(normalized)
+            tags.append(normalized)
+    return tags
 
 
 def select_usable_battles(
@@ -401,17 +1352,36 @@ def select_usable_battles(
     seen_battle_ids: set[str] | None = None,
     observer_tag: str | None = None,
     selection_metrics: dict[str, int] | None = None,
+    path_of_legend_only: bool = False,
+    require_complete_decks_and_stable_id: bool = False,
 ) -> list[dict]:
-    """Keep bounded, unique entries that contain a team deck."""
+    """Keep bounded, unique entries that satisfy the requested battle scope."""
     usable = []
     seen = seen_battle_ids if seen_battle_ids is not None else set()
     for battle in battles:
         if selection_metrics is not None:
             selection_metrics["inspected_battle_records"] = selection_metrics.get("inspected_battle_records", 0) + 1
+        if path_of_legend_only and not is_path_of_legend_battle(battle):
+            if selection_metrics is not None:
+                selection_metrics["non_path_of_legend_records"] = (
+                    selection_metrics.get("non_path_of_legend_records", 0) + 1
+                )
+            continue
         record = normalize_battle_record(battle, observer_tag)
         if record is None:
             if selection_metrics is not None:
                 selection_metrics["deckless_or_invalid_records"] = selection_metrics.get("deckless_or_invalid_records", 0) + 1
+            continue
+        if require_complete_decks_and_stable_id and (
+            not record.get("battle_id")
+            or not record.get("battle_time")
+            or len(record.get("team_deck") or ()) != 8
+            or len(record.get("opponent_deck") or ()) != 8
+        ):
+            if selection_metrics is not None:
+                selection_metrics["deckless_or_invalid_records"] = (
+                    selection_metrics.get("deckless_or_invalid_records", 0) + 1
+                )
             continue
         battle_id = record["battle_id"]
         if battle_id is not None and battle_id in seen:
@@ -437,6 +1407,71 @@ def _is_win(battle: dict) -> bool:
         return False
 
 
+def probe_official_special_fields(battles: list[dict]) -> dict:
+    """Report special-deck fields actually present in official battle payloads.
+
+    The probe records field names and deterministic normalization coverage.
+    Elite state uses explicit official fields when present, otherwise the
+    versioned level-above-max rule used by the stored loadout contract.
+    """
+    tower_fields: Counter[str] = Counter()
+    evolution_fields: Counter[str] = Counter()
+    elite_fields: Counter[str] = Counter()
+    side_records_checked = 0
+    card_records_checked = 0
+    complete_loadout_sides = 0
+
+    def observe_field(field_name: object) -> None:
+        name = str(field_name)
+        lowered = name.lower()
+        if "tower" in lowered or "supportcard" in lowered:
+            tower_fields[name] += 1
+        if "evolution" in lowered:
+            evolution_fields[name] += 1
+        if "elite" in lowered:
+            elite_fields[name] += 1
+
+    for battle in battles:
+        if not isinstance(battle, dict):
+            continue
+        for side_name in ("team", "opponent"):
+            member = _team_member(battle.get(side_name))
+            if member is None:
+                continue
+            side_records_checked += 1
+            complete_loadout_sides += int(normalize_side_loadout(member)["complete"])
+            for field_name in member:
+                observe_field(field_name)
+            cards = member.get("cards")
+            if not isinstance(cards, list):
+                cards = member.get("deck")
+            for card in cards if isinstance(cards, list) else []:
+                if not isinstance(card, dict):
+                    continue
+                card_records_checked += 1
+                for field_name in card:
+                    observe_field(field_name)
+
+    def result(counter: Counter[str]) -> dict:
+        return {
+            "available": bool(counter),
+            "observed_fields": dict(sorted(counter.items())),
+        }
+
+    return {
+        "schema_version": 1,
+        "deck_mode": "base8_and_full_loadout_v1",
+        "available_deck_modes": ["base8", "full_loadout"],
+        "battle_records_checked": sum(1 for battle in battles if isinstance(battle, dict)),
+        "side_records_checked": side_records_checked,
+        "card_records_checked": card_records_checked,
+        "complete_loadout_sides": complete_loadout_sides,
+        "tower": result(tower_fields),
+        "evolution": result(evolution_fields),
+        "elite": result(elite_fields),
+    }
+
+
 def build_live_snapshot(
     players: list[dict],
     battle_logs: dict[str, list[dict]],
@@ -460,6 +1495,7 @@ def build_live_snapshot(
     battle_records = 0
     deck_records = 0
     reached_target = False
+    probe_battles: list[dict] = []
 
     for player in players:
         tag = player.get("tag")
@@ -474,6 +1510,7 @@ def build_live_snapshot(
             cards = _team_cards(battle)
             deck_records += 1
             total_battles += 1
+            probe_battles.append(battle)
             raw_battles.append(record)
             names = tuple(record["team_deck"])
             won = bool(record["won"])
@@ -509,7 +1546,7 @@ def build_live_snapshot(
                 "win_rate": round(wins / usage * 100, 1) if usage else 0.0,
                 "win_delta": 0.0,
                 "clean_win_rate": round(wins / usage * 100, 1) if usage else 0.0,
-                "mode": "Official leaderboard battle-log sample",
+                "mode": "Official Path of Legend battle-log sample",
                 "source": "Supercell API live sample",
                 "source_url": SUPERCELL_SOURCE_URL,
                 "fetched_at": fetched_at,
@@ -524,7 +1561,7 @@ def build_live_snapshot(
         top_decks.append(
             {
                 "rank": rank,
-                "player_name": "Global leaderboard sample",
+                "player_name": "Global Path of Legend sample",
                 "clan_name": "Official Supercell API",
                 "deck_name": " / ".join(deck),
                 "avg_elixir": round(sum(deck_elixir[deck]) / len(deck_elixir[deck]), 1) if deck_elixir[deck] else None,
@@ -578,6 +1615,7 @@ def build_live_snapshot(
         "card_deck_stats": card_deck_stats,
         "deck_matchups": deck_matchups,
         "raw_battles": raw_battles,
+        "special_fields_probe": probe_official_special_fields(probe_battles),
         "fetched_at": fetched_at,
         "sample_battles": total_battles,
         "target_battles": target,
@@ -587,6 +1625,9 @@ def build_live_snapshot(
         "sampled_players": collection_metadata.get("sampled_players", len([items for items in battle_logs.values() if items])),
         "failed_players": collection_metadata.get("failed_players", 0),
         "usable_battles": collection_metadata.get("usable_battles", total_battles),
+        "collection_scope": collection_metadata.get("collection_scope"),
+        "scope_contract": collection_metadata.get("scope_contract"),
+        "scope_verified": bool(collection_metadata.get("scope_verified")),
         "leaderboard_candidate_limit": collection_metadata.get("leaderboard_candidate_limit"),
         "leaderboard_start_rank": collection_metadata.get("leaderboard_start_rank"),
         "leaderboard_last_scanned_rank": collection_metadata.get("leaderboard_last_scanned_rank"),
@@ -600,6 +1641,8 @@ def build_live_snapshot(
                 "sampled_players",
                 "failed_players",
                 "usable_battles",
+                "collection_scope",
+                "scope_contract",
                 "leaderboard_candidate_limit",
                 "leaderboard_start_rank",
                 "leaderboard_last_scanned_rank",

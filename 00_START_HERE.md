@@ -1,352 +1,196 @@
-# 皇室战争 Agent 启动手册
+# 皇室战争数据问答系统启动手册
 
-## Daily Official Snapshot Mode (Current)
+本文只描述当前生效的本机运行方式。采集操作请交给独立任务，并先阅读
+[`docs/SNAPSHOT_COLLECTION_HANDOFF.md`](docs/SNAPSHOT_COLLECTION_HANDOFF.md)。
 
-Production data answers use one complete official Supercell snapshot per day.
-The target is fixed at 20,000 unique battle-log records. Collection starts at
-global leaderboard rank 1, follows ranking cursors in order through a candidate
-pool of up to 3,000 players, and stops as soon as the target is reached. A
-collection that times out, is rate limited, or returns fewer than 20,000 battles
-is discarded and never replaces the last published snapshot.
+## 当前数据架构
 
-The web UI has a persistent Current Data Snapshot panel. It shows the official
-source, current snapshot status, usable-battle count, collection timestamp,
-candidate leaderboard range, actual rank range scanned, usable player count,
-and deduplicated battle-log records. Loading this panel only reads the published
-snapshot; it never starts an API refresh.
+- 长期事实库：`data/corpus/corpus.sqlite`。
+- 活动快照组指针：`data/active_snapshot_group.json`。
+- 默认查询范围：`7d_all`。
+- 固定范围：当前 0-7 天、四个历史 7 天分段和累计 0-35 天，每个窗口提供前 100、前 200、前 500、前 1000 和全量，共 30 个 `dataset_scope`。
+- 数据口径：`base8` 为默认基础八卡；`loadout_entity` 查询普通/觉醒/精英卡牌实体和塔楼；卡组接口继续用 `deck_mode=base8|full_loadout`。
+- 业务 API 只读已发布派生数据，不在用户请求中采集、统计或构建 embedding。
+- 采集、去重、统计和 RAG 文档生成不调用云端模型；RAG embedding 使用本机 Ollama。
 
-RAG is preheated in the background after a complete snapshot is restored or
-published. User requests never build embeddings. The panel also shows the RAG
-state: `ready` (dense plus BM25), `bm25_only` (same-snapshot lexical fallback),
-`building`, `not_ready`, or `failed`. The RAG corpus is derived from the 20,000
-raw battles as card/deck profiles, heuristic archetypes, card pairs, observed
-counter evidence, and deck matchups. Raw battles are retained for aggregation
-and audit, not embedded one document per battle. Preheating sends these derived
-documents to Ollama in bounded batches (`EMBED_BATCH_SIZE`, default `32`) and
-writes matching batches to Qdrant.
+`GET /api/datasets` 是滚动快照组的权威状态接口。旧的 `GET /snapshot/status`
+仍用于兼容单快照链路，不能用它判断滚动事实库是否已经发布。
 
-发布前会逐条校验全部卡牌和全部 `top_decks` 卡组切片：数值必须与结构化快照一致，完整卡组必须恰好八张不同卡，任何 `None%`、null、重复文档 ID 或来源缺失都会阻止发布。对局 matchup 只有样本数至少 5 场才进入 RAG，但低样本明细仍保留在 `official_daily_snapshot.json` 供审计。卡牌搭配与克制聚合至少需要 20 场。
+## 环境变量
 
-索引复用同时检查 `snapshot_id` 与 `docs_fingerprint`。新快照、RAG 文档和新索引通过验证后才一起切换；失败时继续服务上一份完整快照和索引。`/snapshot/status` 与 `/ready` 会显示快照文档指纹、active RAG 指纹、索引指纹及是否一致。
+模型提供方是固定工程契约：
 
-After a successful collection the backend atomically updates these files:
-
-- `data/official_daily_snapshot.json`: canonical raw/aggregated official data.
-- `data/cards_meta.json` and `data/top_decks.json`: structured query datasets.
-- `card_deck_stats` inside `data/official_daily_snapshot.json`: per-card top exact deck variants, derived from all 20,000 raw battles. Queries such as "Electro Giant decks" use this index instead of searching only the global top-30 decks.
-- `data/rag_documents.json`: RAG evidence generated from the same snapshot.
-- `data/daily_snapshot_qdrant/`: persistent local vector index keyed by `snapshot_id`.
-
-`schedule.json` remains a separately maintained local schedule source. In strict
-mode, `cards_meta.json`, `top_decks.json`, and `rag_documents.json` are derived
-compatibility artifacts only: card/deck/RAG answer Skills receive data only from
-the complete `official_daily_snapshot.json`. `cards_meta.json` may still be read
-as a parser-only card-name and alias catalog before the first snapshot exists.
-
-On restart, the backend loads the last complete snapshot immediately. It only
-collects and vectorizes again when that snapshot is at least 24 hours old. A
-cold start with no published snapshot must finish the official collection before
-answering data or RAG questions. The refresh has a 60-minute default maximum runtime;
-it normally stops earlier once 20,000 unique records have been collected. Configure only the
-credentials and port, then start normally:
-
-```powershell
-$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
-$env:EXTERNAL_API_REQUIRED = "true"
-$env:RUNTIME_PORT = "8091"
-powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
+```text
+OPENAI_BASE_URL=https://crs.ruinique.com
+OPENAI_WIRE_API=responses
+OPENAI_MODEL=gpt-5.5
+OPENAI_REVIEW_MODEL=gpt-5.5
+OPENAI_REASONING_EFFORT=medium
+PARSER_REASONING_EFFORT=medium
+SYNTHESIS_REASONING_EFFORT=medium
 ```
 
-## 项目做什么
-
-这是面向战队赛统筹场景的 Skill-based Agent。它先把自然语言问题解析为意图和槽位，再路由到赛程、卡牌、卡组、对比、备战或 RAG Skill。
-
-确定性问题优先从本地 JSON 数据回答；开放式环境分析和备战问题会先使用 RAG 检索，再由模型基于证据综合回答，避免把所有问题都交给模型猜测。
-
-前端“系统可视化”面板用于把升级价值直接展示给非开发用户：数据血缘卡解释官方快照如何进入结构化查询和 RAG，质量卡显示文档校验与 Recall@5，运行卡显示模型熔断、配额、反馈、请求成功率和 Prometheus 指标。面板读取状态接口，不会触发新的数据采集或模型调用。
-
-## 先测试
+真实凭证只从当前进程或 Windows 用户环境读取，不写入仓库：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
+[Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "<key>", "User")
+[Environment]::SetEnvironmentVariable("SUPERCELL_API_TOKEN", "<token>", "User")
 ```
 
-### Test Quality Gate
-
-`run_tests.ps1` first runs every unittest, including snapshot lifecycle, alias
-parsing, multi-intent routing, deterministic Skills, RAG evidence/preheat, and
-SSE streaming contracts. It then runs the static 348-case evaluation corpus.
-The corpus checks English card metrics, Chinese aliases, comparisons, card rank
-lookups, deck rankings, schedule queries, safe out-of-domain rejection, optional
-RAG routing, and multi-intent decomposition. Every execution writes a new
-timestamped JSON report in `evaluation/reports/`; failed rows retain the parsed
-payload, selected Skill, answer, and per-assertion errors. A failed evaluation
-returns a non-zero exit code, so do not delete a report to make a run appear
-healthy.
-
-Run only the deterministic evaluation or choose an explicit report name:
-
-```powershell
-.\.venv\Scripts\python.exe -m evaluation.run_eval
-.\.venv\Scripts\python.exe -m evaluation.run_eval --report evaluation\reports\manual-evaluation.json
-```
-
-When Ollama embeddings are available, the snapshot retrieval benchmark can be
-run separately. It evaluates 97 current-snapshot evidence queries across card,
-deck, archetype, pair, counter, and matchup documents and refuses to call a
-BM25-only result hybrid retrieval.
-
-```powershell
-.\.venv\Scripts\python.exe -m evaluation.retrieval_benchmark --report evaluation\reports\retrieval-benchmark.json
-```
-
-The default suite performs no external API calls. To add the real complete-chain
-smoke test after a strict backend is healthy, use the live API smoke-test command
-below. It verifies model parsing, official Supercell snapshot
-provenance, multi-intent execution, RAG model synthesis, SSE, and Trace data.
-The smoke test sends three requests: a structured card ranking, a mixed
-multi-intent question, and a pure open RAG question. With `--report`, completed
-stages are written immediately so an upstream failure remains auditable.
+修改用户环境变量后必须重启对应进程。采集前还必须确保 Supercell Key
+白名单包含当前公网出口 IP。
 
 ## 启动后端
 
-打开第一个 PowerShell：
+推荐使用 API 角色，它只读取已经发布的快照，不联系 Supercell：
 
 ```powershell
-$env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
-$env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
-if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) { throw "用户环境变量 OPENAI_API_KEY 未配置" }
-if ([string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)) { throw "用户环境变量 SUPERCELL_API_TOKEN 未配置" }
-$env:RUNTIME_HOST = "127.0.0.1"
-$env:RUNTIME_PORT = "8091"
-$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
-$env:EXTERNAL_API_REQUIRED = "true"
-$env:SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = "3600"
-powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
+Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+powershell -ExecutionPolicy Bypass -File .\run_api.ps1
 ```
 
-Supercell Key 必须允许这台 Windows 主机的当前公网出口 IP。本项目推荐在 Windows 本机运行正式采集；Docker 只有在容器出口 IP 固定且已加入 Key 白名单时才适合刷新官方快照。Docker Desktop 的出口 IP 可能与主机浏览器看到的公网 IP 不同，也可能变化。
+默认地址：`http://127.0.0.1:8091`。
 
-后端地址：`http://127.0.0.1:8091`
-
-健康检查：`http://127.0.0.1:8091/health`
-
-在另一个 PowerShell 中验证后端：
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8091/health
-```
-
-生产探针区分存活与可回答状态：`/health` 只检查进程；`/ready` 会检查模型凭证、完整官方快照和 RAG 状态。严格模式首次采集期间 `/ready` 返回 `503`；已有完整旧快照时，刷新中、冷却中、RAG 预热或快照陈旧均返回 `200` 与 `status: degraded`。`/metrics` 提供 Prometheus 文本指标，`/snapshot/status` 还会显示最近刷新尝试、冷却剩余时间、请求数、失败数、限流数与 P95 回答耗时。
-
-默认仅监听 `127.0.0.1`。容器或反向代理部署才显式设置 `RUNTIME_HOST=0.0.0.0`；同时设置 `ALLOWED_ORIGINS`、请求长度/并发/每分钟限流环境变量。`/settings/live-sample` 默认关闭，若显式启用还必须提供 `X-Admin-Key`。
-
-## 启动前端可视化
-
-打开第二个 PowerShell：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run_web.ps1
-```
-
-浏览器打开：`http://127.0.0.1:8080`
-
-建议演示问题：
-
-```text
-我们第五轮打谁？
-使用率第三的卡牌是什么？
-现在热门卡组有哪些？
-帮我根据下一轮对手做备战建议。
-```
-
-前端会用 SSE 实时显示默认展开的“执行说明”：已验证的解析结论、实际 Skill 路由、官方快照、RAG 检索和模型生成状态。它不展示模型私有思维链。结构化结果按标题、指标、数据边界和来源分块输出；RAG 回答会转发模型的公开文本增量。上游不支持 token 流时，执行说明会标记“模型未提供 token 流”，并以完成后结果分段输出；Trace 的 `metadata.model_stream` 会明确标为 `streaming`、`fallback_chunked` 或 `unavailable`。面试讲解链路：`Query Parser -> Router -> Official Snapshot 或 RAG -> Model Synthesis -> Execution Events + Trace -> SSE UI`。
-
-## 重启与完整验收
-
-正常重启时，在运行后端和前端的两个 PowerShell 窗口分别按 `Ctrl+C`，然后先运行 `run_backend.ps1`，确认 `/ready` 后再运行 `run_web.ps1`。如果终端已经关闭，先检查端口对应的进程，确认命令行是本项目的 `runtime_multi.py` 或 `web_app.py` 后再结束进程，不要仅按端口盲目终止其他程序：
-
-```powershell
-$listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-  Where-Object { $_.LocalPort -in 8080,8091 }
-$listeners | Select-Object LocalAddress,LocalPort,OwningProcess
-$pids = $listeners | Select-Object -ExpandProperty OwningProcess -Unique
-Get-CimInstance Win32_Process |
-  Where-Object { $pids -contains $_.ProcessId } |
-  Select-Object ProcessId,Name,CommandLine
-```
-
-重启后先执行只读探针，不要通过测试请求触发快照刷新：
+后端首次启动需要加载本地数据和索引，端口可能在几十秒后才监听。`/health` 可访问后，
+`/ready` 仍可能暂时返回 `degraded`、`rag_status=building`；必须继续等待 RAG 预热完成再验收：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8091/health
 Invoke-RestMethod http://127.0.0.1:8091/ready
-Invoke-RestMethod http://127.0.0.1:8091/snapshot/status
-Invoke-RestMethod http://127.0.0.1:8091/model/status
-Invoke-WebRequest http://127.0.0.1:8091/metrics -UseBasicParsing
+Invoke-RestMethod http://127.0.0.1:8091/api/datasets
 ```
 
-可回答的完整状态应满足：`/health.status=healthy`、`/ready.status=ready` 或有旧快照时可解释的 `degraded`、`sample_battles=target_battles=20000`、`rag_status=ready` 或 `bm25_only`、快照 ID 与 RAG ID 一致、三个 `docs_fingerprint` 一致、`quality.passed=true`、`invalid_document_count=0`。统计数值会随每日快照变化，测试不得断言固定百分比。
+验收标准：
 
-前端在 `http://127.0.0.1:8080` 依次测试以下问题：
+- `/health.status == healthy`。
+- `/ready.status == ready`；该接口仍包含兼容快照的就绪信息。
+- `/api/datasets.snapshot_group_id` 与 `data/active_snapshot_group.json` 一致。
+- `/api/datasets.datasets` 恰好有 30 个范围。
+- 当前 7 天和累计 35 天的非空范围必须 `ready=true`；尚无批次覆盖的历史分段保持 `ready=false` 是正常空态，不能用当前数据回填。
+- `/api/datasets.rag.fully_aligned == true`。
+
+## 启动前端
+
+另开一个 PowerShell：
+
+```powershell
+Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+powershell -ExecutionPolicy Bypass -File .\run_web.ps1
+```
+
+打开 `http://127.0.0.1:8080`。前端默认代理
+`http://127.0.0.1:8091/process`。
+
+只读检查：
+
+```powershell
+(Invoke-WebRequest http://127.0.0.1:8080 -UseBasicParsing).StatusCode
+```
+
+应返回 `200`。
+
+## 安全重启
+
+优先在原终端按 `Ctrl+C`。原终端丢失时，先核对端口进程命令行，只结束本项目的
+`runtime_multi.py` 和 `web_app.py`，不要按名称批量结束所有 Python 进程，也不要碰采集器：
+
+```powershell
+$listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+  Where-Object { $_.LocalPort -in 8080, 8091 }
+$listeners | Select-Object LocalPort, OwningProcess
+Get-CimInstance Win32_Process |
+  Where-Object { $listeners.OwningProcess -contains $_.ProcessId } |
+  Select-Object ProcessId, Name, CommandLine
+```
+
+确认后先启动 `run_api.ps1` 并等待 `/ready`，再启动 `run_web.ps1`。
+
+## 数据范围和卡组口径
+
+所有结构化查询、自由问答和环境分析都显式携带 `dataset_scope`，模型不负责选择范围。
+不传时兼容默认值为 `7d_all`；非法或未就绪范围必须返回明确错误，不能静默回退。
+
+固定范围前缀：
 
 ```text
-骷髅的使用率和胜率是多少？
-火球和毒药的使用率分别是多少？
-雷电巨人的使用率、胜率，以及当前环境主流卡组有哪些？
-当前环境里雷电巨人常见搭配、克制关系和不利对局是什么？
-Hog Rider and Royal Giant usage and win rates, plus current meta decks.
-我们第五轮打谁？
+7d       当前 0-7 天
+d7_14    7-14 天前
+d14_21   14-21 天前
+d21_28   21-28 天前
+d28_35   28-35 天前
+35d      累计 0-35 天
 ```
 
-验收时确认中英文和别名映射正确；复合问题显示独立 `q1/q2`；结构化数值没有 `None%`；RAG 引用属于当前快照并包含样本数、采集时间和非全局环境边界；最终分区保持提问顺序。`有帮助/需改进` 只接受服务器签发的 `request_id`，反馈写入 SQLite，不会自动污染正式评测集。
+每个前缀都组合 `top_100/top_200/top_500/top_1000/all` 五个层级。
 
-需要直接查看 SSE 合约时执行：
+`base8` 会覆盖所有符合基础八卡合同的有效事实。`full_loadout` 只使用同时具备合法塔楼、
+八卡 ID 和觉醒/精英槽位的对局；没有精确样本时返回无证据，不自动回退到 `base8`。
+
+完整配置入口需要同时满足两个状态：
+
+- `complete_loadout_ready=true`：当前范围存在合法完整载荷或完整卡组统计。
+- `entity_stats_ready=true`：当前活动组已经用新版 schema 物化 `loadout_entity_stats`，可查询普通/觉醒/精英卡牌实体和塔楼。
+
+旧活动组可能出现前者为 `true`、后者为 `false`。这表示原始载荷已经存在，但尚无新版实体
+统计，不代表数据丢失；前端此时必须置灰完整配置，不能把 `base8` 结果冒充成觉醒/精英结果。
+
+## 当前接口
+
+- `GET /api/datasets`
+- `GET /api/cards/catalog?dataset_scope=7d_all`
+- `GET /api/cards/rankings?dataset_scope=7d_all&sort_by=usage_rate`
+- `GET /api/cards/{card_id}/stats?dataset_scope=7d_all`
+- `GET /api/loadouts/catalog?dataset_scope=7d_all`
+- `GET /api/entities/catalog?dataset_scope=7d_all`
+- `GET /api/entities/rankings?dataset_scope=7d_all&sort_by=usage_rate`
+- `GET /api/entities/{entity_id}/stats?dataset_scope=7d_all`
+- `POST /api/entities/compare`
+- `POST /api/cards/compare`
+- `POST /api/decks/profile`
+- `POST /api/decks/matchup`
+- `GET /api/meta/archetypes?dataset_scope=7d_all`
+- `POST /process` 与 `/process/stream`
+
+结构化页面不调用模型。自由问答保留自然语言解析、多意图拆分和高级 RAG；环境分析先
+检索当前范围的聚合证据，再由配置模型综合。战队赛赛程与备战功能已移除。
+
+自由问答的普通结构化问题通常只调用一次模型解析，随后由本地 SQLite 生成答案；开放 RAG
+问题通常调用一次解析和一次证据综合。综合完成后，本地质量门逐句校验数值和引用，不再调用
+模型。未受证据支持的数值句会被省略，其余已验证内容继续返回并注明边界；若最终校验仍失败，
+返回明确的安全拒答和已验证来源，不应显示通用“生成回答失败”。
+
+## 测试
+
+完整本地门禁：
 
 ```powershell
-curl.exe -N http://127.0.0.1:8091/process `
-  -H "Content-Type: application/json" `
-  -H "X-Request-ID: manual-sse-test" `
-  --data-raw '{"session_id":"manual","input":[{"role":"user","content":[{"type":"text","text":"Electro Giant usage and win rate, plus current meta decks"}]}]}'
-```
-
-应先收到 `execution`，随后收到一个或多个 `content`，最后收到 `trace completed`，且所有事件的 `request_id` 一致。`model_stream=streaming` 表示上游提供真实文本 delta；`fallback_chunked` 表示模型成功但上游没有提供 delta；`unavailable` 才表示模型流不可用。系统不会把整块结果伪装成 token 流。
-
-完整离线质量、真实 API、多实例 Redis、请求体限制、压测和告警链路分别使用以下命令：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1
-.\.venv\Scripts\python.exe -m evaluation.retrieval_benchmark --report evaluation/reports/manual-retrieval.json
-powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile smoke
-powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile load
-powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile soak -SoakDuration 5m
-powershell -ExecutionPolicy Bypass -File .\test_alert_pipeline.ps1
-```
-
-`run_tests.ps1` 会运行单元/集成测试、348 条确定性评测、引用一致性和故障注入；真实外部 API smoke test 仅在显式设置 `RUN_LIVE_API_SMOKE=true` 时运行。k6 测试经过 Caddy 请求两个 API 实例并共享 Redis，但关闭外部模型和 Supercell 调用。告警演练验证 `Prometheus -> Alertmanager -> 持久化 webhook`，成功和失败报告都会保留。生产演示的具体阈值、报告路径和回滚边界见 `docs/production-demo.md`。
-
-## 模型何时调用
-
-严格模式下所有用户问题都先由模型 API 解析，模型不可用时不会把本地规则伪装成模型解析成功。赛程、固定排名和单卡指标在解析完成后直接读取赛程数据或官方完整快照，结构化数值不再交给模型改写，因此通常只消耗解析调用。开放式环境分析和备战问题还会进入 RAG，并再次调用模型综合证据；Ollama embedding 不可用时会在 10 秒后自动降级为 BM25。解析器和模型合成分别有 45 秒、120 秒上限，超时会返回明确错误。模型 Key 只从当前进程的 `OPENAI_API_KEY` 环境变量读取。
-
-## 失败先查
-
-```text
-1. 后端是否已经先于前端启动。
-2. 8091 和 8080 是否被占用。
-3. 终端是否提示缺少依赖。
-4. 本地 JSON 查询不应依赖真实 LLM Key。
-5. Trace 中的 `hybrid` 表示向量和 BM25 都可用，`bm25_only` 表示 Ollama 不可用但已自动降级。
-6. 检查 `OPENAI_MODEL`、网络和模型调用超时配置，开放问题不会无限等待。
-```
-
-## 模型连接检查
-
-开放式问题会调用模型。`OPENAI_API_KEY`、`OPENAI_MODEL` 与 `OPENAI_BASE_URL` 必须来自同一个 OpenAI 兼容服务商；没有配置 `OPENAI_BASE_URL` 时，程序会使用官方 OpenAI 地址。
-
-启动前可以只检查变量是否存在，不要在终端打印 Key：
-
-```powershell
-"OPENAI_API_KEY 已配置：$(-not [string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY))"
-"OPENAI_MODEL 已配置：$(-not [string]::IsNullOrWhiteSpace($env:OPENAI_MODEL))"
-"OPENAI_BASE_URL 已配置：$(-not [string]::IsNullOrWhiteSpace($env:OPENAI_BASE_URL))"
-```
-
-正式介绍见：`README.md`
-
-## 本项目模型配置
-
-项目不再写死任何私人中转站。请在启动前按服务商文档设置 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和 `OPENAI_WIRE_API`；真实凭证只从当前进程的 `OPENAI_API_KEY` 读取。示例配置必须使用占位符，不能把真实 Key、私人地址或个人目录提交到 Git。
-
-## 严格实时 API 模式
-
-默认后端启动脚本会启用 `EXTERNAL_API_REQUIRED=true`。这个模式用于真实环境，行为如下：
-
-- 每个问题先调用模型 API 做解析；模型未返回可验证结果时直接说明失败，不把本地规则伪装成模型解析。
-- 卡牌指标和卡组样本只来自每日一次的 20,000 场完整 Supercell 官方战斗日志快照。采集从全球排行榜第 1 名开始，按官方分页顺序扫描，候选池最多前 3000 名；达到 20,000 条唯一可用对局立即停止。Trace 和页面快照面板会展示实际场次、候选池、实际扫描排名、有效玩家、失败数和重复记录。未完成的采集绝不发布，也不读取 `cards_meta.json` 或 `top_decks.json` 充当实时结果。
-- 复合问题会分成最多四个子任务。例如“雷电巨人的使用率、胜率，还有当前环境主流卡组”会分别执行 `CardMetaSkill` 与 `EvidenceSynthesisSkill`；前者保留精确结构化数值，后者进行检索后调用模型 API 生成回答。
-- RAG 的检索文档仍是仓库中的知识库；`model_generation=api` 表示最终环境分析确实由模型 API 生成。`bm25_only` 仅表示本地向量 embedding 服务未运行，检索已回退到 BM25，不影响模型 API 或 Supercell API 的调用。
-
-先在当前 PowerShell 设置凭证和端口。不要在终端、截图或聊天中打印任何 Token：
-
-```powershell
-$env:OPENAI_API_KEY = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
-$env:SUPERCELL_API_TOKEN = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
-$env:SUPERCELL_LIVE_DATA_ENABLED = "true"
-$env:EXTERNAL_API_REQUIRED = "true"
-$env:SUPERCELL_LEADERBOARD_PLAYERS = "3000"  # 候选池上限，按第 1 名起顺序分页
-$env:SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = "3600"
-$env:RUNTIME_PORT = "8091"
-powershell -ExecutionPolicy Bypass -File .\run_backend.ps1
-```
-
-网页不会提供采样档位切换。页面顶部的“Current Data Snapshot”面板只读展示当前已发布快照的来源、目标、排行榜候选池、实际扫描范围、采集时间、有效玩家和去重数量；打开页面不会触发新的官方 API 请求。
-
-受控采集默认每秒最多 2 个官方请求、严格按排行榜顺序逐名读取 battle log、遵守 `429` 响应的 `Retry-After`，刷新预算默认 60 分钟。`SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS` 可在 60 秒到 7200 秒之间调整；生产建议保持 3600，网络较慢时可设为 7200。未达到 20,000 场的结果会被丢弃并进入 5/15/30 分钟递增冷却，期间继续服务上一次完整快照，不会立即重复抓取。
-
-## 质量、反馈与生产拓扑
-
-生产演示分支已经把两个 API 实例的进程内限流升级为 Redis 原子共享配额，并为并发槽使用带 TTL 的租约；Redis 不可用时默认 fail-closed。请求体上限会按 ASGI 实际接收字节计算，因此没有 `Content-Length` 的 chunked 请求同样会在进入业务逻辑前返回 413。
-
-压测与告警验收命令：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile smoke
-powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile load
-powershell -ExecutionPolicy Bypass -File .\run_load_test.ps1 -Profile soak -SoakDuration 30m
-powershell -ExecutionPolicy Bypass -File .\test_alert_pipeline.ps1
-```
-
-k6 会经过 Caddy 请求两个真实 API 实例并共享同一个 Redis；测试关闭外部模型与 Supercell 调用，不消耗额度。告警演练覆盖 `Prometheus -> Alertmanager -> 持久化 webhook`，成功和失败都会保留 JSON 报告。完整配置、实测指标和边界见 `docs/production-demo.md`。
-
-每次 RAG 预热会先执行同一 `snapshot_id` 的离线质量门槛：文档数量、证据类型覆盖、文档 ID 唯一性，以及每种证据默认均匀抽取 3 条的 Recall@5。`RAG_PROBES_PER_SOURCE` 可在 1-20 间调整；报告包含总体和分证据类型召回率并写入 `data/rag_quality/`，严格模式下未通过时不会切换 active retriever。RAG 最终回答还会校验引用文档 ID，并把带单位数值绑定到指标和已知卡牌实体；证据中 Poison 的数值不能被错配给 Electro Giant，失败时不输出未经支撑的开放结论。
-
-质量探针只使用卡名、卡组名、对局双方和体系名等用户可见槽位，不会把目标 `doc_id` 或原文复制进查询。完整离线验收还会执行从当前快照自动抽样的引用/数值一致性基准和 28 个故障注入场景；需要真实 dense 消融时先启动 Ollama，再设置 `$env:RUN_RAG_RETRIEVAL_BENCHMARK = "true"` 后运行 `.\run_tests.ps1`。
-
-模型网关包含供应商熔断与能力探测。能力由真实模型调用返回的公开文本 delta 被动探测，不在启动时额外消耗一次 API；首次调用前为 `unknown`。查看 `GET /model/status` 的探测方式和最近观测时间；`GET /metrics` 包含模型调用结果、熔断状态、`streaming`/`fallback_chunked`/`unavailable` 分布，以及各模式的首内容延迟和总耗时。连续失败默认 3 次后熔断 60 秒，半开只允许一个探测请求。
-
-前端每条完成回答提供“有帮助/需改进”。反馈只接受服务器已完成回答的 `request_id`，存入 `data/feedback.sqlite3`，不会自动改写正式评测集。导出待审核的真实问题候选：
-
-```powershell
-.\.venv\Scripts\python.exe -m evaluation.export_feedback_cases
-```
-
-审核人员编辑 `evaluation/feedback_candidates.jsonl`，只把确认过且不依赖快照具体数值的条目标记为 `review_status: approved`，再通过 `python -m evaluation.run_eval --feedback-cases evaluation/feedback_candidates.jsonl` 执行。重复导出会保留已有审核状态、审核备注与人工断言，不会把它们重置为 `pending`。
-
-生产 Compose 将采集器与 API 分离：一个 `collector` 独占 Supercell 刷新，`api-1`、`api-2` 只读共享快照并各自构建内存 RAG，Caddy 负载均衡并提供 HTTPS，Prometheus/Grafana 与 Loki/Promtail 持久化指标和日志。Grafana 在 `http://127.0.0.1:3000` 自动加载 “Clash Royale Agent Operations” 仪表盘；指标保留 30 天、日志保留 7 天，并预置失败率、快照/RAG 不一致和模型熔断告警规则。启动前必须设置强 `GRAFANA_ADMIN_PASSWORD`。
-
-```powershell
-docker compose -f compose.production.yml config --quiet
-docker compose -f compose.production.yml up --build -d
-```
-
-本机 Docker 出口 IP 未加入 Supercell 白名单时，不要启动容器内 `collector`。继续用 `run_backend.ps1` 的 `RUNTIME_ROLE=all` 在 Windows 采集；或单独以 `RUNTIME_ROLE=collector` 启动本机采集器，再启动 Compose 中除 `collector` 外的服务。开发用 Caddy 使用本地 CA，地址为 `https://localhost`；公网域名部署需把 `deploy/Caddyfile` 的 `tls internal` 改为受信任证书或 ACME 配置。
-
-在另一个 PowerShell 验证严格模式已真正加载：
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8091/health
-```
-
-预期至少包含：`live_data_enabled: True`、`external_api_required: True` 和 `model_api_configured: True`。
-
-## 真实 API 冒烟测试
-
-后端保持运行时，在第二个 PowerShell 执行：
-
-```powershell
-$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8091"
-.\.venv\Scripts\python.exe evaluation\run_live_api_smoke.py
-```
-
-该测试实际发出一个实时卡牌榜请求、一个多意图请求和一个纯开放 RAG 请求，并断言 Trace 中存在：`parser_api.status=api`、`live_data.source=supercell_api`、`static_card_fallback_count=0`、`MultiIntentOrchestrator`、成功的结构化/RAG 子任务、`model_generation=api`，以及通过的数值与引用校验。使用 `--report` 时会在每个阶段完成后立即保留结果。全部通过时输出 `LIVE_API_SMOKE_OK`。
-
-也可以把真实冒烟测试并入完整测试命令：
-
-```powershell
-$env:RUN_LIVE_API_SMOKE = "true"
-$env:LIVE_API_BACKEND_URL = "http://127.0.0.1:8091"
 powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
 
-离线开发需要验证 JSON 快照逻辑时，显式设为 `$env:EXTERNAL_API_REQUIRED = "false"`；这不是生产或实时演示配置。
+只运行单元测试：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+```
+
+测试、采集、统计和索引预热不要并行运行，以免 8 GB 可用内存被多个 Python/Ollama
+进程同时占用。
+
+## 采集入口
+
+正常业务启动不触发采集。采集只允许独立任务运行以下入口：
+
+```powershell
+.\run_rolling_collection.ps1 -Mode weekly_expanded
+```
+
+每日任务默认上海时间 03:00，固定运行 20 万场 `weekly_expanded` 扩散采集；该模式名是
+历史兼容命名，不再表示每周一次，也不再安排 `daily_ranked`。详细口径、监控、验收、发布和
+故障处理见 [`docs/SNAPSHOT_COLLECTION_HANDOFF.md`](docs/SNAPSHOT_COLLECTION_HANDOFF.md)。
+
+## 远程仓库与私有数据
+
+Git 和 Docker 镜像只发布源码、测试、文档、配置模板，以及不含对局信息的中文名称/别名
+配置。`data/` 中的原始对局、事实库、统计、RAG 文档、向量索引、状态与断点，连同日志和
+导出文件，都必须留在本机。公开克隆不附带业务数据，需要通过独立采集任务生成或挂载经
+授权的私有数据目录。

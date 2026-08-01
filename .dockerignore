@@ -8,8 +8,15 @@ __pycache__
 .env.*
 !.env.example
 
-data/official_daily_snapshot.json
-data/daily_snapshot_qdrant/
+# Never bake private battle facts, derived statistics, player identifiers,
+# logs, checkpoints, or vector indexes into an image.
+data/**
+!data/card_aliases.zh-CN.json
+data.zip
+data-*.zip
+rolling_data_exports/
+SHARE_PATH_OF_LEGEND_RAW_*/
+SHARE_PATH_OF_LEGEND_RAW_*.zip
 
 evaluation/reports/
 evaluation/*report*.json

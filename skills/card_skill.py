@@ -6,7 +6,7 @@ class CardMetaSkill(DirectJSONSkill):
     name = "CardMetaSkill"
 
     def can_handle(self, parsed: dict) -> bool:
-        return parsed.get("intent") == "card_query" and (
+        return parsed.get("intent") == "card_query" and parsed.get("entity_mode") != "loadout_entity" and (
             parsed.get("card_name") is not None
             or parsed.get("rank") is not None
             or parsed.get("top_n") is not None

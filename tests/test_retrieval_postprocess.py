@@ -5,7 +5,7 @@ from support import install_test_stubs
 install_test_stubs()
 
 from retrieval_postprocess import build_context_and_refs, compress_doc, strip_generated_reference_section
-from snapshot_store import build_snapshot_rag_documents
+from snapshot_store import DAILY_TARGET_BATTLES, build_snapshot_rag_documents
 
 
 class RetrievalEvidencePreservationTests(unittest.TestCase):
@@ -34,8 +34,8 @@ class RetrievalEvidencePreservationTests(unittest.TestCase):
         snapshot = {
             "snapshot_id": "official-regression",
             "fetched_at": "2026-07-26T17:43:32+00:00",
-            "sample_battles": 20000,
-            "target_battles": 20000,
+            "sample_battles": DAILY_TARGET_BATTLES,
+            "target_battles": DAILY_TARGET_BATTLES,
             "shortfall_battles": 0,
             "cards_meta": [
                 {
@@ -71,8 +71,8 @@ class RetrievalEvidencePreservationTests(unittest.TestCase):
         snapshot = {
             "snapshot_id": "official-regression",
             "fetched_at": "2026-07-26T17:43:32+00:00",
-            "sample_battles": 20000,
-            "target_battles": 20000,
+            "sample_battles": DAILY_TARGET_BATTLES,
+            "target_battles": DAILY_TARGET_BATTLES,
             "shortfall_battles": 0,
             "cards_meta": [],
             "top_decks": [

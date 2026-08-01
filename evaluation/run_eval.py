@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from evaluation.metrics import summarize_results
+from evaluation.scorecard import attach_scorecard
 from query_parser import fallback_parse_multi_intent
 from skills.base import SkillContext
 from skills.registry import build_default_registry
@@ -226,6 +227,7 @@ def run_evaluation(
         "results": results,
         "failures": [item for item in results if not item["success"]],
     }
+    attach_scorecard(report, source="deterministic")
     if report_path is not None:
         write_report(report, report_path)
     return report

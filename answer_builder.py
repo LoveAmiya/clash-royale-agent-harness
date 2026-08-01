@@ -192,7 +192,7 @@ def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
             "win_rate": "\u80dc\u7387",
             "clean_win_rate": "\u51c0\u80dc\u7387\uff08CWR\uff09",
         }
-        lines = [f"**{card.get('card_name')}** \u7684\u8bf7\u6c42\u6307\u6807\uff1a"]
+        lines = [f"{card.get('card_name')} \u7684\u8bf7\u6c42\u6307\u6807\uff1a"]
         for metric in metrics:
             if metric in labels:
                 lines.append(f"- {labels[metric]}\uff1a{card.get(metric)}%")
@@ -202,7 +202,7 @@ def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
             [
                 "",
                 "\u6570\u636e\u8fb9\u754c\uff1a\u4ee5\u4e0a\u4e3a Supercell \u5b98\u65b9\u5168\u7403\u6392\u884c\u699c\u73a9\u5bb6\u8fd1\u671f\u6218\u6597\u8bb0\u5f55\u7684\u6709\u9650\u6837\u672c"
-                f"\uff08{card.get('sample_battles', 0)} \u573a\uff0c\u6293\u53d6\u4e8e {fetched_at}\uff09\uff0cnot global meta.",
+                f"\uff08{card.get('sample_battles', 0)} \u573a\uff0c\u6293\u53d6\u4e8e {fetched_at}\uff09\uff0c\u5e76\u975e\u5168\u7403\u5b8c\u6574\u73af\u5883\u7edf\u8ba1\u3002",
                 "\u53c2\u8003\u6765\u6e90\uff1a",
                 f"[1] Supercell API live sample | {card.get('card_name')}",
             ]
@@ -214,7 +214,7 @@ def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
         "win_rate": "胜率",
         "clean_win_rate": "净胜率（CWR）",
     }
-    lines = [f"**{card.get('card_name')}** 在 **{card.get('mode', '当前模式')}** 下的请求指标："]
+    lines = [f"{card.get('card_name')} 在 {card.get('mode', '当前模式')} 下的请求指标："]
     for metric in metrics:
         if metric in labels:
             lines.append(f"- {labels[metric]}：{card.get(metric)}%")
@@ -256,7 +256,7 @@ def build_card_ranking_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
         c = sorted_cards[rank_target - 1]
         return (
             f"当前按 **{field_label}** 排序的第 {rank_target} 名卡牌是 **{c.get('card_name')}**。\n"
-            f"- 全局排名：{c.get('rank')}\n"
+            f"- 样本内排名：{c.get('rank')}\n"
             f"- 评分：{c.get('rating')}\n"
             f"- 使用率：{c.get('usage_rate')}%\n"
             f"- 胜率：{c.get('win_rate')}%\n"
@@ -272,7 +272,7 @@ def build_card_ranking_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
     for i, c in enumerate(selected, start=1):
         lines.append(
             f"{i}. **{c.get('card_name')}**\n"
-            f"   全局排名：{c.get('rank')} | 评分：{c.get('rating')} | 使用率：{c.get('usage_rate')}% | 胜率：{c.get('win_rate')}% | 净胜率：{c.get('clean_win_rate')}%\n"
+            f"   样本内排名：{c.get('rank')} | 评分：{c.get('rating')} | 使用率：{c.get('usage_rate')}% | 胜率：{c.get('win_rate')}% | 净胜率：{c.get('clean_win_rate')}%\n"
         )
         refs.append(build_card_source_reference(c, i))
 
@@ -335,6 +335,11 @@ def build_retrieval_query(parsed: dict, original_question: str) -> str:
         return f"热门卡组 热门 deck 排行 {original_question}"
 
     if intent == "card_query":
+        if parsed.get("entity_mode") == "loadout_entity":
+            state_labels = {"evolution": "觉醒", "elite": "精英", "tower": "塔楼", "ordinary": "普通"}
+            state = state_labels.get(parsed.get("special_state"), "完整配置")
+            entity_name = parsed.get("entity_name") or card_name or "卡牌"
+            return f"{state}{entity_name} 完整配置 使用率 胜率 净胜率 评分 {original_question}"
         if card_name:
             return f"{card_name} 使用率 胜率 净胜率"
         if rank is not None:

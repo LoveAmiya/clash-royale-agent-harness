@@ -9,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +22,9 @@ from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
 from agentscope.model import OpenAIChatModel, OpenAIResponseModel
 
+from analysis_boundaries import build_analysis_boundary_answer, detect_unsupported_analysis_request
+from answer_presentation import normalize_answer_text
+
 from app_config import (
     DATA_DIR,
     CARDS_META_FILE,
@@ -28,6 +32,7 @@ from app_config import (
     RUNTIME_PORT,
     RUNTIME_ROLE,
     SNAPSHOT_FOLLOWER_POLL_SECONDS,
+    SNAPSHOT_AUTO_FOLLOW_ENABLED,
     RAG_INDEX_MODE,
     SCHEDULE_FILE,
     OPENAI_CLIENT_KWARGS,
@@ -44,6 +49,7 @@ from app_config import (
     SUPERCELL_CACHE_TTL_SECONDS,
     SUPERCELL_MAX_TARGET_BATTLES,
     SUPERCELL_TARGET_BATTLES,
+    SUPERCELL_POL_SEED_PLAYERS,
     SUPERCELL_LEADERBOARD_PLAYERS,
     SUPERCELL_BATTLES_PER_PLAYER,
     SUPERCELL_FETCH_CONCURRENCY,
@@ -51,6 +57,7 @@ from app_config import (
     SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND,
     SUPERCELL_HIGH_VOLUME_MAX_RETRIES,
     SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS,
+    SNAPSHOT_PROGRESS_INTERVAL_SECONDS,
     LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED,
     ADMIN_API_KEY,
     ALLOWED_ORIGINS,
@@ -97,11 +104,18 @@ from runtime_hardening import (
     resolve_client_id,
 )
 from supercell_live import SupercellAPIClient
+from structured_query import CARD_RANKING_METRICS, StructuredQueryError, StructuredStatsRepository
+from rolling_corpus import DATASET_SCOPES, DATASET_WINDOW_DEFINITIONS, DEFAULT_DATASET_SCOPE
 from snapshot_store import (
     DAILY_REFRESH_INTERVAL,
     DAILY_TARGET_BATTLES,
+    SNAPSHOT_RETENTION_DAYS,
+    SNAPSHOT_RETENTION_MAX_COMPLETE,
+    cleanup_snapshot_retention,
     is_complete_daily_snapshot,
+    is_path_of_legend_snapshot,
     load_published_snapshot,
+    load_published_snapshot_summary,
     publish_daily_snapshot,
     snapshot_age_seconds,
     snapshot_refresh_due,
@@ -139,6 +153,10 @@ def load_json_file(path: Path):
 class ProcessRequest(BaseModel):
     session_id: str | None = None
     user_id: str | None = None
+    intent_hint: Literal["meta_analysis_query"] | None = None
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+    deck_mode: Literal["base8", "full_loadout"] = "base8"
+    entity_mode: Literal["base8", "loadout_entity"] = "base8"
     input: list[dict]
 
 
@@ -150,6 +168,63 @@ class FeedbackRequest(BaseModel):
     request_id: str
     rating: str
     correction: str | None = None
+
+
+class CardCompareRequest(BaseModel):
+    card_ids: list[str]
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+
+
+class EntityCompareRequest(BaseModel):
+    entity_ids: list[str]
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+
+
+class FullLoadoutCardRequest(BaseModel):
+    card_id: str
+    evolution_level: int = 0
+    elite: bool
+
+
+class FullLoadoutRequest(BaseModel):
+    tower_id: str
+    cards: list[FullLoadoutCardRequest]
+
+
+class DeckProfileRequest(BaseModel):
+    cards: list[str] | None = None
+    deck_mode: Literal["base8", "full_loadout"] = "base8"
+    loadout: FullLoadoutRequest | None = None
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+
+
+class DeckMatchupRequest(BaseModel):
+    deck_a: list[str] | None = None
+    deck_b: list[str] | None = None
+    deck_mode: Literal["base8", "full_loadout"] = "base8"
+    loadout_a: FullLoadoutRequest | None = None
+    loadout_b: FullLoadoutRequest | None = None
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+
+
+def _loadout_request_payload(value: FullLoadoutRequest | None) -> dict:
+    if value is None:
+        raise StructuredQueryError(
+            "INVALID_FULL_LOADOUT",
+            "full_loadout mode requires a tower and exactly 8 configured cards.",
+        )
+    return {
+        "schema_version": 1,
+        "tower": {"id": value.tower_id},
+        "cards": [
+            {
+                "id": card.card_id,
+                "evolution_level": card.evolution_level,
+                "elite": card.elite,
+            }
+            for card in value.cards
+        ],
+    }
 
 
 def get_user_text(request: ProcessRequest) -> str:
@@ -199,7 +274,44 @@ async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key:
     local_parsed = fallback_parse_multi_intent(user_text, cards_meta_data)
     if not api_key:
         logger.warning("no api key available, using fallback parser result")
-        return local_parsed
+        return {
+            **local_parsed,
+            "model_parser_attempted": False,
+            "model_parser_status": "not_configured",
+        }
+
+    def reconciled_local_parse(reason: str) -> dict:
+        return {
+            **merge_parse_metadata(
+                local_parsed,
+                build_parse_metadata(
+                    parse_source="llm_parser",
+                    parse_confidence=local_parsed.get("parse_confidence", LOCAL_PARSE_CONFIDENCE_HIGH),
+                    parse_reason=reason,
+                ),
+            ),
+            "model_parser_attempted": True,
+            "model_parser_status": "validated_reconciled",
+        }
+
+    def validated_fallback(reason: str, status: str) -> dict:
+        confidence = local_parsed.get("parse_confidence", LOCAL_PARSE_CONFIDENCE_LOW)
+        can_continue = (
+            local_parsed.get("intent") != "reject"
+            and confidence in {LOCAL_PARSE_CONFIDENCE_HIGH, LOCAL_PARSE_CONFIDENCE_MEDIUM}
+        )
+        return {
+            **merge_parse_metadata(
+                local_parsed,
+                build_parse_metadata(
+                    parse_source="validated_fallback" if can_continue else local_parsed.get("parse_source", "local_rule"),
+                    parse_confidence=confidence,
+                    parse_reason=reason,
+                ),
+            ),
+            "model_parser_attempted": True,
+            "model_parser_status": status,
+        }
 
     try:
         parse_result = await asyncio.wait_for(
@@ -217,13 +329,9 @@ async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key:
         parsed = extract_json_block(parse_text)
         if parsed is None:
             logger.warning("parser returned non-json output, using fallback parser")
-            return merge_parse_metadata(
-                local_parsed,
-                build_parse_metadata(
-                    parse_source=local_parsed.get("parse_source", "local_rule"),
-                    parse_confidence=local_parsed.get("parse_confidence", LOCAL_PARSE_CONFIDENCE_LOW),
-                    parse_reason="llm parser returned non-json output; kept local parse",
-                ),
+            return validated_fallback(
+                "llm parser returned non-json output; kept locally validated structured parse",
+                "invalid_response",
             )
 
         normalized = normalize_multi_intent_query(parsed, user_text, cards_meta_data)
@@ -232,45 +340,37 @@ async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key:
         if local_parsed.get("intent") == "multi_intent" and (
             normalized.get("intent") != "multi_intent" or normalized_intents != local_intents
         ):
-            return merge_parse_metadata(
-                local_parsed,
+            return reconciled_local_parse(
+                "gpt-5.5 parser output was reconciled to the high-confidence local multi-intent decomposition",
+            )
+        if normalized.get("intent") == "reject" and local_parsed.get("intent") != "reject":
+            # A valid model response was received. The final route is the
+            # deterministic reconciliation of that response with known cards
+            # and supported intents, so it remains an API-validated parse.
+            return reconciled_local_parse(
+                "gpt-5.5 parser output was reconciled to the locally validated supported route",
+            )
+        return {
+            **merge_parse_metadata(
+                normalized,
                 build_parse_metadata(
                     parse_source="llm_parser",
                     parse_confidence=LOCAL_PARSE_CONFIDENCE_HIGH,
-                    parse_reason=(
-                        "gpt-5.5 parser output was reconciled to the high-confidence "
-                        "local multi-intent decomposition"
-                    ),
+                    parse_reason="gpt-5.5 structured parser output validated locally",
                 ),
-            )
-        if normalized.get("intent") == "reject" and local_parsed.get("intent") != "reject":
-            # The model remains the primary parser, but a validated local card
-            # alias must not be discarded merely because the model rejected it.
-            return merge_parse_metadata(
-                local_parsed,
-                build_parse_metadata(
-                    parse_source="local_rule",
-                    parse_confidence=local_parsed.get("parse_confidence", LOCAL_PARSE_CONFIDENCE_HIGH),
-                    parse_reason="llm parser rejected a high-confidence local parse; kept local parse",
-                ),
-            )
-        return merge_parse_metadata(
-            normalized,
-            build_parse_metadata(
-                parse_source="llm_parser",
-                parse_confidence=LOCAL_PARSE_CONFIDENCE_HIGH,
-                parse_reason="gpt-5.5 structured parser output validated locally",
             ),
-        )
+            "model_parser_attempted": True,
+            "model_parser_status": "validated",
+        }
     except Exception as exc:
-        logger.warning("parser agent failed, using fallback parser: %s", exc)
-        return merge_parse_metadata(
-            local_parsed,
-            build_parse_metadata(
-                parse_source=local_parsed.get("parse_source", "local_rule"),
-                parse_confidence=local_parsed.get("parse_confidence", LOCAL_PARSE_CONFIDENCE_LOW),
-                parse_reason=f"llm parser failed; kept local parse: {exc}",
-            ),
+        status = "timeout" if isinstance(exc, TimeoutError) else "error"
+        logger.warning(
+            "parser agent failed, using validated fallback error_type=%s",
+            type(exc).__name__,
+        )
+        return validated_fallback(
+            f"llm parser failed; kept locally validated structured parse: {type(exc).__name__}",
+            status,
         )
 
 
@@ -278,7 +378,7 @@ def query_needs_rag(parsed: dict) -> bool:
     if parsed.get("intent") == "multi_intent":
         return any(query_needs_rag(subquery) for subquery in parsed.get("subqueries", []))
     intent = parsed.get("intent")
-    if intent in {"meta_analysis_query", "match_preparation_query"}:
+    if intent == "meta_analysis_query":
         return True
     if intent == "deck_query":
         return (
@@ -287,6 +387,8 @@ def query_needs_rag(parsed: dict) -> bool:
             and parsed.get("top_n") is None
         )
     if intent == "card_query":
+        if parsed.get("entity_mode") == "loadout_entity":
+            return True
         return (
             parsed.get("card_name") is None
             and parsed.get("rank") is None
@@ -415,7 +517,7 @@ def preheat_retriever(
 
         candidate = HybridRetriever(rag_docs, in_memory=RAG_INDEX_MODE == "memory")
         if candidate.snapshot_id != snapshot_id:
-            raise ValueError("built retriever does not match the active official daily snapshot")
+            raise ValueError("built retriever does not match the active official weekly snapshot")
         if candidate.docs_fingerprint != docs_fingerprint:
             raise ValueError("built retriever fingerprint does not match validated RAG documents")
         if RAG_QUALITY_GATE_ENABLED and EXTERNAL_API_REQUIRED:
@@ -447,6 +549,10 @@ def preheat_retriever(
         app.state.rag_status = "ready" if candidate.dense_available else "bm25_only"
         app.state.rag_candidate_status = app.state.rag_status
         app.state.rag_candidate_error = None
+        if previous_retriever is not None and previous_retriever is not candidate:
+            close_previous = getattr(previous_retriever, "close", None)
+            if callable(close_previous):
+                close_previous()
         logger.info(
             "rag_preheat_complete snapshot_id=%s documents=%s docs_fingerprint=%s mode=%s",
             snapshot_id,
@@ -454,6 +560,16 @@ def preheat_retriever(
             docs_fingerprint[:12],
             app.state.rag_status,
         )
+        if RAG_INDEX_MODE != "memory":
+            retention = cleanup_snapshot_retention(
+                DATA_DIR,
+                active_snapshot_id=str(snapshot_id),
+            )
+            logger.info(
+                "snapshot_retention_complete retained=%s removed=%s",
+                retention["retained_snapshot_ids"],
+                retention["removed_snapshot_ids"],
+            )
         return candidate
     except Exception as exc:
         # Keep an old retriever in memory for rollback, but never use it for a
@@ -513,7 +629,7 @@ async def preheat_retriever_in_background(
 
 
 def get_live_sample_target(app: FastAPI) -> int:
-    """Production answers are always bound to the complete daily sample."""
+    """Production answers are always bound to the complete weekly sample."""
     return DAILY_TARGET_BATTLES
 
 
@@ -581,6 +697,57 @@ def _record_live_refresh_attempt(
         metrics.record_snapshot_collection(collection_metrics)
 
 
+def _record_live_collection_progress(app: FastAPI, progress: dict) -> None:
+    """Publish compact collector progress without invoking parser, RAG, or LLM code."""
+    app.state.live_collection_progress = dict(progress)
+    logger.info(
+        "snapshot_collection_progress usable=%s target=%s players=%s requests=%s rate_limited=%s",
+        progress.get("usable_battles"),
+        progress.get("target_battles"),
+        progress.get("fetched_players"),
+        progress.get("request_count"),
+        progress.get("rate_limited"),
+    )
+
+
+def get_snapshot_artifact_status(data_dir: Path, snapshot_id: str | None) -> dict:
+    """Report compact local artifact readiness without hashing or heavy initialization."""
+    def manifest_status(root: str) -> dict:
+        if not snapshot_id:
+            return {"status": "unavailable", "snapshot_id": None, "counts": {}}
+        path = Path(data_dir) / root / snapshot_id / "manifest.json"
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"status": "unavailable", "snapshot_id": snapshot_id, "counts": {}}
+        aligned = isinstance(manifest, dict) and manifest.get("snapshot_id") == snapshot_id
+        return {
+            "status": "ready" if aligned else "misaligned",
+            "snapshot_id": manifest.get("snapshot_id") if isinstance(manifest, dict) else None,
+            "counts": manifest.get("counts", {}) if isinstance(manifest, dict) else {},
+        }
+
+    review = {"status": "not_imported", "snapshot_id": snapshot_id}
+    if snapshot_id:
+        report_path = Path(data_dir) / "external_reviews" / snapshot_id / "validation_report.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            report = None
+        if isinstance(report, dict):
+            review = {
+                "status": "validated" if report.get("passed") is True else "rejected",
+                "snapshot_id": report.get("snapshot_id"),
+                "document_count": report.get("document_count"),
+                "activation": report.get("activation"),
+            }
+    return {
+        "audit_export": manifest_status("audit_exports"),
+        "structured_stats": manifest_status("structured_stats"),
+        "external_review": review,
+    }
+
+
 def get_live_snapshot_status(app: FastAPI) -> dict:
     """Return display-safe provenance for the currently published data snapshot."""
     snapshot = getattr(app.state, "live_snapshot", None)
@@ -591,7 +758,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
     if not isinstance(snapshot, dict):
         return {
             "source": "Supercell Official API",
-            "source_type": "daily leaderboard battle-log snapshot",
+            "source_type": "weekly leaderboard battle-log snapshot",
             "status": refresh_status,
             "snapshot_status": refresh_status,
             "snapshot_id": None,
@@ -600,8 +767,11 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             "sample_battles": 0,
             "target_battles": DAILY_TARGET_BATTLES,
             "shortfall_battles": DAILY_TARGET_BATTLES,
+            "collection_scope": None,
+            "scope_verified": False,
             "leaderboard": {
-                "candidate_limit": SUPERCELL_LEADERBOARD_PLAYERS,
+                "candidate_limit": SUPERCELL_POL_SEED_PLAYERS,
+                "queue_capacity": SUPERCELL_LEADERBOARD_PLAYERS,
                 "rank_start": 1,
                 "scanned_rank_end": None,
                 "ranked_players_returned": 0,
@@ -609,6 +779,11 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
                 "failed_players": 0,
             },
             "collection_metrics": {},
+            "collection_progress": getattr(app.state, "live_collection_progress", None),
+            "special_fields_probe": None,
+            "refresh_interval_seconds": int(DAILY_REFRESH_INTERVAL.total_seconds()),
+            "retention": {"days": SNAPSHOT_RETENTION_DAYS, "max_complete_snapshots": SNAPSHOT_RETENTION_MAX_COMPLETE},
+            "artifacts": get_snapshot_artifact_status(DATA_DIR, None),
             "runtime": get_runtime_summary(app),
             "rag": {
                 "status": "not_required" if not SUPERCELL_LIVE_DATA_ENABLED else getattr(app.state, "rag_status", "not_ready"),
@@ -623,7 +798,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             },
             "rag_status": "not_required" if not SUPERCELL_LIVE_DATA_ENABLED else getattr(app.state, "rag_status", "not_ready"),
             "data_sources": {
-                "schedule": "local_schedule_json",
+                "schedule": "disabled_clan_war_feature",
                 "cards": "not_available",
                 "decks": "not_available",
                 "rag_documents": "not_available",
@@ -636,7 +811,7 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
     fetched_players = int(snapshot.get("fetched_players", 0) or 0)
     return {
         "source": "Supercell Official API",
-        "source_type": "daily leaderboard battle-log snapshot",
+        "source_type": "weekly leaderboard battle-log snapshot",
         "status": refresh_status,
         "snapshot_status": refresh_status,
         "snapshot_id": snapshot.get("snapshot_id"),
@@ -646,8 +821,13 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
         "sample_battles": snapshot.get("sample_battles", 0),
         "target_battles": snapshot.get("target_battles", DAILY_TARGET_BATTLES),
         "shortfall_battles": snapshot.get("shortfall_battles", DAILY_TARGET_BATTLES),
+        "collection_scope": snapshot.get("collection_scope", "legacy_mixed_or_unverified"),
+        "scope_verified": is_path_of_legend_snapshot(snapshot),
         "leaderboard": {
             "candidate_limit": snapshot.get("leaderboard_candidate_limit", SUPERCELL_LEADERBOARD_PLAYERS),
+            "queue_capacity": snapshot.get("collection_metrics", {}).get(
+                "player_queue_capacity", SUPERCELL_LEADERBOARD_PLAYERS
+            ),
             "rank_start": snapshot.get("leaderboard_start_rank", 1),
             "scanned_rank_end": snapshot.get("leaderboard_last_scanned_rank", fetched_players or None),
             "ranked_players_returned": snapshot.get("ranked_players", 0),
@@ -655,6 +835,11 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
             "failed_players": snapshot.get("failed_players", 0),
         },
         "collection_metrics": snapshot.get("collection_metrics", {}),
+        "collection_progress": getattr(app.state, "live_collection_progress", None),
+        "special_fields_probe": snapshot.get("special_fields_probe"),
+        "refresh_interval_seconds": int(DAILY_REFRESH_INTERVAL.total_seconds()),
+        "retention": {"days": SNAPSHOT_RETENTION_DAYS, "max_complete_snapshots": SNAPSHOT_RETENTION_MAX_COMPLETE},
+        "artifacts": get_snapshot_artifact_status(DATA_DIR, str(snapshot.get("snapshot_id") or "") or None),
         "runtime": get_runtime_summary(app),
         "rag": {
             "status": getattr(app.state, "rag_status", "not_ready"),
@@ -671,10 +856,10 @@ def get_live_snapshot_status(app: FastAPI) -> dict:
         },
         "rag_status": getattr(app.state, "rag_status", "not_ready"),
         "data_sources": {
-            "schedule": "local_schedule_json",
-            "cards": "official_daily_snapshot",
-            "decks": "official_daily_snapshot",
-            "rag_documents": "official_daily_snapshot",
+            "schedule": "disabled_clan_war_feature",
+            "cards": "official_weekly_snapshot",
+            "decks": "official_weekly_snapshot",
+            "rag_documents": "official_weekly_snapshot",
         },
         "last_refresh_attempt": last_refresh_attempt,
         "cooldown_remaining_seconds": round(cooldown_remaining, 1),
@@ -773,13 +958,245 @@ def get_readiness_status(
 def configure_live_sample_target(app: FastAPI, target_battles: int) -> dict:
     raise HTTPException(
         status_code=409,
-        detail=f"daily official sampling is fixed at {DAILY_TARGET_BATTLES} battles",
+        detail=f"weekly official sampling is fixed at {DAILY_TARGET_BATTLES} battles",
     )
+
+
+def _validate_dataset_scope(dataset_scope: str) -> str:
+    scope = str(dataset_scope or DEFAULT_DATASET_SCOPE).strip()
+    if scope not in DATASET_SCOPES:
+        raise StructuredQueryError(
+            "INVALID_DATASET_SCOPE",
+            "dataset_scope must be one of the published rolling dataset scopes.",
+            details={"dataset_scope": scope, "allowed": list(DATASET_SCOPES)},
+        )
+    return scope
+
+
+def _active_snapshot_group_manifest(data_dir: Path = DATA_DIR) -> dict | None:
+    pointer_path = Path(data_dir) / "active_snapshot_group.json"
+    if not pointer_path.is_file():
+        return None
+    try:
+        pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+        group_id = str(pointer.get("snapshot_group_id") or "").strip()
+        manifest_path = Path(data_dir) / "snapshot_groups" / group_id / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        raise StructuredQueryError(
+            "DATASET_SCOPE_NOT_READY",
+            "The active rolling snapshot group is incomplete.",
+            status_code=503,
+        ) from exc
+    if (
+        not group_id
+        or manifest.get("snapshot_group_id") != group_id
+        or manifest.get("fully_aligned") is not True
+        or not set((manifest.get("datasets") or {}).keys())
+        or not set((manifest.get("datasets") or {}).keys()).issubset(set(DATASET_SCOPES))
+        or manifest.get("rag_docs_fingerprint") != manifest.get("index_docs_fingerprint")
+    ):
+        raise StructuredQueryError(
+            "DATASET_SCOPE_NOT_READY",
+            "The active rolling snapshot group failed alignment validation.",
+            status_code=503,
+            details={"snapshot_group_id": group_id or None},
+        )
+    return manifest
+
+
+def get_dataset_catalog(app: FastAPI) -> dict:
+    def scope_parts(scope: str) -> tuple[str, str]:
+        prefix = next(
+            (candidate for candidate in DATASET_WINDOW_DEFINITIONS if scope.startswith(f"{candidate}_")),
+            "",
+        )
+        return prefix, scope[len(prefix) + 1 :] if prefix else scope
+
+    def display_name(scope: str) -> str:
+        window, level = scope_parts(scope)
+        window_labels = {
+            "7d": "最近7天",
+            "d7_14": "7至14天前",
+            "d14_21": "14至21天前",
+            "d21_28": "21至28天前",
+            "d28_35": "28至35天前",
+            "35d": "最近35天",
+        }
+        level_name = "全量" if level == "all" else f"前{level.rsplit('_', 1)[-1]}"
+        return f"{window_labels.get(window, window)} · {level_name}"
+
+    def unavailable_dataset(scope: str) -> dict:
+        prefix, _ = scope_parts(scope)
+        definition = DATASET_WINDOW_DEFINITIONS[prefix]
+        return {
+            "dataset_scope": scope,
+            "name": display_name(scope),
+            "window_days": definition["end_offset_days"] - definition["start_offset_days"],
+            "window_kind": definition["window_kind"],
+            "window_start_offset_days": definition["start_offset_days"],
+            "window_end_offset_days": definition["end_offset_days"],
+            "rank_limit": int(scope.rsplit("_", 1)[-1]) if "_top_" in scope else None,
+            "ready": False,
+            "complete_loadout_ready": False,
+            "entity_stats_ready": False,
+            "delta_ready": False,
+        }
+
+    manifest = _active_snapshot_group_manifest(DATA_DIR)
+    if manifest is None:
+        return {
+            "snapshot_group_id": None,
+            "default_dataset_scope": DEFAULT_DATASET_SCOPE,
+            "datasets": [unavailable_dataset(scope) for scope in DATASET_SCOPES],
+        }
+    return {
+        "snapshot_group_id": manifest["snapshot_group_id"],
+        "published_at": manifest.get("published_at"),
+        "default_dataset_scope": manifest.get("default_dataset_scope", DEFAULT_DATASET_SCOPE),
+        "rag": {
+            "status": "ready",
+            "document_count": manifest.get("rag_document_count"),
+            "fully_aligned": manifest.get("fully_aligned") is True,
+        },
+        "datasets": [
+            (
+                {
+                    **unavailable_dataset(scope),
+                    **manifest["datasets"][scope],
+                    "dataset_scope": scope,
+                    "name": display_name(scope),
+                    "ready": (
+                        manifest["datasets"][scope].get("ready") is True
+                        if "ready" in manifest["datasets"][scope]
+                        else int(manifest["datasets"][scope].get("unique_battles") or 0) > 0
+                    ),
+                    "complete_loadout_ready": (
+                        manifest["datasets"][scope].get("complete_loadout_ready") is True
+                        if "complete_loadout_ready" in manifest["datasets"][scope]
+                        else int((manifest["datasets"][scope].get("structured_counts") or {}).get("full_loadout_side_records") or 0) > 0
+                    ),
+                    "entity_stats_ready": manifest["datasets"][scope].get("entity_stats_ready") is True,
+                    "delta_ready": manifest["datasets"][scope].get("delta_ready") is True,
+                }
+                if scope in manifest["datasets"] else unavailable_dataset(scope)
+            )
+            for scope in DATASET_SCOPES
+        ],
+    }
+
+
+def get_structured_repository(
+    app: FastAPI,
+    dataset_scope: str = DEFAULT_DATASET_SCOPE,
+) -> StructuredStatsRepository:
+    scope = _validate_dataset_scope(dataset_scope)
+    group_manifest = _active_snapshot_group_manifest(DATA_DIR)
+    if group_manifest is not None:
+        group_id = group_manifest["snapshot_group_id"]
+        repositories = getattr(app.state, "structured_group_repositories", None)
+        if not isinstance(repositories, dict):
+            repositories = {}
+            app.state.structured_group_repositories = repositories
+        cache_key = (group_id, scope)
+        repository = repositories.get(cache_key)
+        if not isinstance(repository, StructuredStatsRepository):
+            repository = StructuredStatsRepository.for_snapshot_group(DATA_DIR, group_id, scope)
+            repositories.clear()
+            repositories[cache_key] = repository
+        return repository
+    if scope != DEFAULT_DATASET_SCOPE:
+        raise StructuredQueryError(
+            "DATASET_SCOPE_NOT_READY",
+            "The requested rolling dataset scope has not been published yet.",
+            status_code=503,
+            details={"dataset_scope": scope},
+        )
+    snapshot = getattr(app.state, "live_snapshot", None)
+    snapshot_id = str(snapshot.get("snapshot_id") or "") if isinstance(snapshot, dict) else ""
+    if not snapshot_id:
+        try:
+            pointer = load_json_file(DATA_DIR / "official_snapshot_pointer.json")
+            snapshot_id = str(pointer.get("snapshot_id") or "") if isinstance(pointer, dict) else ""
+        except (OSError, json.JSONDecodeError):
+            snapshot_id = ""
+    if not snapshot_id:
+        raise StructuredQueryError(
+            "STRUCTURED_INDEX_UNAVAILABLE",
+            "No active official snapshot is available for structured queries.",
+            status_code=503,
+        )
+    repository = getattr(app.state, "structured_repository", None)
+    if not isinstance(repository, StructuredStatsRepository) or repository.snapshot_id != snapshot_id:
+        repository = StructuredStatsRepository(DATA_DIR, snapshot_id)
+        app.state.structured_repository = repository
+    return repository
+
+
+def ensure_dataset_retriever(app: FastAPI, dataset_scope: str) -> HybridRetriever | None:
+    scope = _validate_dataset_scope(dataset_scope)
+    manifest = _active_snapshot_group_manifest(DATA_DIR)
+    if manifest is None:
+        if scope != DEFAULT_DATASET_SCOPE:
+            raise StructuredQueryError(
+                "DATASET_SCOPE_NOT_READY",
+                "The requested rolling dataset scope has not been published yet.",
+                status_code=503,
+                details={"dataset_scope": scope},
+            )
+        return ensure_retriever(app)
+    group_id = manifest["snapshot_group_id"]
+    retriever = getattr(app.state, "rolling_retriever", None)
+    if getattr(app.state, "rolling_retriever_group_id", None) == group_id and retriever is not None:
+        return retriever
+    lock = getattr(app.state, "rolling_retriever_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        app.state.rolling_retriever_lock = lock
+    with lock:
+        retriever = getattr(app.state, "rolling_retriever", None)
+        if getattr(app.state, "rolling_retriever_group_id", None) == group_id and retriever is not None:
+            return retriever
+        group_dir = DATA_DIR / "snapshot_groups" / group_id
+        try:
+            documents = json.loads((group_dir / "rag_documents.json").read_text(encoding="utf-8"))
+            candidate = HybridRetriever(
+                documents,
+                index_path=group_dir / "qdrant",
+                lazy_scope_bm25=True,
+                bm25_scope_cache_size=2,
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            raise StructuredQueryError(
+                "DATASET_SCOPE_NOT_READY",
+                "The rolling RAG index could not be loaded.",
+                status_code=503,
+                details={"snapshot_group_id": group_id, "dataset_scope": scope},
+            ) from exc
+        expected = manifest.get("rag_docs_fingerprint")
+        if not candidate.dense_available or candidate.docs_fingerprint != expected:
+            candidate.close()
+            raise StructuredQueryError(
+                "DATASET_SCOPE_NOT_READY",
+                "The rolling RAG index is not aligned with its documents.",
+                status_code=503,
+                details={"snapshot_group_id": group_id, "dataset_scope": scope},
+            )
+        previous = getattr(app.state, "rolling_retriever", None)
+        app.state.rolling_retriever = candidate
+        app.state.rolling_retriever_group_id = group_id
+        if previous is not None and previous is not candidate:
+            previous.close()
+        return candidate
 
 
 def restore_published_snapshot(app: FastAPI) -> dict | None:
     """Restore the last complete official dataset before scheduling a refresh."""
-    snapshot = load_published_snapshot(DATA_DIR)
+    snapshot = (
+        load_published_snapshot_summary(DATA_DIR)
+        if RUNTIME_ROLE == "collector"
+        else load_published_snapshot(DATA_DIR)
+    )
     if snapshot is None:
         return None
     app.state.live_snapshot = snapshot
@@ -799,7 +1216,7 @@ def restore_published_snapshot(app: FastAPI) -> dict | None:
         finished_at=snapshot.get("published_at") or snapshot.get("fetched_at"),
     )
     logger.info(
-        "restored official daily snapshot id=%s battles=%s age_seconds=%.1f",
+        "restored official weekly snapshot id=%s battles=%s age_seconds=%.1f",
         snapshot.get("snapshot_id"),
         snapshot.get("sample_battles"),
         age_seconds or 0.0,
@@ -818,7 +1235,8 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
         return getattr(app.state, "live_snapshot", None)
     cached = getattr(app.state, "live_snapshot", None)
     cached_at = getattr(app.state, "live_snapshot_at", 0.0)
-    if cached is not None and not snapshot_refresh_due(cached):
+    legacy_scope_refresh = RUNTIME_ROLE == "collector" and not is_path_of_legend_snapshot(cached)
+    if cached is not None and not legacy_scope_refresh and not snapshot_refresh_due(cached):
         return cached
 
     refresh_lock = getattr(app.state, "live_refresh_lock", None)
@@ -835,6 +1253,12 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
 
     try:
         app.state.live_refresh_status = "refreshing"
+        app.state.live_collection_progress = {
+            "status": "starting",
+            "target_battles": target_battles,
+            "usable_battles": 0,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
         if cached is None:
             app.state.rag_status = "not_ready"
         client = SupercellAPIClient(
@@ -846,30 +1270,43 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
         snapshot = client.fetch_snapshot(
             target_battles=target_battles,
             player_limit=SUPERCELL_LEADERBOARD_PLAYERS,
+            seed_player_limit=SUPERCELL_POL_SEED_PLAYERS,
             battles_per_player=SUPERCELL_BATTLES_PER_PLAYER,
             concurrency=SUPERCELL_FETCH_CONCURRENCY,
             fallback_player_tags=SUPERCELL_FALLBACK_PLAYER_TAGS,
             max_duration_seconds=SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS,
+            progress_callback=lambda progress: _record_live_collection_progress(app, progress),
+            progress_interval_seconds=SNAPSHOT_PROGRESS_INTERVAL_SECONDS,
+            spool_dir=DATA_DIR / "snapshot_work",
         )
         if not is_complete_daily_snapshot(snapshot):
             app.state.live_error = (
                 "IncompleteOfficialSnapshot: "
                 f"sample_battles={snapshot.get('sample_battles')} target_battles={target_battles}"
             )
-            failures = getattr(app.state, "live_refresh_failures", 0) + 1
-            app.state.live_refresh_failures = failures
-            app.state.live_cooldown_until = time.monotonic() + _refresh_cooldown_seconds(failures)
-            app.state.live_refresh_status = "cooldown"
+            source_exhausted = bool(snapshot.get("collection_metrics", {}).get("source_exhausted"))
+            if source_exhausted:
+                app.state.live_refresh_status = "source_exhausted"
+                app.state.live_cooldown_until = time.monotonic() + DAILY_REFRESH_INTERVAL.total_seconds()
+            else:
+                failures = getattr(app.state, "live_refresh_failures", 0) + 1
+                app.state.live_refresh_failures = failures
+                app.state.live_cooldown_until = time.monotonic() + _refresh_cooldown_seconds(failures)
+                app.state.live_refresh_status = "cooldown"
             _record_live_refresh_attempt(
                 app,
-                status="incomplete",
+                status="source_exhausted" if source_exhausted else "incomplete",
                 snapshot=snapshot,
                 error=app.state.live_error,
             )
-            logger.warning("discarded incomplete official daily snapshot %s", app.state.live_error)
+            logger.warning("discarded incomplete official weekly snapshot %s", app.state.live_error)
             return cached
 
         snapshot = publish_daily_snapshot(snapshot, DATA_DIR)
+        if RUNTIME_ROLE != "collector" and snapshot.get("raw_battles_storage"):
+            snapshot = load_published_snapshot(DATA_DIR)
+            if snapshot is None:
+                raise ValueError("streamed snapshot publication could not be reloaded")
         if RUNTIME_ROLE == "collector":
             _activate_snapshot_state(app, snapshot)
         else:
@@ -929,7 +1366,7 @@ def ensure_live_snapshot(app: FastAPI) -> dict | None:
 
 
 async def refresh_live_snapshot_loop(app: FastAPI) -> None:
-    """Load once, then refresh a complete official dataset every 24 hours."""
+    """Load once, then refresh a complete official dataset every week."""
     while True:
         snapshot = await asyncio.to_thread(ensure_live_snapshot, app)
         snapshot_id = snapshot.get("snapshot_id") if isinstance(snapshot, dict) else None
@@ -941,6 +1378,8 @@ async def refresh_live_snapshot_loop(app: FastAPI) -> None:
             await preheat_retriever_in_background(app)
         if getattr(app.state, "live_refresh_status", None) == "cooldown":
             delay = max(60.0, getattr(app.state, "live_cooldown_until", 0.0) - time.monotonic())
+        elif getattr(app.state, "live_refresh_status", None) == "source_exhausted":
+            delay = max(3600.0, getattr(app.state, "live_cooldown_until", 0.0) - time.monotonic())
         elif snapshot is None:
             delay = 1800.0
         else:
@@ -985,9 +1424,9 @@ def merge_live_card_snapshot(live_cards: list[dict], fallback_cards: list[dict])
 
 
 def query_requires_official_snapshot(parsed: dict) -> bool:
-    """Return whether a parsed request needs the official daily game snapshot.
+    """Return whether a parsed request needs the official weekly game snapshot.
 
-    Schedule data is maintained locally and is the sole intentional exception.
+    Removed clan-war intents are rejected locally without touching data APIs.
     In strict mode, every card, deck, ranking, or open-analysis subquery must
     receive a complete Supercell-derived snapshot rather than repository JSON.
     """
@@ -999,7 +1438,12 @@ def query_requires_official_snapshot(parsed: dict) -> bool:
         if any(not isinstance(subquery, dict) for subquery in subqueries):
             return True
         return any(query_requires_official_snapshot(subquery) for subquery in subqueries)
-    return intent not in {"schedule_query", "reject"}
+    return intent not in {
+        "schedule_query",
+        "schedule_summary_query",
+        "match_preparation_query",
+        "reject",
+    }
 
 
 def build_external_api_unavailable_result(parsed: dict, message: str, live_metadata: dict) -> AnswerResult:
@@ -1031,10 +1475,27 @@ def describe_parsed_request(parsed: dict) -> str:
         metric_labels = {
             "usage_rate": "使用率",
             "win_rate": "胜率",
-            "net_win_rate": "净胜率",
+            "clean_win_rate": "净胜率",
         }
         metrics = "、".join(metric_labels.get(metric, str(metric)) for metric in metric_values)
         return f"{card} 的{metrics or '数据'}查询"
+    if intent == "card_compare_query":
+        names = [str(name) for name in parsed.get("card_names", []) if name]
+        metric_labels = {
+            "usage_rate": "使用率",
+            "win_rate": "胜率",
+            "clean_win_rate": "净胜率",
+        }
+        metric = metric_labels.get(parsed.get("compare_metric"), "表现")
+        return f"{' 与 '.join(names) or '两张卡牌'}的{metric}比较"
+    if intent == "card_rank_lookup_query":
+        metric_labels = {
+            "usage_rate": "使用率",
+            "win_rate": "胜率",
+            "clean_win_rate": "净胜率",
+        }
+        metric = metric_labels.get(parsed.get("metric"), "表现")
+        return f"卡牌{metric}第 {parsed.get('rank') or '?'} 名查询"
     if intent == "deck_query":
         return f"{parsed.get('card_name') or '热门'}卡组查询"
     if intent == "meta_analysis_query":
@@ -1051,7 +1512,12 @@ async def build_answer(
     app: FastAPI,
     event_sink: RuntimeEventEmitter | None = None,
     request_id: str | None = None,
+    intent_hint: Literal["meta_analysis_query"] | None = None,
+    dataset_scope: str = DEFAULT_DATASET_SCOPE,
+    deck_mode: Literal["base8", "full_loadout"] = "base8",
+    entity_mode: Literal["base8", "loadout_entity"] = "base8",
 ) -> AnswerResult:
+    dataset_scope = _validate_dataset_scope(dataset_scope)
     # Bootstrap cards are a parser-only compatibility catalog. They identify
     # card names/aliases before the first official snapshot exists, but strict
     # answer Skills never receive these repository records.
@@ -1068,7 +1534,49 @@ async def build_answer(
             phase="parse",
             status="running",
             title="正在解析问题",
-            detail="使用模型 API 识别可执行意图，不展示内部推理。",
+            detail=(
+                "使用页面的已验证功能契约进入环境 RAG 分析。"
+                if intent_hint == "meta_analysis_query"
+                else "使用模型 API 识别可执行意图，不展示内部推理。"
+            ),
+        )
+
+    analysis_boundary = detect_unsupported_analysis_request(user_text)
+    if analysis_boundary is not None:
+        parsed = {
+            "intent": "reject",
+            "parse_source": "analysis_boundary",
+            "parse_confidence": LOCAL_PARSE_CONFIDENCE_HIGH,
+            "parse_reason": "request requires evidence or a model not provided by the current snapshot",
+            "boundary_code": analysis_boundary["code"],
+            "model_parser_attempted": False,
+            "model_parser_status": "not_required",
+        }
+        if event_sink is not None:
+            await event_sink.execution(
+                step_id="parse",
+                phase="parse",
+                status="completed",
+                title="已确认数据边界",
+                detail="该问题要求当前观测快照无法支持的预测、精确概率、因果效果或历史趋势。",
+            )
+        logger.info(
+            "request rejected by analysis boundary request_id=%s boundary=%s",
+            request_id,
+            analysis_boundary["code"],
+        )
+        return AnswerResult(
+            answer=build_analysis_boundary_answer(analysis_boundary),
+            trace_id=None,
+            parsed=parsed,
+            plan=None,
+            selected_skill=None,
+            mode="boundary_reject",
+            metadata={
+                "boundary": analysis_boundary,
+                "model_parser_attempted": False,
+                "data_context": {"snapshot": "observational_only"},
+            },
         )
 
     if EXTERNAL_API_REQUIRED and not api_key:
@@ -1083,7 +1591,25 @@ async def build_answer(
             {"status": "not_checked"},
         )
 
-    parsed = await parse_user_query(user_text, bootstrap_cards_meta_data, api_key)
+    if intent_hint == "meta_analysis_query":
+        parsed = {
+            "intent": "meta_analysis_query",
+            "parse_source": "interface_contract",
+            "parse_confidence": LOCAL_PARSE_CONFIDENCE_HIGH,
+            "parse_reason": "validated environment-analysis page contract",
+            "model_parser_attempted": False,
+            "model_parser_status": "not_required",
+        }
+    else:
+        parsed = await parse_user_query(user_text, bootstrap_cards_meta_data, api_key)
+    parsed_subqueries = parsed.get("subqueries") if isinstance(parsed.get("subqueries"), list) else []
+    if parsed.get("entity_mode") == "loadout_entity" or any(
+        subquery.get("entity_mode") == "loadout_entity"
+        for subquery in parsed_subqueries
+        if isinstance(subquery, dict)
+    ):
+        entity_mode = "loadout_entity"
+        deck_mode = "full_loadout"
     logger.info(
         "request parsed request_id=%s intent=%s source=%s subqueries=%s",
         request_id,
@@ -1099,12 +1625,29 @@ async def build_answer(
             title="已解析问题",
             detail=describe_parsed_request(parsed),
         )
+    parse_source = parsed.get("parse_source")
+    validated_fallback = (
+        parse_source == "validated_fallback"
+        and parsed.get("model_parser_attempted") is True
+        and parsed.get("parse_confidence") in {LOCAL_PARSE_CONFIDENCE_HIGH, LOCAL_PARSE_CONFIDENCE_MEDIUM}
+        and parsed.get("intent") != "reject"
+    )
+    parser_status = (
+        "api"
+        if parse_source == "llm_parser"
+        else "interface_contract"
+        if parse_source == "interface_contract"
+        else "degraded"
+        if validated_fallback
+        else "fallback"
+    )
     parser_api = {
-        "status": "api" if parsed.get("parse_source") == "llm_parser" else "fallback",
+        "status": parser_status,
         "parse_source": parsed.get("parse_source"),
+        "model_status": parsed.get("model_parser_status"),
         "model": OPENAI_MODEL,
     }
-    if EXTERNAL_API_REQUIRED and parser_api["status"] != "api":
+    if EXTERNAL_API_REQUIRED and parser_api["status"] not in {"api", "degraded", "interface_contract"}:
         unavailable = build_external_api_unavailable_result(
             parsed,
             "Model parser did not return a validated API result. Strict external API mode will not use local parsing as a substitute.",
@@ -1115,14 +1658,39 @@ async def build_answer(
 
     needs_official_snapshot = query_requires_official_snapshot(parsed)
     data_context = {
-        "schedule": "local_schedule_json",
+        "schedule": "disabled_clan_war_feature",
         "cards": "not_used" if not needs_official_snapshot else "not_loaded",
         "decks": "not_used" if not needs_official_snapshot else "not_loaded",
         "rag_documents": "not_used" if not query_needs_rag(parsed) else "not_loaded",
         "snapshot_id": None,
     }
     live_metadata = {"status": "not_required" if not needs_official_snapshot else "disabled"}
-    if SUPERCELL_LIVE_DATA_ENABLED and SUPERCELL_API_TOKEN and (needs_official_snapshot or not EXTERNAL_API_REQUIRED):
+    rolling_manifest = _active_snapshot_group_manifest(DATA_DIR)
+    if rolling_manifest is not None and needs_official_snapshot:
+        rolling_repository = get_structured_repository(app, dataset_scope)
+        rolling_payload = rolling_repository.answer_payload()
+        rolling_provenance = rolling_payload["provenance"]
+        cards_meta_data = rolling_payload["cards_meta"]
+        top_decks_data = rolling_payload["top_decks"]
+        card_deck_stats_data = rolling_payload["card_deck_stats"]
+        data_context.update(
+            {
+                "cards": "rolling_path_of_legend_scope",
+                "decks": "rolling_path_of_legend_scope",
+                "rag_documents": "rolling_path_of_legend_scope" if query_needs_rag(parsed) else "not_used",
+                "snapshot_group_id": rolling_provenance["snapshot_group_id"],
+                "snapshot_id": rolling_provenance["snapshot_id"],
+                "dataset_scope": dataset_scope,
+                "window_started_at": rolling_provenance["window_started_at"],
+                "window_ended_at": rolling_provenance["window_ended_at"],
+                "unique_battles": rolling_provenance["unique_battles"],
+            }
+        )
+        live_metadata = {
+            "status": "rolling_snapshot_group",
+            **rolling_provenance,
+        }
+    elif SUPERCELL_LIVE_DATA_ENABLED and SUPERCELL_API_TOKEN and (needs_official_snapshot or not EXTERNAL_API_REQUIRED):
         if event_sink is not None:
             await event_sink.execution(
                 step_id="snapshot",
@@ -1143,9 +1711,9 @@ async def build_answer(
             card_deck_stats_data = dict(live_snapshot.get("card_deck_stats", {}))
             data_context.update(
                 {
-                    "cards": "official_daily_snapshot",
-                    "decks": "official_daily_snapshot",
-                    "rag_documents": "official_daily_snapshot" if query_needs_rag(parsed) else "not_used",
+                    "cards": "official_weekly_snapshot",
+                    "decks": "official_weekly_snapshot",
+                    "rag_documents": "official_weekly_snapshot" if query_needs_rag(parsed) else "not_used",
                     "snapshot_id": live_snapshot.get("snapshot_id"),
                 }
             )
@@ -1198,16 +1766,26 @@ async def build_answer(
         top_decks_data = []
         card_deck_stats_data = {}
 
-    retriever = ensure_retriever(app)
-    rag_metadata = {
-        "status": getattr(app.state, "rag_status", "not_required"),
-        "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
-        "docs_fingerprint": getattr(app.state, "rag_docs_fingerprint", None),
-    }
+    retriever = ensure_dataset_retriever(app, dataset_scope) if query_needs_rag(parsed) else None
+    if rolling_manifest is not None:
+        rag_metadata = {
+            "status": "ready" if retriever is not None else "not_ready",
+            "snapshot_group_id": rolling_manifest["snapshot_group_id"],
+            "snapshot_id": rolling_manifest["datasets"][dataset_scope]["snapshot_id"],
+            "dataset_scope": dataset_scope,
+            "docs_fingerprint": rolling_manifest.get("rag_docs_fingerprint"),
+        }
+    else:
+        rag_metadata = {
+            "status": getattr(app.state, "rag_status", "not_required"),
+            "snapshot_id": getattr(app.state, "rag_snapshot_id", None),
+            "dataset_scope": dataset_scope,
+            "docs_fingerprint": getattr(app.state, "rag_docs_fingerprint", None),
+        }
     if query_needs_rag(parsed):
         # RAG indexing is preheated on startup and snapshot publication. User
         # requests only read an already activated index and never embed docs.
-        retriever = ensure_retriever(app)
+        retriever = ensure_dataset_retriever(app, dataset_scope)
 
     if event_sink is not None:
         await event_sink.execution(
@@ -1236,12 +1814,18 @@ async def build_answer(
             "request_id": request_id,
             "rag_status": rag_metadata["status"],
             "rag_snapshot_id": rag_metadata["snapshot_id"],
+            "dataset_scope": dataset_scope,
+            "deck_mode": deck_mode,
+            "entity_mode": entity_mode,
             "data_context": data_context,
         },
         event_sink=event_sink,
-        stream_content=parsed.get("intent") != "multi_intent",
+        # Buffer model text until grounding validation and presentation
+        # normalization finish. Raw model Markdown must never leak to the UI.
+        stream_content=False,
     )
     assert isinstance(result, AnswerResult)
+    result.answer = normalize_answer_text(result.answer)
     # Direct deterministic Skills do not invoke text generation. Keep the
     # stream contract explicit rather than leaving a caller to infer it from a
     # missing field; RAG Skills overwrite this with streaming/fallback_chunked.
@@ -1250,6 +1834,7 @@ async def build_answer(
     result.metadata["parser_api"] = parser_api
     result.metadata["rag"] = rag_metadata
     result.metadata["data_context"] = data_context
+    result.metadata["presentation"] = "plain_text_zh_cn_v1"
     if request_id:
         result.metadata["request_id"] = request_id
     if event_sink is not None and event_sink.content_count == 0:
@@ -1349,11 +1934,15 @@ async def lifespan(app: FastAPI):
     app.state.bootstrap_cards_meta_data = load_json_file(CARDS_META_FILE)
     # Repository snapshots are only a non-strict fallback. In strict mode the
     # active answer data starts empty and is populated by a complete official
-    # daily snapshot (or restored official snapshot) only.
+    # weekly snapshot (or restored official snapshot) only.
     app.state.top_decks_data = [] if EXTERNAL_API_REQUIRED else list(app.state.bootstrap_top_decks_data)
     app.state.cards_meta_data = [] if EXTERNAL_API_REQUIRED else list(app.state.bootstrap_cards_meta_data)
     app.state.card_deck_stats_data = {}
     app.state.retriever = None
+    app.state.rolling_retriever = None
+    app.state.rolling_retriever_group_id = None
+    app.state.rolling_retriever_lock = threading.Lock()
+    app.state.structured_group_repositories = {}
     app.state.rag_snapshot_id = None
     app.state.rag_docs_fingerprint = None
     app.state.rag_document_validation = None
@@ -1389,7 +1978,10 @@ async def lifespan(app: FastAPI):
         restore_published_snapshot(app)
         if getattr(app.state, "live_snapshot", None) is not None:
             app.state.rag_preheat_task = asyncio.create_task(preheat_retriever_in_background(app))
-        app.state.live_refresh_task = asyncio.create_task(follow_published_snapshot_loop(app))
+        if SNAPSHOT_AUTO_FOLLOW_ENABLED:
+            app.state.live_refresh_task = asyncio.create_task(follow_published_snapshot_loop(app))
+        else:
+            logger.info("snapshot auto-follow disabled; API remains pinned until restart")
     elif SUPERCELL_LIVE_DATA_ENABLED and SUPERCELL_API_TOKEN:
         app.state.rag_status = "not_ready"
         restore_published_snapshot(app)
@@ -1417,6 +2009,9 @@ async def lifespan(app: FastAPI):
                 await rag_task
             except asyncio.CancelledError:
                 pass
+        rolling_retriever = getattr(app.state, "rolling_retriever", None)
+        if rolling_retriever is not None:
+            rolling_retriever.close()
         quota = getattr(app.state, "process_quota", None)
         if quota is not None:
             await quota.close()
@@ -1460,6 +2055,11 @@ async def runtime_protection_middleware(request: Request, call_next):
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=MAX_REQUEST_BODY_BYTES)
 
 
+@app.exception_handler(StructuredQueryError)
+async def structured_query_error_handler(_request: Request, exc: StructuredQueryError):
+    return JSONResponse(status_code=exc.status_code, content=exc.response())
+
+
 @app.get("/health")
 async def health():
     quota = getattr(app.state, "process_quota", None)
@@ -1474,6 +2074,7 @@ async def health():
             and bool(SUPERCELL_API_TOKEN)
         ),
         "official_collection_enabled": RUNTIME_ROLE in {"all", "collector"},
+        "snapshot_auto_follow_enabled": RUNTIME_ROLE == "api" and SNAPSHOT_AUTO_FOLLOW_ENABLED,
         "external_api_required": EXTERNAL_API_REQUIRED,
         "model_api_configured": bool(os.getenv("OPENAI_API_KEY")),
         "live_sample_target_battles": get_live_sample_target(app),
@@ -1518,6 +2119,92 @@ async def get_live_sample_settings_endpoint():
 @app.get("/snapshot/status")
 async def get_snapshot_status_endpoint():
     return get_live_snapshot_status(app)
+
+
+@app.get("/api/datasets")
+async def structured_datasets():
+    return get_dataset_catalog(app)
+
+
+@app.get("/api/cards/catalog")
+async def structured_card_catalog(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return get_structured_repository(app, dataset_scope).card_catalog()
+
+
+@app.get("/api/cards/rankings")
+async def structured_card_rankings(
+    dataset_scope: str = DEFAULT_DATASET_SCOPE,
+    sort_by: str = "usage_rate",
+):
+    if sort_by not in CARD_RANKING_METRICS:
+        raise StructuredQueryError(
+            "INVALID_CARD_RANKING_METRIC",
+            "sort_by must be usage_rate, clean_win_rate, or rating.",
+            details={"sort_by": sort_by, "allowed": list(CARD_RANKING_METRICS)},
+        )
+    return get_structured_repository(app, dataset_scope).card_rankings(sort_by)
+
+
+@app.get("/api/cards/{card_id}/stats")
+async def structured_card_stats(card_id: str, dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return get_structured_repository(app, dataset_scope).card_stats(card_id)
+
+
+@app.get("/api/entities/catalog")
+async def structured_entity_catalog(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return get_structured_repository(app, dataset_scope).entity_catalog()
+
+
+@app.get("/api/entities/rankings")
+async def structured_entity_rankings(
+    dataset_scope: str = DEFAULT_DATASET_SCOPE,
+    sort_by: str = "usage_rate",
+):
+    return get_structured_repository(app, dataset_scope).entity_rankings(sort_by)
+
+
+@app.get("/api/entities/{entity_id}/stats")
+async def structured_entity_stats(entity_id: str, dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return get_structured_repository(app, dataset_scope).entity_stats(entity_id)
+
+
+@app.get("/api/loadouts/catalog")
+async def structured_loadout_catalog(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return get_structured_repository(app, dataset_scope).loadout_catalog()
+
+
+@app.post("/api/cards/compare")
+async def structured_card_compare(payload: CardCompareRequest):
+    return get_structured_repository(app, payload.dataset_scope).compare_cards(payload.card_ids)
+
+
+@app.post("/api/entities/compare")
+async def structured_entity_compare(payload: EntityCompareRequest):
+    return get_structured_repository(app, payload.dataset_scope).compare_entities(payload.entity_ids)
+
+
+@app.post("/api/decks/profile")
+async def structured_deck_profile(payload: DeckProfileRequest):
+    repository = get_structured_repository(app, payload.dataset_scope)
+    if payload.deck_mode == "full_loadout":
+        return repository.full_loadout_profile(_loadout_request_payload(payload.loadout))
+    return repository.deck_profile(payload.cards or [])
+
+
+@app.post("/api/decks/matchup")
+async def structured_deck_matchup(payload: DeckMatchupRequest):
+    repository = get_structured_repository(app, payload.dataset_scope)
+    if payload.deck_mode == "full_loadout":
+        return repository.full_loadout_matchup(
+            _loadout_request_payload(payload.loadout_a),
+            _loadout_request_payload(payload.loadout_b),
+        )
+    return repository.deck_matchup(payload.deck_a or [], payload.deck_b or [])
+
+
+@app.get("/api/meta/archetypes")
+async def structured_archetypes(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return get_structured_repository(app, dataset_scope).archetypes()
 
 
 @app.post("/feedback")
@@ -1567,6 +2254,15 @@ async def process(request: Request, payload: ProcessRequest | None = None):
     request_object = request if isinstance(request, Request) else None
     if payload is None:
         payload = request
+    dataset_scope = _validate_dataset_scope(payload.dataset_scope)
+    active_group = _active_snapshot_group_manifest(DATA_DIR)
+    if active_group is None and dataset_scope != DEFAULT_DATASET_SCOPE:
+        raise StructuredQueryError(
+            "DATASET_SCOPE_NOT_READY",
+            "The requested rolling dataset scope has not been published yet.",
+            status_code=503,
+            details={"dataset_scope": dataset_scope},
+        )
     user_text = get_user_text(payload)
     if not user_text:
         raise HTTPException(status_code=422, detail="a non-empty user question is required")
@@ -1663,8 +2359,34 @@ async def process(request: Request, payload: ProcessRequest | None = None):
             }
         )
 
-        event_sink = RuntimeEventEmitter(request_id=request_id)
-        answer_task = asyncio.create_task(build_answer(user_text, app, event_sink=event_sink, request_id=request_id))
+        event_sink = RuntimeEventEmitter(
+            request_id=request_id,
+            question=user_text,
+            attributes={
+                "snapshot_group_id": active_group.get("snapshot_group_id") if active_group else None,
+                "snapshot_id": (
+                    active_group.get("datasets", {}).get(dataset_scope, {}).get("snapshot_id")
+                    if active_group else None
+                ),
+                "dataset_scope": dataset_scope,
+                "deck_mode": payload.deck_mode,
+                "entity_mode": payload.entity_mode,
+                "model": OPENAI_MODEL,
+            },
+        )
+        answer_kwargs = {
+            "event_sink": event_sink,
+            "request_id": request_id,
+        }
+        if dataset_scope != DEFAULT_DATASET_SCOPE:
+            answer_kwargs["dataset_scope"] = dataset_scope
+        if payload.deck_mode != "base8":
+            answer_kwargs["deck_mode"] = payload.deck_mode
+        if payload.entity_mode != "base8":
+            answer_kwargs["entity_mode"] = payload.entity_mode
+        if payload.intent_hint is not None:
+            answer_kwargs["intent_hint"] = payload.intent_hint
+        answer_task = asyncio.create_task(build_answer(user_text, app, **answer_kwargs))
         answer_task_holder.append(answer_task)
         stages = [
             ("route", "正在确定结构化查询或 RAG 路径..."),
@@ -1697,7 +2419,12 @@ async def process(request: Request, payload: ProcessRequest | None = None):
         try:
             answer_result = answer_task.result()
         except Exception as exc:
-            logger.exception("answer generation failed")
+            logger.error(
+                "answer generation failed type=%s detail=%s",
+                type(exc).__name__,
+                str(exc)[:500],
+                exc_info=True,
+            )
             yield encode(
                 {
                     "object": "error",

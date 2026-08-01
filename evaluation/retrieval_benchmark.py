@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from hybrid_retriever import HybridRetriever, load_docs
+from evaluation.scorecard import attach_scorecard
 from retrieval_postprocess import rerank_results
 
 
@@ -374,6 +375,7 @@ def main() -> None:
     attach_corpus_identity(report, retriever)
     report["case_source"] = "active official snapshot evidence with template-generated silver labels"
     report["index_path"] = str(index_path)
+    attach_scorecard(report, source="retrieval")
     Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({name: item["metrics"] for name, item in report["methods"].items()}, ensure_ascii=False))
 

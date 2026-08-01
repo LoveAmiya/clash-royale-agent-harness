@@ -6,14 +6,18 @@
 
 import json
 import uuid
+from typing import Literal
+from urllib.parse import quote
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app_config import BACKEND_URL, WEB_HOST, WEB_PORT
+from rolling_corpus import DEFAULT_DATASET_SCOPE
+from web_ui_template import HTML_PAGE as MODERN_HTML_PAGE
 
 
 app = FastAPI(title="CR Agent Web UI")
@@ -24,6 +28,7 @@ READY_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/ready"
 MODEL_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/model/status"
 METRICS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/metrics"
 FEEDBACK_STATS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/feedback/stats"
+STRUCTURED_API_BASE_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/api"
 
 
 HTML_PAGE = """
@@ -32,7 +37,7 @@ HTML_PAGE = """
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>皇室战争战队赛统筹 Agent</title>
+  <title>皇室战争官方数据问答</title>
   <style>
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -419,7 +424,7 @@ HTML_PAGE = """
 </head>
 <body>
   <div class="container">
-    <div class="title">皇室战争战队赛统筹 Agent</div>
+    <div class="title">皇室战争官方数据问答</div>
     <div class="subtitle">网页版客户端。调用你本地运行的 <code>runtime_multi.py</code> 服务。</div>
 
     <section class="snapshot-panel" aria-live="polite" aria-label="官方数据快照状态">
@@ -477,13 +482,13 @@ HTML_PAGE = """
     </section>
 
     <div class="composer">
-      <textarea id="inputBox" placeholder="输入问题，例如：\n- 我们第五轮打谁\n- 使用率第三的卡牌是什么\n- 现在热门卡组有哪些"></textarea>
+      <textarea id="inputBox" placeholder="输入问题，例如：\n- 使用率第三的卡牌是什么\n- 比较火球和毒药的胜率\n- 现在的环境以哪些体系为主"></textarea>
 
       <div class="actions">
         <label id="sampleControl" class="sample-control" for="sampleTarget" hidden>
           实时样本
           <select id="sampleTarget" aria-label="Supercell 实时采样场次">
-            <option value="20000" selected>20000 场</option>
+            <option value="200000" selected>200000 场</option>
           </select>
         </label>
         <button id="sendBtn">发送</button>
@@ -691,7 +696,7 @@ HTML_PAGE = """
       );
       appendFlow(dataLineageViz, [
         ["Supercell battle logs", String(collection.raw_battle_records || 0) + " raw / " + String(snapshot.sample_battles || 0) + " usable"],
-        ["official_daily_snapshot", (snapshot.snapshot_id || "无") + " | " + formatSnapshotTime(snapshot.fetched_at)],
+        ["official_weekly_snapshot", (snapshot.snapshot_id || "无") + " | " + formatSnapshotTime(snapshot.fetched_at)],
         ["结构化聚合", "cards_meta / top_decks / card_deck_stats 均来自当前快照"],
         ["RAG evidence docs", String(quality.document_count || Object.values(sourceCounts).reduce((a, b) => a + numberValue(b), 0)) + " docs"],
         ["active retriever", aligned ? "snapshot_id 与 docs_fingerprint 匹配" : "等待新索引完成或回退旧索引"]
@@ -784,7 +789,7 @@ HTML_PAGE = """
         ["回答耗时 P95", runtime.sample_size ? `${runtime.process_p95_ms || 0} ms` : "暂无样本"],
         ["来源", snapshot.source || "Supercell Official API"],
         ["快照状态", snapshotStateLabel(snapshot.status)],
-        ["有效对局", `${snapshot.sample_battles || 0}/${snapshot.target_battles || 20000}`],
+        ["有效对局", `${snapshot.sample_battles || 0}/${snapshot.target_battles || 200000}`],
         ["采集时间", formatSnapshotTime(snapshot.fetched_at)],
         ["候选排行榜", `前 ${leaderboard.candidate_limit || "-"} 名`],
         ["实际扫描排名", scanRange],
@@ -1121,12 +1126,20 @@ HTML_PAGE = """
 </html>
 """
 
+# Keep the prior template in source history while the web server presents the
+# isolated multi-view workbench. Backend proxy routes below remain unchanged.
+HTML_PAGE = MODERN_HTML_PAGE
+
 
 class ChatRequest(BaseModel):
     """浏览器聊天表单提交前经过校验的输入。"""
     message: str
     session_id: str | None = None
     user_id: str | None = None
+    intent_hint: Literal["meta_analysis_query"] | None = None
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+    deck_mode: Literal["base8", "full_loadout"] = "base8"
+    entity_mode: Literal["base8", "loadout_entity"] = "base8"
 
 
 class LiveSampleSettingsRequest(BaseModel):
@@ -1137,6 +1150,32 @@ class FeedbackProxyRequest(BaseModel):
     request_id: str
     rating: str
     correction: str | None = None
+
+
+class CardCompareProxyRequest(BaseModel):
+    card_ids: list[str]
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+
+
+class EntityCompareProxyRequest(BaseModel):
+    entity_ids: list[str]
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+
+
+class DeckProfileProxyRequest(BaseModel):
+    cards: list[str] | None = None
+    deck_mode: Literal["base8", "full_loadout"] = "base8"
+    loadout: dict | None = None
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
+
+
+class DeckMatchupProxyRequest(BaseModel):
+    deck_a: list[str] | None = None
+    deck_b: list[str] | None = None
+    deck_mode: Literal["base8", "full_loadout"] = "base8"
+    loadout_a: dict | None = None
+    loadout_b: dict | None = None
+    dataset_scope: str = DEFAULT_DATASET_SCOPE
 
 
 def sse_data(payload: dict) -> str:
@@ -1188,6 +1227,36 @@ async def proxy_backend_text(url: str, *, unavailable: str, failed: str) -> str:
     if response.status_code >= 400:
         raise HTTPException(status_code=response.status_code, detail=response.text or failed)
     return response.text
+
+
+async def proxy_structured_api(
+    method: str,
+    path: str,
+    payload: dict | None = None,
+    dataset_scope: str | None = None,
+    query_params: dict | None = None,
+) -> JSONResponse:
+    """Preserve backend structured status codes and error envelopes verbatim."""
+    params = dict(query_params or {})
+    if dataset_scope is not None:
+        params["dataset_scope"] = dataset_scope
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.request(
+                method,
+                f"{STRUCTURED_API_BASE_URL}{path}",
+                json=payload,
+                params=params or None,
+            )
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail="backend structured statistics service is unavailable") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="backend structured statistics request failed") from exc
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"error": {"code": "INVALID_BACKEND_RESPONSE", "message": "Backend returned invalid JSON.", "details": {}}}
+    return JSONResponse(status_code=response.status_code, content=body)
 
 
 @app.get("/ready")
@@ -1281,6 +1350,91 @@ async def get_snapshot_status():
     return body
 
 
+@app.get("/api/datasets")
+async def structured_datasets_proxy():
+    return await proxy_structured_api("GET", "/datasets")
+
+
+@app.get("/api/cards/catalog")
+async def structured_card_catalog_proxy(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return await proxy_structured_api("GET", "/cards/catalog", dataset_scope=dataset_scope)
+
+
+@app.get("/api/cards/rankings")
+async def structured_card_rankings_proxy(
+    dataset_scope: str = DEFAULT_DATASET_SCOPE,
+    sort_by: str = "usage_rate",
+):
+    return await proxy_structured_api(
+        "GET",
+        "/cards/rankings",
+        dataset_scope=dataset_scope,
+        query_params={"sort_by": sort_by},
+    )
+
+
+@app.get("/api/cards/{card_id}/stats")
+async def structured_card_stats_proxy(card_id: str, dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return await proxy_structured_api(
+        "GET", f"/cards/{quote(card_id, safe='')}/stats", dataset_scope=dataset_scope
+    )
+
+
+@app.get("/api/entities/catalog")
+async def structured_entity_catalog_proxy(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return await proxy_structured_api("GET", "/entities/catalog", dataset_scope=dataset_scope)
+
+
+@app.get("/api/entities/rankings")
+async def structured_entity_rankings_proxy(
+    dataset_scope: str = DEFAULT_DATASET_SCOPE,
+    sort_by: str = "usage_rate",
+):
+    return await proxy_structured_api(
+        "GET",
+        "/entities/rankings",
+        dataset_scope=dataset_scope,
+        query_params={"sort_by": sort_by},
+    )
+
+
+@app.get("/api/entities/{entity_id}/stats")
+async def structured_entity_stats_proxy(entity_id: str, dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return await proxy_structured_api(
+        "GET", f"/entities/{quote(entity_id, safe='')}/stats", dataset_scope=dataset_scope
+    )
+
+
+@app.get("/api/loadouts/catalog")
+async def structured_loadout_catalog_proxy(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return await proxy_structured_api("GET", "/loadouts/catalog", dataset_scope=dataset_scope)
+
+
+@app.post("/api/cards/compare")
+async def structured_card_compare_proxy(request: CardCompareProxyRequest):
+    return await proxy_structured_api("POST", "/cards/compare", request.model_dump())
+
+
+@app.post("/api/entities/compare")
+async def structured_entity_compare_proxy(request: EntityCompareProxyRequest):
+    return await proxy_structured_api("POST", "/entities/compare", request.model_dump())
+
+
+@app.post("/api/decks/profile")
+async def structured_deck_profile_proxy(request: DeckProfileProxyRequest):
+    return await proxy_structured_api("POST", "/decks/profile", request.model_dump())
+
+
+@app.post("/api/decks/matchup")
+async def structured_deck_matchup_proxy(request: DeckMatchupProxyRequest):
+    return await proxy_structured_api("POST", "/decks/matchup", request.model_dump())
+
+
+@app.get("/api/meta/archetypes")
+async def structured_archetypes_proxy(dataset_scope: str = DEFAULT_DATASET_SCOPE):
+    return await proxy_structured_api("GET", "/meta/archetypes", dataset_scope=dataset_scope)
+
+
 @app.post("/feedback")
 async def submit_feedback(request: FeedbackProxyRequest):
     try:
@@ -1308,6 +1462,10 @@ async def chat(req: ChatRequest):
     backend_payload = {
         "session_id": session_id,
         "user_id": user_id,
+        "intent_hint": req.intent_hint,
+        "dataset_scope": req.dataset_scope,
+        "deck_mode": req.deck_mode,
+        "entity_mode": req.entity_mode,
         "input": [
             {
                 "role": "user",

@@ -14,7 +14,7 @@ REQUIRED_CATEGORIES = {
     "card_comparison_english",
     "card_rank_lookup_english",
     "deck_ranking_english",
-    "schedule_direct_english",
+    "removed_clan_war_feature",
     "out_of_domain_rejection",
     "rag_route_optional",
     "multi_intent_decomposition",

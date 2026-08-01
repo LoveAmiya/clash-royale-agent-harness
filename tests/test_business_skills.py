@@ -12,8 +12,10 @@ from skills.card_compare_skill import CardCompareSkill
 from skills.card_rank_lookup_skill import CardRankLookupSkill
 from skills.card_skill import CardMetaSkill
 from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
+from skills.rag_skill import RAGEvidenceSkill
 from skills.registry import build_default_registry
 from skills.schedule_summary_skill import ScheduleSummarySkill
+from skills.unsupported_clan_war_skill import UnsupportedClanWarSkill
 
 
 DATA_DIR = Path("data")
@@ -83,6 +85,15 @@ class BusinessSkillTests(unittest.TestCase):
 
         self.assertEqual(parsed["intent"], "card_query")
         self.assertIsInstance(selected_skill, CardMetaSkill)
+
+    def test_explicit_card_form_routes_to_rag_entity_evidence(self):
+        registry = build_default_registry()
+        parsed = fallback_parse_query("觉醒骑士的使用率是多少", self.card_data)
+
+        selected_skill = registry.resolve(parsed)
+
+        self.assertEqual(parsed["entity_mode"], "loadout_entity")
+        self.assertIsInstance(selected_skill, RAGEvidenceSkill)
 
     def test_card_compare_skill_returns_controlled_failure_for_single_recognized_card(self):
         parsed = {
@@ -171,7 +182,7 @@ class BusinessSkillTests(unittest.TestCase):
 
         selected_skill = registry.resolve(parsed)
 
-        self.assertIsInstance(selected_skill, ScheduleSummarySkill)
+        self.assertIsInstance(selected_skill, UnsupportedClanWarSkill)
 
     def test_summary_of_environment_is_not_parsed_as_schedule_summary_query(self):
         parsed = fallback_parse_query("总结一下环境", self.card_data)
@@ -183,10 +194,15 @@ class BusinessSkillTests(unittest.TestCase):
 
         self.assertEqual(parsed["intent"], "match_preparation_query")
 
-    def test_match_preparation_resolves_to_evidence_synthesis_skill(self):
+    def test_match_preparation_resolves_to_removed_feature_boundary(self):
         registry = build_default_registry()
         parsed = fallback_parse_query("帮我推荐几套可练的卡组", self.card_data)
 
         selected_skill = registry.resolve(parsed)
 
-        self.assertIsInstance(selected_skill, EvidenceSynthesisSkill)
+        self.assertIsInstance(selected_skill, UnsupportedClanWarSkill)
+        context = self.build_context(parsed)
+        context.metadata = {}
+        answer = selected_skill.run(context)
+        self.assertEqual(context.metadata["error_code"], "UNSUPPORTED_CLAN_WAR_FEATURE")
+        self.assertIn("已从本项目移除", answer)

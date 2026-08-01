@@ -1,4 +1,6 @@
+import asyncio
 import json
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -38,6 +40,20 @@ class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["subqueries"][0]["card_name"], "Electro Giant")
         self.assertEqual(parsed["subqueries"][0]["metrics"], ["usage_rate", "win_rate"])
         self.assertEqual(parsed["subqueries"][1]["intent"], "meta_analysis_query")
+
+    def test_execution_description_names_card_comparison_instead_of_marking_it_unsupported(self):
+        description = runtime_multi.describe_parsed_request(
+            {
+                "intent": "card_compare_query",
+                "card_names": ["Fireball", "Poison"],
+                "compare_metric": "win_rate",
+            }
+        )
+
+        self.assertIn("Fireball", description)
+        self.assertIn("Poison", description)
+        self.assertIn("胜率比较", description)
+        self.assertNotIn("未支持", description)
 
     def test_english_compound_question_deduplicates_card_metrics_and_routes_meta_to_synthesis(self):
         parsed = fallback_parse_multi_intent(
@@ -157,6 +173,43 @@ class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MultiIntentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_subqueries_execute_concurrently_and_keep_question_order(self):
+        parsed = {
+            "intent": "multi_intent",
+            "subqueries": [
+                {"id": "q1", "intent": "card_query"},
+                {"id": "q2", "intent": "meta_analysis_query"},
+                {"id": "q3", "intent": "deck_query"},
+            ],
+        }
+        running = 0
+        peak_running = 0
+
+        async def execute(**kwargs):
+            nonlocal running, peak_running
+            running += 1
+            peak_running = max(peak_running, running)
+            await asyncio.sleep(0.05)
+            running -= 1
+            subquery = kwargs["parsed"]
+            return {
+                "id": subquery["id"], "title": subquery["id"], "parsed": subquery,
+                "plan": None, "selected_skill": "test", "mode": "direct", "status": "success",
+                "answer": subquery["id"], "metadata": {}, "error": None, "latency_ms": 50,
+            }
+
+        started = time.perf_counter()
+        with patch("query_answering.execute_subquery", side_effect=execute):
+            result = await answer_query(
+                user_text="compound", parsed=parsed, schedule_data=[], top_decks_data=[],
+                cards_meta_data=[], retriever=None, api_key="test-key", include_metadata=True,
+            )
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(peak_running, 3)
+        self.assertLess(elapsed, 0.12)
+        self.assertEqual([item["id"] for item in result.sub_results], ["q1", "q2", "q3"])
+
     async def test_top_level_model_stream_reflects_rag_subquery_fallback(self):
         parsed = {
             "intent": "multi_intent",

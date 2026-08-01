@@ -90,12 +90,13 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(normalized["card_name"], "Electro Giant")
         self.assertEqual(normalized["top_n"], 5)
 
-    async def test_high_confidence_local_parse_skips_llm_fallback(self):
+    async def test_high_confidence_local_parse_is_validated_fallback_when_model_call_fails(self):
         with patch("runtime_multi.generate_model_text") as build_parser_agent:
             parsed = await parse_user_query("我们第五轮打谁", self.card_data, api_key="test-key")
 
-        self.assertEqual(parsed["parse_source"], "local_rule")
+        self.assertEqual(parsed["parse_source"], "validated_fallback")
         self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_HIGH)
+        self.assertEqual(parsed["model_parser_status"], "error")
         build_parser_agent.assert_called_once()
 
     async def test_medium_confidence_local_parse_uses_local_when_no_api_key(self):
@@ -124,17 +125,19 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(parsed["intent"], "card_query")
         self.assertEqual(parsed["card_name"], "Mega Knight Evolution")
-        self.assertEqual(parsed["parse_source"], "local_rule")
-        self.assertIn("rejected a high-confidence", parsed["parse_reason"])
+        self.assertEqual(parsed["parse_source"], "llm_parser")
+        self.assertEqual(parsed["model_parser_status"], "validated_reconciled")
+        self.assertIn("reconciled", parsed["parse_reason"])
 
     async def test_llm_reject_keeps_current_mainstream_decks_on_rag_route(self):
         with patch("runtime_multi.generate_model_text", AsyncMock(return_value='{"intent":"reject"}')):
             parsed = await parse_user_query("当前主流卡组有哪些？", self.card_data, api_key="test-key")
 
         self.assertEqual(parsed["intent"], "meta_analysis_query")
-        self.assertEqual(parsed["parse_source"], "local_rule")
+        self.assertEqual(parsed["parse_source"], "llm_parser")
+        self.assertEqual(parsed["model_parser_status"], "validated_reconciled")
         self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_HIGH)
-        self.assertIn("rejected a high-confidence", parsed["parse_reason"])
+        self.assertIn("reconciled", parsed["parse_reason"])
 
     async def test_llm_non_json_response_keeps_local_parse_with_reason(self):
         fake_agent = AsyncMock(return_value="not json")
@@ -154,3 +157,15 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(parsed["intent"], "reject")
         self.assertIn("llm parser failed", parsed["parse_reason"])
+
+    async def test_llm_timeout_marks_high_confidence_local_parse_as_validated_fallback(self):
+        fake_agent = AsyncMock(side_effect=TimeoutError())
+
+        with patch("runtime_multi.generate_model_text", fake_agent):
+            parsed = await parse_user_query("当前主流卡组有哪些？", self.card_data, api_key="test-key")
+
+        self.assertEqual(parsed["intent"], "meta_analysis_query")
+        self.assertEqual(parsed["parse_source"], "validated_fallback")
+        self.assertEqual(parsed["model_parser_status"], "timeout")
+        self.assertTrue(parsed["model_parser_attempted"])
+        self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_HIGH)

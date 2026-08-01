@@ -1,0 +1,1068 @@
+{
+  "cards": {
+    "Archer Queen": {
+      "aliases": [
+        "aq",
+        "弓皇",
+        "女王",
+        "archerqueen"
+      ],
+      "display_name": "弓箭女皇"
+    },
+    "Archers": {
+      "aliases": [
+        "弓手",
+        "弓箭妹妹",
+        "archers"
+      ],
+      "display_name": "弓箭手"
+    },
+    "Arrows": {
+      "aliases": [
+        "箭雨",
+        "arrows",
+        "万箭",
+        "箭",
+        "arrow"
+      ],
+      "display_name": "万箭齐发"
+    },
+    "Baby Dragon": {
+      "aliases": [
+        "宝宝龙",
+        "绿龙",
+        "青龙",
+        "龙宝",
+        "baby dragon",
+        "小飞龙",
+        "babydragon"
+      ],
+      "display_name": "飞龙宝宝"
+    },
+    "Balloon": {
+      "aliases": [
+        "气球",
+        "balloon",
+        "气球哥",
+        "气球炮",
+        "looner"
+      ],
+      "display_name": "气球兵"
+    },
+    "Bandit": {
+      "aliases": [
+        "刺客",
+        "幻刺",
+        "bandit"
+      ],
+      "display_name": "幻影刺客"
+    },
+    "Barbarian Barrel": {
+      "aliases": [
+        "蛮桶",
+        "滚桶",
+        "barbarian barrel",
+        "野桶",
+        "barbbarrel"
+      ],
+      "display_name": "野蛮人滚桶"
+    },
+    "Barbarian Hut": {
+      "aliases": [
+        "蛮屋",
+        "蛮人房",
+        "barbhut"
+      ],
+      "display_name": "野蛮人小屋"
+    },
+    "Barbarians": {
+      "aliases": [
+        "蛮人",
+        "蛮子",
+        "barbs"
+      ],
+      "display_name": "野蛮人"
+    },
+    "Bats": {
+      "aliases": [
+        "小蝙蝠",
+        "蝠蝙",
+        "bats"
+      ],
+      "display_name": "蝙蝠"
+    },
+    "Battle Healer": {
+      "aliases": [
+        "战斗治疗师",
+        "治疗师",
+        "奶妈",
+        "奶治",
+        "healer"
+      ],
+      "display_name": "战斗天使"
+    },
+    "Battle Ram": {
+      "aliases": [
+        "攻城槌",
+        "攻城锤",
+        "蛮锤",
+        "battleram"
+      ],
+      "display_name": "野蛮人攻城锤"
+    },
+    "Berserker": {
+      "aliases": [
+        "狂战",
+        "berserk"
+      ],
+      "display_name": "狂战士"
+    },
+    "Bomb Tower": {
+      "aliases": [
+        "炸塔",
+        "炸弹防御塔",
+        "bombtower"
+      ],
+      "display_name": "炸弹塔"
+    },
+    "Bomber": {
+      "aliases": [
+        "炸弹人",
+        "投弹兵",
+        "bomber"
+      ],
+      "display_name": "炸弹兵"
+    },
+    "Boss Bandit": {
+      "aliases": [
+        "首领幻影刺客",
+        "首领刺客",
+        "首领幻刺",
+        "bossbandit"
+      ],
+      "display_name": "刺客头领"
+    },
+    "Bowler": {
+      "aliases": [
+        "保龄球手",
+        "滚石人",
+        "推球哥",
+        "bowler"
+      ],
+      "display_name": "巨石投手"
+    },
+    "Cannon": {
+      "aliases": [
+        "小炮",
+        "加农",
+        "cannon"
+      ],
+      "display_name": "加农炮"
+    },
+    "Cannon Cart": {
+      "aliases": [
+        "炮车",
+        "加农炮车",
+        "cannoncart"
+      ],
+      "display_name": "加农炮战车"
+    },
+    "Cannoneer": {
+      "aliases": [
+        "炮手",
+        "小炮手",
+        "cannoneer"
+      ],
+      "display_name": "加农炮手"
+    },
+    "Clone": {
+      "aliases": [
+        "克隆",
+        "分身",
+        "克隆术",
+        "clone"
+      ],
+      "display_name": "克隆法术"
+    },
+    "Dagger Duchess": {
+      "aliases": [
+        "飞刀塔",
+        "刀女王",
+        "daggerduchess"
+      ],
+      "display_name": "飞刀女王"
+    },
+    "Dark Prince": {
+      "aliases": [
+        "黑王",
+        "dark prince",
+        "黑王子",
+        "黑骑",
+        "darkprince"
+      ],
+      "display_name": "黑暗王子"
+    },
+    "Dart Goblin": {
+      "aliases": [
+        "吹箭",
+        "吹箭哥",
+        "dartgoblin"
+      ],
+      "display_name": "吹箭哥布林"
+    },
+    "Earthquake": {
+      "aliases": [
+        "地震",
+        "地震术",
+        "大地震",
+        "eq"
+      ],
+      "display_name": "地震法术"
+    },
+    "Electro Dragon": {
+      "aliases": [
+        "电龙",
+        "闪电龙",
+        "edrag"
+      ],
+      "display_name": "雷电飞龙"
+    },
+    "Electro Giant": {
+      "aliases": [
+        "电巨",
+        "e-giant",
+        "egiant",
+        "electro giant",
+        "雷巨"
+      ],
+      "display_name": "雷电巨人"
+    },
+    "Electro Spirit": {
+      "aliases": [
+        "小电精灵",
+        "电精灵",
+        "electro spirit",
+        "电灵",
+        "电精",
+        "espirit"
+      ],
+      "display_name": "雷电精灵"
+    },
+    "Electro Wizard": {
+      "aliases": [
+        "电法师",
+        "电法",
+        "ewiz",
+        "electro wizard"
+      ],
+      "display_name": "闪电法师"
+    },
+    "Elite Barbarians": {
+      "aliases": [
+        "蛮精",
+        "精锐蛮",
+        "ebarbs"
+      ],
+      "display_name": "野蛮人精锐"
+    },
+    "Elixir Collector": {
+      "aliases": [
+        "圣水机",
+        "采集器",
+        "pump"
+      ],
+      "display_name": "圣水收集器"
+    },
+    "Elixir Golem": {
+      "aliases": [
+        "圣水石人",
+        "egolem"
+      ],
+      "display_name": "圣水戈仑"
+    },
+    "Executioner": {
+      "aliases": [
+        "刃子手",
+        "executioner",
+        "刽子手",
+        "刃子",
+        "飞斧",
+        "exe"
+      ],
+      "display_name": "飞斧屠夫"
+    },
+    "Fire Spirit": {
+      "aliases": [
+        "火精灵",
+        "火灵",
+        "小火人",
+        "fispirit"
+      ],
+      "display_name": "烈焰精灵"
+    },
+    "Fireball": {
+      "aliases": [
+        "fb",
+        "fireball",
+        "大火球"
+      ],
+      "display_name": "火球"
+    },
+    "Firecracker": {
+      "aliases": [
+        "烟花",
+        "firecracker",
+        "炮姐",
+        "fc"
+      ],
+      "display_name": "烟花炮手"
+    },
+    "Fisherman": {
+      "aliases": [
+        "老渔",
+        "钩子",
+        "fisherman"
+      ],
+      "display_name": "渔夫"
+    },
+    "Flying Machine": {
+      "aliases": [
+        "飞机",
+        "飞行机器",
+        "flyingmachine"
+      ],
+      "display_name": "飞行器"
+    },
+    "Freeze": {
+      "aliases": [
+        "冰冻",
+        "freeze",
+        "冰冻术",
+        "大冰"
+      ],
+      "display_name": "冰冻法术"
+    },
+    "Furnace": {
+      "aliases": [
+        "炉子",
+        "烈炉",
+        "furnace"
+      ],
+      "display_name": "烈焰熔炉"
+    },
+    "Giant": {
+      "aliases": [
+        "大个子",
+        "大巨人",
+        "giant"
+      ],
+      "display_name": "巨人"
+    },
+    "Giant Skeleton": {
+      "aliases": [
+        "巨人骷髅",
+        "巨型骷髅",
+        "大骷髅",
+        "giantskeleton"
+      ],
+      "display_name": "骷髅巨人"
+    },
+    "Giant Snowball": {
+      "aliases": [
+        "巨型雪球",
+        "雪球",
+        "snowball"
+      ],
+      "display_name": "大雪球"
+    },
+    "Goblin Barrel": {
+      "aliases": [
+        "飞桶",
+        "全家桶",
+        "gbarrel"
+      ],
+      "display_name": "哥布林飞桶"
+    },
+    "Goblin Cage": {
+      "aliases": [
+        "goblin cage",
+        "哥笼",
+        "牢笼",
+        "gcage"
+      ],
+      "display_name": "哥布林牢笼"
+    },
+    "Goblin Curse": {
+      "aliases": [
+        "诅咒",
+        "gcurse"
+      ],
+      "display_name": "哥布林诅咒"
+    },
+    "Goblin Demolisher": {
+      "aliases": [
+        "爆破哥布林",
+        "爆破手",
+        "demolisher"
+      ],
+      "display_name": "哥布林爆破手"
+    },
+    "Goblin Drill": {
+      "aliases": [
+        "钻机",
+        "goblin drill",
+        "哥钻",
+        "gdrill"
+      ],
+      "display_name": "哥布林钻机"
+    },
+    "Goblin Gang": {
+      "aliases": [
+        "哥布林团",
+        "哥布林帮",
+        "ggang"
+      ],
+      "display_name": "哥布林团伙"
+    },
+    "Goblin Giant": {
+      "aliases": [
+        "哥巨",
+        "哥布林大个",
+        "ggiant"
+      ],
+      "display_name": "哥布林巨人"
+    },
+    "Goblin Hut": {
+      "aliases": [
+        "哥屋",
+        "哥布林房",
+        "ghut"
+      ],
+      "display_name": "哥布林小屋"
+    },
+    "Goblin Machine": {
+      "aliases": [
+        "哥机",
+        "gmachine"
+      ],
+      "display_name": "哥布林机甲"
+    },
+    "Goblins": {
+      "aliases": [
+        "小哥布林",
+        "小哥",
+        "gobs"
+      ],
+      "display_name": "哥布林"
+    },
+    "Goblinstein": {
+      "aliases": [
+        "哥布林博士",
+        "哥斯坦",
+        "goblinstein"
+      ],
+      "display_name": "哥布林斯坦"
+    },
+    "Golden Knight": {
+      "aliases": [
+        "黄金骑士",
+        "gk",
+        "金骑",
+        "金甲骑士"
+      ],
+      "display_name": "黄金圣骑"
+    },
+    "Golem": {
+      "aliases": [
+        "石人",
+        "大石人",
+        "golem"
+      ],
+      "display_name": "戈仑石人"
+    },
+    "Graveyard": {
+      "aliases": [
+        "墓园",
+        "graveyard",
+        "墓地",
+        "墓园法术",
+        "gy"
+      ],
+      "display_name": "骷髅召唤"
+    },
+    "Guards": {
+      "aliases": [
+        "盾骷髅",
+        "骷髅卫士",
+        "guards"
+      ],
+      "display_name": "骷髅守卫"
+    },
+    "Heal Spirit": {
+      "aliases": [
+        "奶精",
+        "hspirit"
+      ],
+      "display_name": "治疗精灵"
+    },
+    "Hog Rider": {
+      "aliases": [
+        "野猪",
+        "hog",
+        "hog rider",
+        "猪"
+      ],
+      "display_name": "野猪骑士"
+    },
+    "Hunter": {
+      "aliases": [
+        "猛男",
+        "猎枪",
+        "hunter"
+      ],
+      "display_name": "猎人"
+    },
+    "Ice Golem": {
+      "aliases": [
+        "冰戈仑",
+        "冰人",
+        "冰石",
+        "igolem"
+      ],
+      "display_name": "戈仑冰人"
+    },
+    "Ice Spirit": {
+      "aliases": [
+        "冰精灵",
+        "冰灵",
+        "小冰人",
+        "ispirit"
+      ],
+      "display_name": "冰雪精灵"
+    },
+    "Ice Wizard": {
+      "aliases": [
+        "冰法师",
+        "冰法",
+        "iwiz"
+      ],
+      "display_name": "寒冰法师"
+    },
+    "Inferno Dragon": {
+      "aliases": [
+        "地狱龙",
+        "煤气龙",
+        "idrag"
+      ],
+      "display_name": "地狱飞龙"
+    },
+    "Inferno Tower": {
+      "aliases": [
+        "地狱塔",
+        "itower"
+      ],
+      "display_name": "地狱之塔"
+    },
+    "Knight": {
+      "aliases": [
+        "小骑士",
+        "精销骑士",
+        "knight"
+      ],
+      "display_name": "骑士"
+    },
+    "Lava Hound": {
+      "aliases": [
+        "天狗",
+        "lava hound",
+        "岩犬",
+        "lavahound"
+      ],
+      "display_name": "熔岩猎犬"
+    },
+    "Lightning": {
+      "aliases": [
+        "闪电",
+        "大电",
+        "雷电",
+        "lightning"
+      ],
+      "display_name": "雷电法术"
+    },
+    "Little Prince": {
+      "aliases": [
+        "lp",
+        "小王"
+      ],
+      "display_name": "小王子"
+    },
+    "Lumberjack": {
+      "aliases": [
+        "伐木工",
+        "伐木",
+        "伐木哥",
+        "lj"
+      ],
+      "display_name": "狂暴樵夫"
+    },
+    "Magic Archer": {
+      "aliases": [
+        "魔法神箭手",
+        "神箭",
+        "老高",
+        "marcher"
+      ],
+      "display_name": "神箭游侠"
+    },
+    "Mega Knight": {
+      "aliases": [
+        "超骑",
+        "mk"
+      ],
+      "display_name": "超级骑士"
+    },
+    "Mega Minion": {
+      "aliases": [
+        "铁苍",
+        "mminion"
+      ],
+      "display_name": "重甲亡灵"
+    },
+    "Mighty Miner": {
+      "aliases": [
+        "机甲矿工",
+        "强力矿工",
+        "mm"
+      ],
+      "display_name": "威猛矿工"
+    },
+    "Miner": {
+      "aliases": [
+        "掘地矿工",
+        "miner",
+        "小矿",
+        "挖矿工"
+      ],
+      "display_name": "矿工"
+    },
+    "Mini P.E.K.K.A": {
+      "aliases": [
+        "小皮卡",
+        "mini pekka",
+        "小皮",
+        "minipekka"
+      ],
+      "display_name": "迷你皮卡"
+    },
+    "Minion Horde": {
+      "aliases": [
+        "亡灵海",
+        "苍蝇海",
+        "minionhorde"
+      ],
+      "display_name": "亡灵大军"
+    },
+    "Minions": {
+      "aliases": [
+        "小亡灵",
+        "小苍蝇",
+        "minions"
+      ],
+      "display_name": "亡灵"
+    },
+    "Mirror": {
+      "aliases": [
+        "镜像",
+        "复制",
+        "镜子",
+        "mirror"
+      ],
+      "display_name": "镜像法术"
+    },
+    "Monk": {
+      "aliases": [
+        "武僧",
+        "monk",
+        "和尚",
+        "和尚哥"
+      ],
+      "display_name": "盖世武僧"
+    },
+    "Mortar": {
+      "aliases": [
+        "炮击",
+        "迫炮",
+        "mortar"
+      ],
+      "display_name": "迫击炮"
+    },
+    "Mother Witch": {
+      "aliases": [
+        "母巫",
+        "老巫婆",
+        "mw"
+      ],
+      "display_name": "女巫婆婆"
+    },
+    "Musketeer": {
+      "aliases": [
+        "女枪",
+        "火枪",
+        "musketeer"
+      ],
+      "display_name": "火枪手"
+    },
+    "Night Witch": {
+      "aliases": [
+        "夜巫",
+        "黑巫",
+        "nw"
+      ],
+      "display_name": "暗夜女巫"
+    },
+    "P.E.K.K.A": {
+      "aliases": [
+        "大皮卡",
+        "pekka",
+        "皮姐"
+      ],
+      "display_name": "皮卡超人"
+    },
+    "Phoenix": {
+      "aliases": [
+        "凤凰鸟",
+        "不死鸟",
+        "phoenix"
+      ],
+      "display_name": "凤凰"
+    },
+    "Poison": {
+      "aliases": [
+        "毒药",
+        "poison",
+        "毒",
+        "毒法"
+      ],
+      "display_name": "毒药法术"
+    },
+    "Prince": {
+      "aliases": [
+        "白王",
+        "白骑",
+        "prince"
+      ],
+      "display_name": "王子"
+    },
+    "Princess": {
+      "aliases": [
+        "princess",
+        "小公主",
+        "公主妹妹"
+      ],
+      "display_name": "公主"
+    },
+    "Rage": {
+      "aliases": [
+        "狂暴术",
+        "狂暴法术",
+        "rage"
+      ],
+      "display_name": "狂暴"
+    },
+    "Ram Rider": {
+      "aliases": [
+        "攻城槌骑士",
+        "攻城锤骑士",
+        "羊骑",
+        "羊骑士",
+        "ramrider"
+      ],
+      "display_name": "蛮羊骑士"
+    },
+    "Rascals": {
+      "aliases": [
+        "淘气三人组",
+        "rascals",
+        "三人组",
+        "淘气三人"
+      ],
+      "display_name": "绿林团伙"
+    },
+    "Rocket": {
+      "aliases": [
+        "大火箭",
+        "火箭术",
+        "rocket"
+      ],
+      "display_name": "火箭"
+    },
+    "Ronin": {
+      "aliases": [
+        "浪客",
+        "浪人武士"
+      ],
+      "display_name": "浪人"
+    },
+    "Royal Chef": {
+      "aliases": [
+        "皇家厨师",
+        "厨师塔",
+        "chef"
+      ],
+      "display_name": "皇家主厨"
+    },
+    "Royal Delivery": {
+      "aliases": [
+        "皇家快递",
+        "快递",
+        "delivery"
+      ],
+      "display_name": "皇家速递"
+    },
+    "Royal Ghost": {
+      "aliases": [
+        "皇幽",
+        "皇鬼",
+        "皇家鬼魂",
+        "ghost"
+      ],
+      "display_name": "皇家幽灵"
+    },
+    "Royal Giant": {
+      "aliases": [
+        "皇巨",
+        "rg",
+        "royal giant"
+      ],
+      "display_name": "皇家巨人"
+    },
+    "Royal Hogs": {
+      "aliases": [
+        "皇猪",
+        "皇家猪",
+        "rhogs"
+      ],
+      "display_name": "皇家野猪"
+    },
+    "Royal Recruits": {
+      "aliases": [
+        "国王守卫",
+        "recruits"
+      ],
+      "display_name": "皇家卫队"
+    },
+    "Rune Giant": {
+      "aliases": [
+        "符文石人",
+        "符文大个",
+        "runegiant"
+      ],
+      "display_name": "符文巨人"
+    },
+    "Skeleton Army": {
+      "aliases": [
+        "骷髅海",
+        "skarmy"
+      ],
+      "display_name": "骷髅军团"
+    },
+    "Skeleton Barrel": {
+      "aliases": [
+        "骷髅桶",
+        "sbarrel"
+      ],
+      "display_name": "骷髅气球"
+    },
+    "Skeleton Dragons": {
+      "aliases": [
+        "骷髅龙",
+        "双龙",
+        "sdragons"
+      ],
+      "display_name": "骷髅飞龙"
+    },
+    "Skeleton King": {
+      "aliases": [
+        "骷髅王",
+        "sk",
+        "skeleton king",
+        "骷王"
+      ],
+      "display_name": "骷髅帝王"
+    },
+    "Skeletons": {
+      "aliases": [
+        "小骷髅",
+        "skeletons",
+        "骷髅",
+        "skeles"
+      ],
+      "display_name": "骷髅兵"
+    },
+    "Sparky": {
+      "aliases": [
+        "大电磁炮",
+        "电炮",
+        "sparky"
+      ],
+      "display_name": "电磁炮"
+    },
+    "Spear Goblins": {
+      "aliases": [
+        "哥布林矛手",
+        "长矛哥布林",
+        "sgobs"
+      ],
+      "display_name": "哥布林投矛手"
+    },
+    "Spirit Empress": {
+      "aliases": [
+        "灵魂女皇",
+        "灵后",
+        "灵魂皇后",
+        "spiritempress"
+      ],
+      "display_name": "精灵女皇"
+    },
+    "Suspicious Bush": {
+      "aliases": [
+        "可疑草",
+        "草丛",
+        "bush"
+      ],
+      "display_name": "可疑草丛"
+    },
+    "Tesla": {
+      "aliases": [
+        "电磁塔",
+        "电塔",
+        "tesla"
+      ],
+      "display_name": "特斯拉电磁塔"
+    },
+    "The Log": {
+      "aliases": [
+        "滚木",
+        "the log",
+        "小木头",
+        "log"
+      ],
+      "display_name": "复仇滚木"
+    },
+    "Three Musketeers": {
+      "aliases": [
+        "3m",
+        "三枪",
+        "3枪"
+      ],
+      "display_name": "三个火枪手"
+    },
+    "Tombstone": {
+      "aliases": [
+        "墓碑",
+        "骷髅碑",
+        "坟碑",
+        "tombstone"
+      ],
+      "display_name": "骷髅墓碑"
+    },
+    "Tornado": {
+      "aliases": [
+        "飓风",
+        "龙卷风",
+        "tornado",
+        "nado"
+      ],
+      "display_name": "飓风法术"
+    },
+    "Tower Princess": {
+      "aliases": [
+        "公主塔",
+        "tower princess",
+        "塔娘",
+        "towerprincess"
+      ],
+      "display_name": "塔楼公主"
+    },
+    "Valkyrie": {
+      "aliases": [
+        "女武神",
+        "转圈姐",
+        "valk"
+      ],
+      "display_name": "瓦基丽武神"
+    },
+    "Vines": {
+      "aliases": [
+        "藤蔓",
+        "缠绕藤",
+        "藤条",
+        "vines"
+      ],
+      "display_name": "藤蔓法术"
+    },
+    "Void": {
+      "aliases": [
+        "虚空",
+        "空间法术",
+        "虚空术",
+        "void"
+      ],
+      "display_name": "虚空法术"
+    },
+    "Wall Breakers": {
+      "aliases": [
+        "破墙者",
+        "破墙",
+        "爆弹人",
+        "wallbreakers"
+      ],
+      "display_name": "攻城炸弹人"
+    },
+    "Witch": {
+      "aliases": [
+        "巫婆",
+        "普通女巫",
+        "witch"
+      ],
+      "display_name": "女巫"
+    },
+    "Wizard": {
+      "aliases": [
+        "火法",
+        "wiz"
+      ],
+      "display_name": "法师"
+    },
+    "X-Bow": {
+      "aliases": [
+        "连弩",
+        "xbow",
+        "x-bow",
+        "弩",
+        "努"
+      ],
+      "display_name": "X连弩"
+    },
+    "Zap": {
+      "aliases": [
+        "电击",
+        "小电",
+        "zap",
+        "小闪"
+      ],
+      "display_name": "电击法术"
+    },
+    "Zappies": {
+      "aliases": [
+        "电击小队",
+        "zappies",
+        "电车"
+      ],
+      "display_name": "电击车小队"
+    }
+  },
+  "description": "自由问答卡牌标准中文名与可接受别名。display_name 是回答和前端展示名；aliases 仅用于自然语言解析。",
+  "language": "zh-CN",
+  "schema_version": 1
+}

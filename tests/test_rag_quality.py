@@ -225,6 +225,19 @@ class RAGQualityTests(unittest.TestCase):
         with self.assertRaises(GroundingValidationError):
             buffer.push("99.9%。")
 
+    def test_stream_buffer_can_drop_only_unsupported_numeric_sentences(self):
+        buffer = GroundedStreamBuffer(
+            "usage rate 4.3%",
+            set(),
+            drop_unsupported=True,
+        )
+
+        chunks = buffer.push("可保留结论。使用率 99.9%。后续结论。")
+        chunks += buffer.finish()
+
+        self.assertEqual("".join(chunks), "可保留结论。后续结论。")
+        self.assertEqual(buffer.dropped_count, 1)
+
     def test_stream_buffer_stops_before_model_generated_reference_section(self):
         buffer = GroundedStreamBuffer(
             "usage rate 4.3%",

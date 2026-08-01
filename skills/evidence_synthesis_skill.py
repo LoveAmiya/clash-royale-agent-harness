@@ -1,4 +1,4 @@
-"""处理需要多份证据和模型综合判断的环境、备战类问题。"""
+"""处理需要多份证据和模型综合判断的环境分析问题。"""
 
 from skills.base import Skill, SkillContext
 
@@ -10,11 +10,11 @@ class EvidenceSynthesisSkill(Skill):
         self._answer_builder = answer_builder
 
     def can_handle(self, parsed: dict) -> bool:
-        return parsed.get("intent") in {"meta_analysis_query", "match_preparation_query"}
+        return parsed.get("intent") == "meta_analysis_query"
 
     async def run(self, context: SkillContext) -> str:
         if not context.api_key:
-            return "此类环境和备战问题需要 RAG 检索与模型综合，请先设置 OPENAI_API_KEY 后重试。"
+            return "此类环境分析需要 RAG 检索与模型综合，请先设置 OPENAI_API_KEY 后重试。"
         if context.retriever is None:
             rag_status = (context.metadata or {}).get("rag_status")
             if rag_status == "building":

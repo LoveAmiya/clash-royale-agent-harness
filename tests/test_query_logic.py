@@ -11,7 +11,7 @@ import app_config
 import query_answering
 import runtime_multi
 from fastapi import FastAPI
-from answer_builder import build_card_answer, build_deck_answer, build_schedule_answer
+from answer_builder import build_card_answer, build_deck_answer, build_named_card_metrics_answer, build_schedule_answer
 from runtime_multi import build_chat_model, lifespan, query_needs_rag
 from query_parser import fallback_parse_query, normalize_parsed_query
 
@@ -54,6 +54,24 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(parsed["metric"], "win_rate")
         self.assertIsNone(parsed["top_n"])
 
+    def test_explicit_card_forms_and_towers_select_loadout_entities(self):
+        evolved = fallback_parse_query("觉醒骑士的使用率是多少", self.card_data)
+        elite = fallback_parse_query("精英火球的胜率是多少", self.card_data)
+        tower = fallback_parse_query("飞刀塔目前表现如何", self.card_data)
+
+        self.assertEqual(evolved["entity_mode"], "loadout_entity")
+        self.assertEqual(evolved["special_state"], "evolution")
+        self.assertEqual(elite["special_state"], "elite")
+        self.assertEqual(tower["entity_type"], "tower")
+        self.assertTrue(query_needs_rag(evolved))
+
+    def test_official_elite_barbarians_name_is_not_an_elite_form_modifier(self):
+        ordinary = fallback_parse_query("Elite Barbarians usage rate", self.card_data)
+
+        self.assertEqual(ordinary["card_name"], "Elite Barbarians")
+        self.assertEqual(ordinary["entity_mode"], "base8")
+        self.assertIsNone(ordinary["special_state"])
+
     def test_meta_analysis_parses_baby_dragon_alias_and_qualitative_question(self):
         parsed = fallback_parse_query("绿龙在当前环境里的定位是什么？适合搭配哪些核心卡，主要怕什么？", self.card_data)
 
@@ -68,6 +86,12 @@ class QueryLogicTests(unittest.TestCase):
             with self.subTest(question=question):
                 parsed = fallback_parse_query(question, self.card_data)
                 self.assertEqual(parsed["intent"], "meta_analysis_query")
+
+    def test_environment_change_question_selects_precomputed_meta_delta(self):
+        parsed = fallback_parse_query("最近环境发生了什么变化？", self.card_data)
+
+        self.assertEqual(parsed["intent"], "meta_analysis_query")
+        self.assertEqual(parsed["analysis_type"], "meta_delta")
 
     def test_match_preparation_keeps_tactical_user_question(self):
         parsed = fallback_parse_query("如果对手最近常用空军卡组，我们应该优先准备哪些防守和反制方案？", self.card_data)
@@ -237,6 +261,25 @@ class QueryLogicTests(unittest.TestCase):
         )
         self.assertIn("Fireball", answer)
         self.assertIn("Supercell API live sample", answer)
+        self.assertNotIn("not global meta", answer)
+
+    def test_live_card_boundary_is_fully_chinese(self):
+        answer = build_named_card_metrics_answer(
+            {
+                "card_name": "Bowler",
+                "source": "Supercell API live sample",
+                "sample_battles": 200000,
+                "fetched_at": "2026-07-28T21:52:30+00:00",
+                "usage_rate": 11.2,
+                "win_rate": 57.0,
+                "appearance_count": 22418,
+            },
+            ["usage_rate", "win_rate"],
+        )
+
+        self.assertIn("并非全球完整环境统计", answer)
+        self.assertNotIn("not global meta", answer)
+        self.assertNotIn("**", answer)
 
     def test_build_card_answer_returns_single_ranked_card(self):
         answer = build_card_answer(
@@ -255,11 +298,18 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(app_config.EMBED_BATCH_SIZE, 32)
         self.assertEqual(app_config.PARSER_CALL_TIMEOUT_SECONDS, 45.0)
         self.assertEqual(app_config.MODEL_CALL_TIMEOUT_SECONDS, 120.0)
-        self.assertEqual(app_config.SUPERCELL_TARGET_BATTLES, 20000)
-        self.assertEqual(app_config.SUPERCELL_MAX_TARGET_BATTLES, 20000)
-        self.assertEqual(app_config.SUPERCELL_LEADERBOARD_PLAYERS, 3000)
+        self.assertEqual(app_config.SUPERCELL_TARGET_BATTLES, 200000)
+        self.assertEqual(app_config.SUPERCELL_MAX_TARGET_BATTLES, 200000)
+        self.assertEqual(app_config.SUPERCELL_POL_SEED_PLAYERS, 1000)
+        self.assertEqual(app_config.SUPERCELL_LEADERBOARD_PLAYERS, 12000)
         self.assertEqual(app_config.SUPERCELL_FETCH_CONCURRENCY, 1)
-        self.assertTrue(app_config.OPENAI_MODEL)
+        self.assertEqual(app_config.OPENAI_MODEL, "gpt-5.5")
+        self.assertEqual(app_config.OPENAI_REVIEW_MODEL, "gpt-5.5")
+        self.assertEqual(app_config.OPENAI_BASE_URL, "https://crs.ruinique.com")
+        self.assertEqual(app_config.OPENAI_WIRE_API, "responses")
+        self.assertEqual(app_config.OPENAI_REASONING_EFFORT, "medium")
+        self.assertEqual(app_config.PARSER_REASONING_EFFORT, "medium")
+        self.assertEqual(app_config.SYNTHESIS_REASONING_EFFORT, "medium")
 
     def test_chat_model_uses_responses_configuration(self):
         with patch("runtime_multi.OpenAIResponseModel") as model_class:
@@ -278,7 +328,7 @@ class QueryLogicTests(unittest.TestCase):
             query_answering.build_reviewer_model("test-key")
 
         model_class.assert_called_once_with(
-            model_name=app_config.OPENAI_MODEL,
+            model_name=app_config.OPENAI_REVIEW_MODEL,
             api_key="test-key",
             stream=False,
             client_kwargs=app_config.OPENAI_CLIENT_KWARGS,

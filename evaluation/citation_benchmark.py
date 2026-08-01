@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from rag_quality import validate_answer_grounding
+from evaluation.scorecard import attach_scorecard
 
 
 def _load_cases(path: Path) -> list[dict[str, Any]]:
@@ -199,6 +200,7 @@ def run_citation_benchmark(
             "rows": [],
         }
     report["case_source"] = str(cases_path)
+    attach_scorecard(report, source="citation")
     _persist_report(report, Path(report_path))
     return report
 
@@ -222,6 +224,7 @@ def main() -> None:
         )
         report = evaluate_citation_cases(cases, snapshot_id=args.snapshot_id)
         report["case_source"] = f"generated from {args.documents}"
+        attach_scorecard(report, source="citation")
         _persist_report(report, Path(args.report))
     else:
         report = run_citation_benchmark(args.cases, args.report, snapshot_id=args.snapshot_id)

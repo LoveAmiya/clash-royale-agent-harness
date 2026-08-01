@@ -3,19 +3,32 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from support import install_test_stubs
 
 install_test_stubs()
 
 from snapshot_store import (
+    DAILY_REFRESH_INTERVAL,
+    DAILY_TARGET_BATTLES,
+    SNAPSHOT_RETENTION_DAYS,
+    SNAPSHOT_RETENTION_MAX_COMPLETE,
     build_snapshot_rag_documents,
+    cleanup_snapshot_retention,
     compute_rag_docs_fingerprint,
     is_complete_daily_snapshot,
+    is_path_of_legend_snapshot,
     load_published_snapshot,
+    load_published_snapshot_summary,
     publish_daily_snapshot,
     snapshot_refresh_due,
     validate_snapshot_rag_documents,
+)
+from supercell_live import (
+    JsonlRecordSequence,
+    PATH_OF_LEGEND_COLLECTION_SCOPE,
+    PATH_OF_LEGEND_SCOPE_CONTRACT,
 )
 
 
@@ -23,8 +36,8 @@ def complete_snapshot(*, fetched_at=None):
     return {
         "snapshot_id": "official-20260725-a",
         "fetched_at": fetched_at or datetime.now(timezone.utc).isoformat(),
-        "sample_battles": 20000,
-        "target_battles": 20000,
+        "sample_battles": DAILY_TARGET_BATTLES,
+        "target_battles": DAILY_TARGET_BATTLES,
         "shortfall_battles": 0,
         "cards_meta": [
             {
@@ -80,6 +93,13 @@ class DailySnapshotStoreTests(unittest.TestCase):
         partial["shortfall_battles"] = 1
         self.assertFalse(is_complete_daily_snapshot(partial))
 
+    def test_path_of_legend_scope_requires_the_versioned_collection_contract(self):
+        snapshot = complete_snapshot()
+        self.assertFalse(is_path_of_legend_snapshot(snapshot))
+        snapshot["collection_scope"] = PATH_OF_LEGEND_COLLECTION_SCOPE
+        snapshot["scope_contract"] = PATH_OF_LEGEND_SCOPE_CONTRACT
+        self.assertTrue(is_path_of_legend_snapshot(snapshot))
+
     def test_publish_writes_the_canonical_snapshot_and_derived_json_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -101,6 +121,54 @@ class DailySnapshotStoreTests(unittest.TestCase):
             self.assertTrue(validation["passed"], validation)
             self.assertEqual(validation["card_documents_checked"], len(published["cards_meta"]))
             self.assertEqual(validation["deck_documents_checked"], len(published["top_decks"]))
+
+    def test_publish_streams_raw_records_and_preserves_the_exact_aggregate_store(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "published"
+            work_dir = data_dir / "snapshot_work" / "collection-test"
+            work_dir.mkdir(parents=True)
+            raw_path = work_dir / "raw_battles.jsonl"
+            records = [
+                {
+                    "battle_id": "battle-1",
+                    "team_deck": ["Electro Giant", "Tornado"],
+                    "opponent_deck": ["P.E.K.K.A", "Zap"],
+                    "won": True,
+                },
+                {
+                    "battle_id": "battle-2",
+                    "team_deck": ["P.E.K.K.A", "Zap"],
+                    "opponent_deck": ["Electro Giant", "Tornado"],
+                    "won": False,
+                },
+            ]
+            raw_path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+            aggregate_path = work_dir / "aggregates.sqlite"
+            aggregate_path.write_bytes(b"exact-aggregate-store")
+            snapshot = complete_snapshot()
+            snapshot.update(
+                {
+                    "sample_battles": 2,
+                    "target_battles": 2,
+                    "raw_battles": JsonlRecordSequence(raw_path, 2),
+                    "_aggregate_store_path": str(aggregate_path),
+                    "_streaming_work_dir": str(work_dir),
+                }
+            )
+
+            with patch("snapshot_store.DAILY_TARGET_BATTLES", 2):
+                published = publish_daily_snapshot(snapshot, data_dir)
+                collector_summary = load_published_snapshot_summary(data_dir)
+
+            canonical = json.loads((data_dir / "official_daily_snapshot.json").read_text(encoding="utf-8"))
+            self.assertEqual(canonical["raw_battles"], records)
+            aggregate_file = data_dir / published["aggregate_store"]["canonical_file"]
+            self.assertEqual(aggregate_file.read_bytes(), b"exact-aggregate-store")
+            self.assertEqual(published["raw_battles"], [])
+            self.assertFalse(work_dir.exists())
+            self.assertEqual(collector_summary["snapshot_id"], snapshot["snapshot_id"])
+            self.assertEqual(collector_summary["raw_battles"], [])
+            self.assertFalse(collector_summary["raw_battles_storage"]["loaded"])
 
     def test_publish_records_the_exact_rag_document_fingerprint(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -126,6 +194,24 @@ class DailySnapshotStoreTests(unittest.TestCase):
                 publish_daily_snapshot(invalid, Path(temp_dir))
 
             self.assertFalse((Path(temp_dir) / "official_daily_snapshot.json").exists())
+
+    def test_publish_rejects_out_of_scope_battles_from_a_path_of_legend_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot = complete_snapshot()
+            snapshot.update(
+                {
+                    "sample_battles": 1,
+                    "target_battles": 1,
+                    "collection_scope": PATH_OF_LEGEND_COLLECTION_SCOPE,
+                    "scope_contract": PATH_OF_LEGEND_SCOPE_CONTRACT,
+                    "raw_battles": [{"battle_id": "wrong-mode", "battle_type": "PvP"}],
+                }
+            )
+
+            with patch("snapshot_store.DAILY_TARGET_BATTLES", 1), self.assertRaisesRegex(
+                ValueError, "out-of-scope raw battles"
+            ):
+                publish_daily_snapshot(snapshot, Path(temp_dir))
 
     def test_invalid_evidence_does_not_overwrite_previous_complete_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -225,20 +311,68 @@ class DailySnapshotStoreTests(unittest.TestCase):
             partial = complete_snapshot()
             partial["snapshot_id"] = "partial"
             partial["sample_battles"] = 100
-            partial["shortfall_battles"] = 19900
+            partial["shortfall_battles"] = DAILY_TARGET_BATTLES - 100
 
             with self.assertRaises(ValueError):
                 publish_daily_snapshot(partial, data_dir)
 
             self.assertEqual(load_published_snapshot(data_dir)["snapshot_id"], published["snapshot_id"])
 
-    def test_snapshot_is_due_only_after_twenty_four_hours(self):
+    def test_snapshot_is_due_only_after_weekly_refresh_interval(self):
         now = datetime(2026, 7, 25, tzinfo=timezone.utc)
-        fresh = complete_snapshot(fetched_at=(now - timedelta(hours=23, minutes=59)).isoformat())
-        stale = complete_snapshot(fetched_at=(now - timedelta(hours=24)).isoformat())
+        fresh = complete_snapshot(fetched_at=(now - DAILY_REFRESH_INTERVAL + timedelta(minutes=1)).isoformat())
+        stale = complete_snapshot(fetched_at=(now - DAILY_REFRESH_INTERVAL).isoformat())
 
         self.assertFalse(snapshot_refresh_due(fresh, now=now))
         self.assertTrue(snapshot_refresh_due(stale, now=now))
+
+    def test_cleanup_retains_only_current_and_previous_complete_snapshot_packages(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            now = datetime(2026, 7, 28, tzinfo=timezone.utc)
+            snapshot_ids = ["official-current", "official-previous", "official-old"]
+            published_times = [
+                now,
+                now - timedelta(days=7),
+                now - timedelta(days=15),
+            ]
+            for snapshot_id, published_at in zip(snapshot_ids, published_times):
+                archive_dir = data_dir / "snapshot_archives" / snapshot_id
+                qdrant_dir = data_dir / "daily_snapshot_qdrant" / snapshot_id
+                audit_dir = data_dir / "audit_exports" / snapshot_id
+                review_dir = data_dir / "external_reviews" / snapshot_id
+                structured_dir = data_dir / "structured_stats" / snapshot_id
+                for directory in (archive_dir, qdrant_dir, audit_dir, review_dir, structured_dir):
+                    directory.mkdir(parents=True)
+                    (directory / "marker.txt").write_text(snapshot_id, encoding="utf-8")
+                manifest = {
+                    "snapshot_id": snapshot_id,
+                    "published_at": published_at.isoformat(),
+                    "complete": True,
+                }
+                (archive_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+            report = cleanup_snapshot_retention(
+                data_dir,
+                active_snapshot_id="official-current",
+                now=now,
+            )
+
+            self.assertEqual(SNAPSHOT_RETENTION_DAYS, 14)
+            self.assertEqual(SNAPSHOT_RETENTION_MAX_COMPLETE, 2)
+            self.assertEqual(report["retained_snapshot_ids"], ["official-current", "official-previous"])
+            self.assertIn("official-old", report["removed_snapshot_ids"])
+            for kept in ("official-current", "official-previous"):
+                self.assertTrue((data_dir / "snapshot_archives" / kept).exists())
+                self.assertTrue((data_dir / "daily_snapshot_qdrant" / kept).exists())
+                self.assertTrue((data_dir / "audit_exports" / kept).exists())
+                self.assertTrue((data_dir / "external_reviews" / kept).exists())
+                self.assertTrue((data_dir / "structured_stats" / kept).exists())
+            self.assertFalse((data_dir / "snapshot_archives" / "official-old").exists())
+            self.assertFalse((data_dir / "daily_snapshot_qdrant" / "official-old").exists())
+            self.assertFalse((data_dir / "audit_exports" / "official-old").exists())
+            self.assertFalse((data_dir / "external_reviews" / "official-old").exists())
+            self.assertFalse((data_dir / "structured_stats" / "official-old").exists())
 
     def test_rag_documents_are_derived_from_the_daily_snapshot_not_static_strategy_text(self):
         documents = build_snapshot_rag_documents(complete_snapshot())
@@ -270,6 +404,12 @@ class DailySnapshotStoreTests(unittest.TestCase):
         self.assertTrue(by_type["counter"])
         self.assertIn("Electro Giant", by_type["card_profile"][0]["text"])
         self.assertTrue(any("P.E.K.K.A" in document["text"] for document in by_type["counter"]))
+        profiles = {
+            document["metadata"]["card_name"]: document
+            for document in by_type["card_profile"]
+        }
+        self.assertEqual(profiles["Electro Giant"]["metadata"]["games"], 20)
+        self.assertEqual(profiles["P.E.K.K.A"]["metadata"]["games"], 20)
 
 
 if __name__ == "__main__":

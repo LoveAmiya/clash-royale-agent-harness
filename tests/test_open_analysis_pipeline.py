@@ -14,15 +14,20 @@ from hybrid_retriever import HybridRetriever
 from rag_data_builder import build_strategy_docs
 from runtime_events import RuntimeEventEmitter
 from runtime_multi import emit_semantic_content, query_needs_rag, split_answer_semantic_chunks, split_stream_chunks
-from query_answering import AnswerResult
+from query_answering import AnswerResult, DATA_ANALYSIS_SYSTEM_PROMPT
 from skills.base import SkillContext
 from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
 
 
 class OpenAnalysisRoutingTests(unittest.TestCase):
+    def test_analysis_prompt_has_no_clan_war_or_gameplay_scope(self):
+        self.assertIn("数据分析助手", DATA_ANALYSIS_SYSTEM_PROMPT)
+        self.assertIn("不得提供具体打法", DATA_ANALYSIS_SYSTEM_PROMPT)
+        self.assertNotIn("战队赛分析助手", DATA_ANALYSIS_SYSTEM_PROMPT)
+
     def test_open_analysis_intents_require_rag(self):
         self.assertTrue(query_needs_rag({"intent": "meta_analysis_query"}))
-        self.assertTrue(query_needs_rag({"intent": "match_preparation_query"}))
+        self.assertFalse(query_needs_rag({"intent": "match_preparation_query"}))
 
     def test_stream_chunks_are_bounded_and_reconstruct_answer(self):
         answer = "这是一个需要逐段显示的回答，用于证明 SSE 不会只发送一整块内容。"
@@ -167,6 +172,82 @@ class RetrievalFallbackTests(unittest.TestCase):
         self.assertEqual(results[0]["doc"]["doc_id"], "strategy_air")
         self.assertEqual(results[0]["retrieval_mode"], "bm25_only")
 
+    def test_hybrid_retriever_filters_documents_by_dataset_scope(self):
+        docs = [
+            {
+                "doc_id": "group:7d:card",
+                "source_type": "card",
+                "text": "Fireball usage evidence",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "7d_all"},
+            },
+            {
+                "doc_id": "group:35d:card",
+                "source_type": "card",
+                "text": "Fireball usage evidence",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "35d_all"},
+            },
+        ]
+        with patch.object(HybridRetriever, "_build_dense_index", side_effect=RuntimeError("offline")):
+            retriever = HybridRetriever(docs)
+
+        results = retriever.hybrid_search("Fireball usage", dataset_scope="35d_all")
+
+        self.assertEqual([item["doc"]["doc_id"] for item in results], ["group:35d:card"])
+
+    def test_hybrid_retriever_filters_deck_evidence_by_mode_but_keeps_shared_evidence(self):
+        docs = [
+            {
+                "doc_id": "base",
+                "source_type": "deck",
+                "text": "same evidence",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "7d_all", "deck_mode": "base8"},
+            },
+            {
+                "doc_id": "full",
+                "source_type": "full_loadout",
+                "text": "same evidence",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "7d_all", "deck_mode": "full_loadout"},
+            },
+            {
+                "doc_id": "shared",
+                "source_type": "card",
+                "text": "same evidence",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "7d_all"},
+            },
+        ]
+        with patch.object(HybridRetriever, "_build_dense_index", side_effect=RuntimeError("offline")):
+            retriever = HybridRetriever(docs)
+
+        results = retriever.hybrid_search(
+            "same evidence", dataset_scope="7d_all", deck_mode="full_loadout", final_top_k=5
+        )
+
+        self.assertEqual({item["doc"]["doc_id"] for item in results}, {"full", "shared"})
+
+    def test_lazy_bm25_keeps_only_two_scope_indexes(self):
+        documents = [
+            {
+                "doc_id": f"doc-{scope}",
+                "source_type": "snapshot",
+                "text": f"dataset evidence {scope}",
+                "metadata": {"snapshot_id": "group", "dataset_scope": scope},
+            }
+            for scope in ("7d_all", "35d_all", "7d_top_100")
+        ]
+        with patch.object(HybridRetriever, "_build_dense_index", side_effect=RuntimeError("offline")):
+            retriever = HybridRetriever(
+                documents,
+                in_memory=True,
+                lazy_scope_bm25=True,
+                bm25_scope_cache_size=2,
+            )
+        retriever.bm25_search("evidence", dataset_scope="7d_all")
+        retriever.bm25_search("evidence", dataset_scope="35d_all")
+        retriever.bm25_search("evidence", dataset_scope="7d_top_100")
+
+        self.assertEqual(len(retriever._bm25_scope_cache), 2)
+        self.assertNotIn("7d_all", retriever._bm25_scope_cache)
+
     def test_strategy_documents_are_part_of_the_retrieval_corpus(self):
         docs = build_strategy_docs()
 
@@ -179,8 +260,8 @@ class EvidenceSynthesisRetrievalTests(unittest.IsolatedAsyncioTestCase):
     async def test_open_analysis_requires_retriever_before_calling_model(self):
         skill = EvidenceSynthesisSkill(answer_builder=lambda **kwargs: "should not run")
         context = SkillContext(
-            user_text="空军防守怎么准备？",
-            parsed={"intent": "match_preparation_query"},
+            user_text="当前环境以哪些体系为主？",
+            parsed={"intent": "meta_analysis_query"},
             schedule_data=[],
             top_decks_data=[],
             cards_meta_data=[],
@@ -194,6 +275,40 @@ class EvidenceSynthesisRetrievalTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProcessSSETests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # This suite supplies its own retriever state. Isolate it from a real
+        # rolling snapshot group that may be active in the local workspace.
+        import runtime_multi
+
+        rolling_manifest = patch.object(runtime_multi, "_active_snapshot_group_manifest", return_value=None)
+        rolling_manifest.start()
+        self.addCleanup(rolling_manifest.stop)
+
+    async def test_process_forwards_validated_page_intent_to_answer_pipeline(self):
+        import runtime_multi
+
+        result = AnswerResult(
+            answer="环境分析",
+            trace_id="trace-page-intent",
+            parsed={"intent": "meta_analysis_query", "parse_source": "interface_contract"},
+            plan=None,
+            selected_skill="EvidenceSynthesisSkill",
+            mode="rag_synthesis",
+            metadata={},
+        )
+        request = runtime_multi.ProcessRequest(
+            intent_hint="meta_analysis_query",
+            input=[{"role": "user", "content": [{"type": "text", "text": "分析当前环境"}]}],
+        )
+
+        with patch.object(runtime_multi, "build_answer", AsyncMock(return_value=result)) as build_answer, patch.object(
+            runtime_multi, "read_trace", return_value=[]
+        ):
+            response = await runtime_multi.process(request)
+            _ = [chunk async for chunk in response.body_iterator]
+
+        self.assertEqual(build_answer.await_args.kwargs["intent_hint"], "meta_analysis_query")
+
     async def test_process_sends_progress_trace_and_multiple_content_events(self):
         import runtime_multi
 
@@ -307,3 +422,40 @@ class ProcessSSETests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(answer, result)
         to_thread.assert_not_awaited()
+
+    async def test_environment_page_intent_skips_model_parser_but_keeps_rag_answering(self):
+        import runtime_multi
+
+        app = types.SimpleNamespace(
+            state=types.SimpleNamespace(
+                cards_meta_data=[], bootstrap_cards_meta_data=[], schedule_data=[], top_decks_data=[],
+                card_deck_stats_data={}, retriever=object(), live_snapshot=None, live_snapshot_at=0.0,
+                live_error=None, rag_status="ready", rag_snapshot_id="snapshot-1",
+                rag_docs_fingerprint="fingerprint-1",
+            )
+        )
+        result = AnswerResult(
+            answer="环境 RAG 回答",
+            trace_id="trace-page-intent",
+            parsed={"intent": "meta_analysis_query"},
+            plan=None,
+            selected_skill="EvidenceSynthesisSkill",
+            mode="rag_synthesis",
+            metadata={},
+        )
+
+        with patch.dict(runtime_multi.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(
+            runtime_multi, "EXTERNAL_API_REQUIRED", True
+        ), patch.object(runtime_multi, "query_requires_official_snapshot", return_value=False), patch.object(
+            runtime_multi, "parse_user_query", AsyncMock()
+        ) as parser, patch.object(runtime_multi, "answer_query", AsyncMock(return_value=result)) as answer_query:
+            answer = await runtime_multi.build_answer(
+                "分析当前环境",
+                app,
+                intent_hint="meta_analysis_query",
+            )
+
+        parser.assert_not_awaited()
+        self.assertEqual(answer_query.await_args.kwargs["parsed"]["intent"], "meta_analysis_query")
+        self.assertEqual(answer.metadata["parser_api"]["status"], "interface_contract")
+        self.assertEqual(answer.answer, "环境 RAG 回答")

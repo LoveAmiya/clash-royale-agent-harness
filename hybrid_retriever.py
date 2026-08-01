@@ -8,13 +8,14 @@ import json
 import hashlib
 import logging
 import math
+from collections import OrderedDict
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 import requests
 from rank_bm25 import BM25Okapi
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, VectorParams, PointStruct
 
 from app_config import EMBED_BATCH_SIZE, EMBED_MODEL, OLLAMA_EMBED_TIMEOUT_SECONDS, OLLAMA_EMBED_URL, RAG_DOCS_FILE
 
@@ -29,13 +30,28 @@ logger = logging.getLogger(__name__)
 
 class HybridRetriever:
     """Build BM25 plus a snapshot-versioned local Qdrant index."""
-    def __init__(self, docs: List[Dict[str, Any]], *, index_path: Path | None = None, in_memory: bool = False):
+    def __init__(
+        self,
+        docs: List[Dict[str, Any]],
+        *,
+        index_path: Path | None = None,
+        in_memory: bool = False,
+        lazy_scope_bm25: bool = False,
+        bm25_scope_cache_size: int = 2,
+    ):
         """对同一批文档建立两套索引，使词法与语义召回使用相同语料。"""
         self.docs = docs
         self.doc_id_to_doc = {idx: doc for idx, doc in enumerate(docs)}
 
-        self.tokenized_corpus = [self.tokenize(doc["text"]) for doc in docs]
-        self.bm25 = BM25Okapi(self.tokenized_corpus)
+        self.lazy_scope_bm25 = bool(lazy_scope_bm25)
+        self.bm25_scope_cache_size = max(1, int(bm25_scope_cache_size))
+        self._bm25_scope_cache = OrderedDict()
+        if self.lazy_scope_bm25:
+            self.tokenized_corpus = None
+            self.bm25 = None
+        else:
+            self.tokenized_corpus = [self.tokenize(doc["text"]) for doc in docs]
+            self.bm25 = BM25Okapi(self.tokenized_corpus)
 
         self.snapshot_id = self._snapshot_id_from_docs(docs)
         self.index_path = None if in_memory else index_path if index_path is not None else (
@@ -174,10 +190,20 @@ class HybridRetriever:
         if self.qdrant.collection_exists(self.collection_name):
             self.qdrant.delete_collection(self.collection_name)
 
-        self.qdrant.create_collection(
-            collection_name=self.collection_name,
-            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
-        )
+        vectors = VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE, on_disk=True)
+        try:
+            self.qdrant.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=vectors,
+                on_disk_payload=True,
+            )
+        except TypeError:
+            # Older embedded clients still persist the collection path and the
+            # on-disk vectors, but do not expose the payload storage option.
+            self.qdrant.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=vectors,
+            )
 
         for start in range(0, len(self.docs), EMBED_BATCH_SIZE):
             batch_docs = self.docs[start : start + EMBED_BATCH_SIZE]
@@ -206,18 +232,54 @@ class HybridRetriever:
                 )
             self.qdrant.upsert(collection_name=self.collection_name, points=points)
 
-    def bm25_search(self, query: str, top_k: int = 10, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    def bm25_search(
+        self,
+        query: str,
+        top_k: int = 10,
+        source_type: Optional[str] = None,
+        dataset_scope: Optional[str] = None,
+        deck_mode: Optional[str] = None,
+        entity_mode: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """返回按词频相关性排序的词法候选文档。"""
         tokenized_query = self.tokenize(query)
-        scores = self.bm25.get_scores(tokenized_query)
-
-        indexed_scores = list(enumerate(scores))
+        if self.lazy_scope_bm25 and dataset_scope is not None:
+            cache_key = (dataset_scope, deck_mode, entity_mode)
+            cached = self._bm25_scope_cache.pop(cache_key, None)
+            if cached is None:
+                internal_ids = [
+                    index
+                    for index, doc in self.doc_id_to_doc.items()
+                    if doc.get("metadata", {}).get("dataset_scope") == dataset_scope
+                    and self._matches_deck_mode(doc, deck_mode)
+                    and self._matches_entity_mode(doc, entity_mode)
+                ]
+                tokenized = [self.tokenize(self.doc_id_to_doc[index]["text"]) for index in internal_ids]
+                cached = (BM25Okapi(tokenized), internal_ids)
+            self._bm25_scope_cache[cache_key] = cached
+            while len(self._bm25_scope_cache) > self.bm25_scope_cache_size:
+                self._bm25_scope_cache.popitem(last=False)
+            bm25, internal_ids = cached
+            scores = bm25.get_scores(tokenized_query)
+            indexed_scores = list(zip(internal_ids, scores))
+        else:
+            if self.bm25 is None:
+                self.tokenized_corpus = [self.tokenize(doc["text"]) for doc in self.docs]
+                self.bm25 = BM25Okapi(self.tokenized_corpus)
+            scores = self.bm25.get_scores(tokenized_query)
+            indexed_scores = list(enumerate(scores))
         indexed_scores.sort(key=lambda x: x[1], reverse=True)
 
         results = []
         for idx, score in indexed_scores:
             doc = self.doc_id_to_doc[idx]
             if source_type is not None and doc["source_type"] != source_type:
+                continue
+            if dataset_scope is not None and doc.get("metadata", {}).get("dataset_scope") != dataset_scope:
+                continue
+            if not self._matches_deck_mode(doc, deck_mode):
+                continue
+            if not self._matches_entity_mode(doc, entity_mode):
                 continue
 
             results.append(
@@ -232,7 +294,15 @@ class HybridRetriever:
 
         return results
 
-    def dense_search(self, query: str, top_k: int = 10, source_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    def dense_search(
+        self,
+        query: str,
+        top_k: int = 10,
+        source_type: Optional[str] = None,
+        dataset_scope: Optional[str] = None,
+        deck_mode: Optional[str] = None,
+        entity_mode: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """返回向量索引中按余弦相似度排序的语义候选文档。"""
         if not self.dense_available:
             return []
@@ -244,6 +314,18 @@ class HybridRetriever:
             query=query_vector,
             limit=max(top_k * 3, 20),
             with_payload=True,
+            query_filter=(
+                Filter(
+                    must=[
+                        FieldCondition(
+                            key="metadata.dataset_scope",
+                            match=MatchValue(value=dataset_scope),
+                        )
+                    ]
+                )
+                if dataset_scope is not None
+                else None
+            ),
         )
 
         points = response.points if hasattr(response, "points") else []
@@ -254,6 +336,12 @@ class HybridRetriever:
             doc = self.doc_id_to_doc[internal_id]
 
             if source_type is not None and doc["source_type"] != source_type:
+                continue
+            if dataset_scope is not None and doc.get("metadata", {}).get("dataset_scope") != dataset_scope:
+                continue
+            if not self._matches_deck_mode(doc, deck_mode):
+                continue
+            if not self._matches_entity_mode(doc, entity_mode):
                 continue
 
             results.append(
@@ -267,6 +355,20 @@ class HybridRetriever:
                 break
 
         return results
+
+    @staticmethod
+    def _matches_deck_mode(doc: Dict[str, Any], deck_mode: Optional[str]) -> bool:
+        if deck_mode is None:
+            return True
+        document_mode = doc.get("metadata", {}).get("deck_mode")
+        return document_mode is None or document_mode == deck_mode
+
+    @staticmethod
+    def _matches_entity_mode(doc: Dict[str, Any], entity_mode: Optional[str]) -> bool:
+        if entity_mode is None:
+            return True
+        document_mode = doc.get("metadata", {}).get("entity_mode")
+        return document_mode is None or document_mode == entity_mode
 
     @staticmethod
     def normalize_scores(results: List[Dict[str, Any]]) -> Dict[int, float]:
@@ -294,14 +396,31 @@ class HybridRetriever:
         final_top_k: int = 5,
         alpha: float = 0.5,
         source_type: Optional[str] = None,
+        dataset_scope: Optional[str] = None,
+        deck_mode: Optional[str] = None,
+        entity_mode: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """以可审计的加权分数融合词法与稠密候选集。
 
         ``alpha`` 控制词法贡献。只被一路召回的文档仍会保留，缺失一路记为 0 分；
         这样既提升召回，也能解释它为什么排在当前位置。
         """
-        bm25_results = self.bm25_search(query, top_k=top_k_bm25, source_type=source_type)
-        dense_results = self.dense_search(query, top_k=top_k_dense, source_type=source_type)
+        bm25_results = self.bm25_search(
+            query,
+            top_k=top_k_bm25,
+            source_type=source_type,
+            dataset_scope=dataset_scope,
+            deck_mode=deck_mode,
+            entity_mode=entity_mode,
+        )
+        dense_results = self.dense_search(
+            query,
+            top_k=top_k_dense,
+            source_type=source_type,
+            dataset_scope=dataset_scope,
+            deck_mode=deck_mode,
+            entity_mode=entity_mode,
+        )
 
         bm25_norm = self.normalize_scores(bm25_results)
         dense_norm = self.normalize_scores(dense_results)

@@ -9,15 +9,16 @@ TOP_DECKS_FILE = DATA_DIR / "top_decks.json"
 CARDS_META_FILE = DATA_DIR / "cards_meta.json"
 RAG_DOCS_FILE = DATA_DIR / "rag_documents.json"
 
-# The API key is supplied by the process environment, never by source files.
-# This project uses the same OpenAI-compatible relay configured for Codex.
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
-OPENAI_WIRE_API = os.getenv("OPENAI_WIRE_API", "responses").strip().lower()
-OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "medium").strip().lower()
-# The project uses a consistent medium reasoning effort for parsing and final synthesis.
-PARSER_REASONING_EFFORT = os.getenv("PARSER_REASONING_EFFORT", "medium").strip().lower()
-SYNTHESIS_REASONING_EFFORT = os.getenv("SYNTHESIS_REASONING_EFFORT", "medium").strip().lower()
+# The credential is supplied by the process environment. Provider routing is a
+# project contract so a stale machine-level OPENAI_BASE_URL cannot silently
+# redirect this application to a different service.
+OPENAI_MODEL = "gpt-5.5"
+OPENAI_REVIEW_MODEL = "gpt-5.5"
+OPENAI_BASE_URL = "https://crs.ruinique.com"
+OPENAI_WIRE_API = "responses"
+OPENAI_REASONING_EFFORT = "medium"
+PARSER_REASONING_EFFORT = "medium"
+SYNTHESIS_REASONING_EFFORT = "medium"
 OPENAI_CLIENT_KWARGS = {"base_url": OPENAI_BASE_URL}
 
 def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -34,6 +35,11 @@ RUNTIME_ROLE = os.getenv("RUNTIME_ROLE", "all").strip().lower()
 if RUNTIME_ROLE not in {"all", "api", "collector"}:
     RUNTIME_ROLE = "all"
 SNAPSHOT_FOLLOWER_POLL_SECONDS = max(5, min(int(os.getenv("SNAPSHOT_FOLLOWER_POLL_SECONDS", "30")), 3600))
+SNAPSHOT_AUTO_FOLLOW_ENABLED = os.getenv("SNAPSHOT_AUTO_FOLLOW_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 RAG_INDEX_MODE = os.getenv("RAG_INDEX_MODE", "persistent").strip().lower()
 if RAG_INDEX_MODE not in {"persistent", "memory"}:
     RAG_INDEX_MODE = "persistent"
@@ -111,23 +117,27 @@ SUPERCELL_LIVE_DATA_ENABLED = os.getenv("SUPERCELL_LIVE_DATA_ENABLED", "true").s
 EXTERNAL_API_REQUIRED = os.getenv("EXTERNAL_API_REQUIRED", "false").strip().lower() in {"1", "true", "yes"}
 # A leaderboard request may require multiple official API calls. Five seconds is
 # too aggressive on ordinary residential networks and causes avoidable strict-mode failures.
-SUPERCELL_API_TIMEOUT_SECONDS = float(os.getenv("SUPERCELL_API_TIMEOUT_SECONDS", "15"))
+SUPERCELL_API_TIMEOUT_SECONDS = float(os.getenv("SUPERCELL_API_TIMEOUT_SECONDS", "30"))
 SUPERCELL_CACHE_TTL_SECONDS = 86400
-# Production uses one complete daily official sample. The public API exposes
+# Production uses one complete weekly official sample. The public API exposes
 # player battle logs rather than global card statistics, so every answer is
 # bound to this fixed, labelled sample instead of a user-selected sample size.
-SUPERCELL_MAX_TARGET_BATTLES = 20000
+SUPERCELL_MAX_TARGET_BATTLES = 200000
 SUPERCELL_TARGET_BATTLES = SUPERCELL_MAX_TARGET_BATTLES
-SUPERCELL_LEADERBOARD_PLAYERS = max(1, min(int(os.getenv("SUPERCELL_LEADERBOARD_PLAYERS", "3000")), 3000))
+# Collection starts from the global Path of Legend top 1,000, then expands
+# through opponent tags while the larger queue budget remains bounded.
+SUPERCELL_POL_SEED_PLAYERS = 1000
+SUPERCELL_LEADERBOARD_PLAYERS = max(1, min(int(os.getenv("SUPERCELL_LEADERBOARD_PLAYERS", "12000")), 20000))
 SUPERCELL_BATTLES_PER_PLAYER = max(1, min(int(os.getenv("SUPERCELL_BATTLES_PER_PLAYER", "25")), 25))
 # Sampling intentionally walks leaderboard rank order. A later rank must not
 # overtake an earlier one merely because its request returned faster.
 SUPERCELL_FETCH_CONCURRENCY = 1
 LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED = os.getenv("LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
 # Large samples intentionally trade freshness for controlled official API usage.
-SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND = max(0.1, float(os.getenv("SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND", "2")))
-SUPERCELL_HIGH_VOLUME_MAX_RETRIES = max(0, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_RETRIES", "0")), 5))
-SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = max(60, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS", "3600")), 7200))
+SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND = max(0.1, float(os.getenv("SUPERCELL_HIGH_VOLUME_REQUESTS_PER_SECOND", "1")))
+SUPERCELL_HIGH_VOLUME_MAX_RETRIES = max(0, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_RETRIES", "2")), 5))
+SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS = max(60, min(int(os.getenv("SUPERCELL_HIGH_VOLUME_MAX_REFRESH_SECONDS", "28800")), 86400))
+SNAPSHOT_PROGRESS_INTERVAL_SECONDS = max(60, min(int(os.getenv("SNAPSHOT_PROGRESS_INTERVAL_SECONDS", "3600")), 21600))
 
 
 def _parse_supercell_player_tags(value: str) -> tuple[str, ...]:

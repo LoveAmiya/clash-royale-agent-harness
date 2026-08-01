@@ -40,13 +40,11 @@ def build_default_registry(
     from skills.deck_skill import DeckRankingSkill
     from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
     from skills.rag_skill import RAGEvidenceSkill
-    from skills.schedule_skill import ScheduleQuerySkill
-    from skills.schedule_summary_skill import ScheduleSummarySkill
+    from skills.unsupported_clan_war_skill import UnsupportedClanWarSkill
 
     return SkillRegistry(
         [
-            ScheduleSummarySkill(),
-            ScheduleQuerySkill(),
+            UnsupportedClanWarSkill(),
             DeckRankingSkill(),
             CardCompareSkill(),
             CardRankLookupSkill(),

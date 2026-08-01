@@ -249,8 +249,8 @@ class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
 
         ready_snapshot = {
             "snapshot_id": "official-1",
-            "sample_battles": 20_000,
-            "target_battles": 20_000,
+            "sample_battles": runtime_multi.DAILY_TARGET_BATTLES,
+            "target_battles": runtime_multi.DAILY_TARGET_BATTLES,
             "shortfall_battles": 0,
             "collection_metrics": {"refresh_budget_exhausted": False, "rate_limited": 0},
         }

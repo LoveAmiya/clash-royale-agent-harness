@@ -212,12 +212,36 @@ class GroundedStreamBuffer:
         allowed_doc_ids: set[str] | list[str] | tuple[str, ...],
         *,
         stop_markers: tuple[str, ...] = (),
+        drop_unsupported: bool = False,
     ):
         self.evidence = evidence
         self.allowed_doc_ids = set(allowed_doc_ids)
         self.stop_markers = stop_markers
+        self.drop_unsupported = drop_unsupported
         self.pending = ""
         self.stopped = False
+        self.dropped_count = 0
+
+    def _validated_parts(self, parts: list[str]) -> list[str]:
+        accepted: list[str] = []
+        for part in parts:
+            if not part:
+                continue
+            try:
+                validate_answer_grounding(
+                    part,
+                    self.evidence,
+                    self.allowed_doc_ids,
+                    raise_on_failure=True,
+                    require_citations=False,
+                )
+            except GroundingValidationError:
+                if not self.drop_unsupported:
+                    raise
+                self.dropped_count += 1
+                continue
+            accepted.append(part)
+        return accepted
 
     def push(self, delta: str) -> list[str]:
         if self.stopped:
@@ -232,42 +256,19 @@ class GroundedStreamBuffer:
             self.stopped = True
             if not pending:
                 return []
-            validate_answer_grounding(
-                pending,
-                self.evidence,
-                self.allowed_doc_ids,
-                raise_on_failure=True,
-                require_citations=False,
-            )
-            return [pending]
+            return self._validated_parts([pending])
         parts = self._BOUNDARY.split(self.pending)
         if len(parts) == 1:
             return []
         self.pending = parts.pop()
-        for part in parts:
-            if part:
-                validate_answer_grounding(
-                    part,
-                    self.evidence,
-                    self.allowed_doc_ids,
-                    raise_on_failure=True,
-                    require_citations=False,
-                )
-        return [part for part in parts if part]
+        return self._validated_parts(parts)
 
     def finish(self) -> list[str]:
         if self.stopped or not self.pending:
             return []
         pending = self.pending
         self.pending = ""
-        validate_answer_grounding(
-            pending,
-            self.evidence,
-            self.allowed_doc_ids,
-            raise_on_failure=True,
-            require_citations=False,
-        )
-        return [pending]
+        return self._validated_parts([pending])
 
 
 def _probe_query(doc: dict[str, Any]) -> str:

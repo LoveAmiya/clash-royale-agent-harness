@@ -137,12 +137,12 @@ def build_cases(cards: list[dict]) -> list[dict]:
     for round_number in range(1, 12):
         cases.append({
             "id": f"schedule-round-{round_number:03d}",
-            "category": "schedule_direct_english",
+            "category": "removed_clan_war_feature",
             "question": f"round {round_number} match schedule",
             "expected_intent": "schedule_query",
-            "expected_skill": "ScheduleQuerySkill",
+            "expected_skill": "UnsupportedClanWarSkill",
             "expected_fields": {"round": round_number},
-            "answer_contains": [f"round={round_number}"],
+            "answer_contains": ["已从本项目移除"],
         })
 
     for index, question in enumerate([

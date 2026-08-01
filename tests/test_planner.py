@@ -35,33 +35,30 @@ class PlannerTests(unittest.TestCase):
             metadata={},
         )
 
-    def test_match_preparation_query_generates_plan(self):
+    def test_match_preparation_query_does_not_generate_plan(self):
         planner = RuleBasedPlanner()
         context = self.build_context({"intent": "match_preparation_query"})
+
+        self.assertIsNone(planner.build_plan(context))
+
+    def test_meta_analysis_plan_has_three_steps(self):
+        planner = RuleBasedPlanner()
+        context = self.build_context({"intent": "meta_analysis_query"})
 
         plan = planner.build_plan(context)
 
-        self.assertIsNotNone(plan)
-        self.assertEqual(plan.trigger_intent, "match_preparation_query")
+        self.assertEqual(len(plan.steps), 3)
 
-    def test_match_preparation_plan_has_four_steps(self):
+    def test_meta_analysis_plan_contains_expected_skills(self):
         planner = RuleBasedPlanner()
-        context = self.build_context({"intent": "match_preparation_query"})
-
-        plan = planner.build_plan(context)
-
-        self.assertEqual(len(plan.steps), 4)
-
-    def test_match_preparation_plan_contains_expected_skills(self):
-        planner = RuleBasedPlanner()
-        context = self.build_context({"intent": "match_preparation_query"})
+        context = self.build_context({"intent": "meta_analysis_query"})
 
         plan = planner.build_plan(context)
         skill_names = [step.skill_name for step in plan.steps]
 
         self.assertEqual(
             skill_names,
-            ["ScheduleQuerySkill", "DeckRankingSkill", "CardMetaSkill", "EvidenceSynthesisSkill"],
+            ["DeckRankingSkill", "CardMetaSkill", "EvidenceSynthesisSkill"],
         )
 
     def test_card_query_does_not_generate_plan(self):

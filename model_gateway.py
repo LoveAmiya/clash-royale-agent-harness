@@ -43,7 +43,10 @@ async def generate_model_text_stream(
 
     operation = "stream"
     _provider_guard.before_call(operation)
-    client = AsyncOpenAI(api_key=api_key, base_url=OPENAI_BASE_URL)
+    # The runtime owns retry/fallback policy. SDK-level retries can otherwise
+    # outlive the parser timeout and turn a 45-second bound into a much longer
+    # request with no useful status signal.
+    client = AsyncOpenAI(api_key=api_key, base_url=OPENAI_BASE_URL, max_retries=0)
     effort = reasoning_effort or OPENAI_REASONING_EFFORT
     emitted = False
     try:
@@ -114,7 +117,7 @@ async def generate_model_text(
 
     operation = "generate"
     _provider_guard.before_call(operation)
-    client = AsyncOpenAI(api_key=api_key, base_url=OPENAI_BASE_URL)
+    client = AsyncOpenAI(api_key=api_key, base_url=OPENAI_BASE_URL, max_retries=0)
     effort = reasoning_effort or OPENAI_REASONING_EFFORT
     try:
         if uses_responses_api():

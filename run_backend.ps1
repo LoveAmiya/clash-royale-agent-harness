@@ -13,15 +13,13 @@ if (Test-Path $localPython) {
 if (-not $env:RUNTIME_PORT) {
     $env:RUNTIME_PORT = "8091"
 }
+$runtimeRole = if ($env:RUNTIME_ROLE) { $env:RUNTIME_ROLE.ToLowerInvariant() } else { "all" }
 
-# Provider endpoints and credentials must come from the caller's environment.
-# Never hard-code a private relay or API key in this repository.
-if (-not $env:OPENAI_WIRE_API) {
-    $env:OPENAI_WIRE_API = "responses"
-}
-if (-not $env:OPENAI_MODEL) {
-    $env:OPENAI_MODEL = "gpt-5.5"
-}
+# Provider routing is fixed for this application. The key remains external.
+$env:OPENAI_BASE_URL = "https://crs.ruinique.com"
+$env:OPENAI_WIRE_API = "responses"
+$env:OPENAI_MODEL = "gpt-5.5"
+$env:OPENAI_REVIEW_MODEL = "gpt-5.5"
 $env:OPENAI_REASONING_EFFORT = "medium"
 $env:PARSER_REASONING_EFFORT = "medium"
 $env:SYNTHESIS_REASONING_EFFORT = "medium"
@@ -30,11 +28,18 @@ if (-not $env:EXTERNAL_API_REQUIRED) {
 }
 $env:SUPERCELL_CACHE_TTL_SECONDS = "86400"
 
-# A Codex-launched shell may not inherit variables added to the Windows user
-# environment after the desktop app started. Import the persisted API token
-# only when the current process does not already provide one; never print it.
-if ([string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)) {
-    $persistedSupercellToken = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
+# A Codex-launched shell may retain an older process value after the Windows
+# user environment is updated. Treat the persisted user OpenAI key as the
+# canonical local credential so a backend restart always picks up rotations.
+# Never print token values.
+$persistedSupercellToken = [Environment]::GetEnvironmentVariable("SUPERCELL_API_TOKEN", "User")
+$persistedOpenAIKey = [Environment]::GetEnvironmentVariable("OPENAI_API_KEY", "User")
+if (-not [string]::IsNullOrWhiteSpace($persistedOpenAIKey)) {
+    $env:OPENAI_API_KEY = $persistedOpenAIKey
+}
+if ($runtimeRole -eq "collector" -and -not [string]::IsNullOrWhiteSpace($persistedSupercellToken)) {
+    $env:SUPERCELL_API_TOKEN = $persistedSupercellToken
+} elseif ([string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)) {
     if (-not [string]::IsNullOrWhiteSpace($persistedSupercellToken)) {
         $env:SUPERCELL_API_TOKEN = $persistedSupercellToken
     }
@@ -42,6 +47,16 @@ if ([string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)) {
 
 $supercellTokenConfigured = -not [string]::IsNullOrWhiteSpace($env:SUPERCELL_API_TOKEN)
 $openaiKeyConfigured = -not [string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)
+
+$skipSupercellPreflight = $env:SUPERCELL_PREFLIGHT_SKIP -in @("1", "true", "TRUE", "yes", "YES")
+if ($runtimeRole -eq "collector" -and -not $skipSupercellPreflight) {
+    Write-Host "Running Supercell collector preflight..."
+    & $pythonExe -m supercell_preflight
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Supercell collector preflight failed. Update the API token IP allowlist before starting collection."
+        exit $LASTEXITCODE
+    }
+}
 
 Write-Host "Starting Clash Royale Agent backend..."
 Write-Host "Health: http://127.0.0.1:$env:RUNTIME_PORT/health"

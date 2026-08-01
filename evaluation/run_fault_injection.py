@@ -19,6 +19,7 @@ from typing import Any, Callable
 from model_resilience import ModelCircuitOpenError, ModelProviderGuard
 from rag_quality import validate_answer_grounding
 from runtime_hardening import ProcessQuota
+from evaluation.scorecard import attach_scorecard
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -346,6 +347,7 @@ def run_evaluation(
         "results": results,
         "failures": [item for item in results if not item["success"]],
     }
+    attach_scorecard(report, source="fault_injection")
     if report_path is not None:
         write_report(report, report_path)
     return report

@@ -13,6 +13,7 @@ from skills.deck_skill import DeckRankingSkill
 from skills.registry import SkillRegistry, build_default_registry
 from skills.rag_skill import RAGEvidenceSkill
 from skills.schedule_skill import ScheduleQuerySkill
+from skills.unsupported_clan_war_skill import UnsupportedClanWarSkill
 
 
 DATA_DIR = Path("data")
@@ -109,7 +110,11 @@ class SkillImplementationTests(unittest.TestCase):
 
         self.assertIsInstance(
             registry.resolve({"intent": "schedule_query", "round": 3}),
-            ScheduleQuerySkill,
+            UnsupportedClanWarSkill,
+        )
+        self.assertIsInstance(
+            registry.resolve({"intent": "match_preparation_query"}),
+            UnsupportedClanWarSkill,
         )
         self.assertIsInstance(
             registry.resolve({"intent": "deck_query", "rank": 1, "top_n": None}),
