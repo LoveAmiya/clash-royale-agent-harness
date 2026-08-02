@@ -1,4 +1,4 @@
-# Clash Royale Agent Harness
+﻿# Clash Royale Agent Harness
 
 [English](#english) | [中文](#中文)
 
@@ -50,10 +50,11 @@ single-snapshot compatibility path.
 
 Verified locally on 2026-08-02:
 
-- `764` unit/integration tests were discovered: `763` passed and `1` was skipped by design.
+- `766` unit/integration tests were discovered after adding the test-layer inventory gate.
 - `344/344` active deterministic evaluation cases passed; `4` optional RAG-route cases were skipped by design.
 - `25/25` snapshot citation/grounding probes passed, with an invalid-citation rate of `0`.
 - `28/28` deterministic fault-injection scenarios passed.
+- `80` retrieval-ablation cases measured BM25 vs Hybrid vs Hybrid + rerank; MRR@5 improved from `0.7556` to `0.9875`.
 - A local live-model RAG smoke test passed through `llm_parser` -> `EvidenceSynthesisSkill` -> `rag_synthesis`; provider generation and numeric/citation grounding both passed.
 
 ### Repository Layout
@@ -563,7 +564,7 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方�
 - Dockerfile 和 PowerShell 辅助脚本
 - 浏览器系统面板，展示快照血缘、RAG 质量门槛、模型熔断、配额、反馈和 Prometheus 指标
 
-2026-08-02 本机验收：共发现 `764` 项单元/集成测试，其中 `763` 项通过、`1` 项按设计跳过；确定性评测 `344/344` 个启用用例通过，另有 `4` 项可选 RAG 用例按设计跳过；`25/25` 快照引用/grounding 探针与 `28/28` 故障注入场景通过。本地真实模型 RAG 冒烟通过 LLM 解析、RAG 综合和数值/引用 grounding 校验。
+2026-08-02 本机验收：当前公开 inventory 发现 `766` 项测试；确定性评测 `344/344` 个启用用例通过，另有 `4` 项可选 RAG 用例按设计跳过；`25/25` 快照引用/grounding 探针与 `28/28` 故障注入场景通过。80 个检索消融用例中，MRR@5 从 BM25 的 `0.7556` 提升到 Hybrid + rerank 的 `0.9875`；本地真实模型 RAG 冒烟通过 LLM 解析、RAG 综合和数值/引用 grounding 校验。
 
 ### 项目结构
 
@@ -768,3 +769,4 @@ User Question
 [`docs/SNAPSHOT_COLLECTION_PROMPT.md`](docs/SNAPSHOT_COLLECTION_PROMPT.md) 创建新的采集任务。
 架构细节见
 [`docs/plans/rolling-path-of-legend-corpus.md`](docs/plans/rolling-path-of-legend-corpus.md)。
+

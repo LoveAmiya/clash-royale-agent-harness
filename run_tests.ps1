@@ -41,6 +41,11 @@ try {
         exit $LASTEXITCODE
     }
 
+    & $pythonExe -m evaluation.test_inventory --report evaluation\reports\test-inventory-latest.json
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
     if ($env:RUN_LIVE_API_SMOKE -eq "true") {
         $env:SUPERCELL_LIVE_DATA_ENABLED = if ($null -eq $originalLiveDataEnabled) { "true" } else { $originalLiveDataEnabled }
         $env:EXTERNAL_API_REQUIRED = if ($null -eq $originalExternalApiRequired) { "true" } else { $originalExternalApiRequired }
