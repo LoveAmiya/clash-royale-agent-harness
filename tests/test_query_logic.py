@@ -1,9 +1,8 @@
-import json
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from support import install_test_stubs
+from support import install_test_stubs, sample_cards, sample_decks, sample_schedule
 
 install_test_stubs()
 
@@ -16,19 +15,12 @@ from runtime_multi import build_chat_model, lifespan, query_needs_rag
 from query_parser import fallback_parse_query, normalize_parsed_query
 
 
-DATA_DIR = Path("data")
-
-
-def load_json(name: str):
-    return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
-
-
 class QueryLogicTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.schedule_data = load_json("schedule.json")
-        cls.deck_data = load_json("top_decks.json")
-        cls.card_data = load_json("cards_meta.json")
+        cls.schedule_data = sample_schedule()
+        cls.deck_data = sample_decks()
+        cls.card_data = sample_cards()
 
     def test_schedule_query_parses_round(self):
         parsed = fallback_parse_query("我们第五轮打谁", self.card_data)
@@ -260,7 +252,7 @@ class QueryLogicTests(unittest.TestCase):
             self.card_data,
         )
         self.assertIn("Fireball", answer)
-        self.assertIn("Supercell API live sample", answer)
+        self.assertIn("unit-test fixture", answer)
         self.assertNotIn("not global meta", answer)
 
     def test_live_card_boundary_is_fully_chinese(self):
@@ -383,16 +375,15 @@ class ModelFirstParserTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RuntimeLifecycleTests(unittest.IsolatedAsyncioTestCase):
-    async def test_lifespan_initializes_json_data_and_keeps_retriever_lazy(self):
+    async def test_lifespan_starts_without_private_legacy_json_data(self):
         app = FastAPI()
-        async with lifespan(app):
-            self.assertEqual(len(app.state.schedule_data), 11)
-            self.assertEqual(len(app.state.top_decks_data), 30)
-            self.assertTrue(app.state.cards_meta_data)
-            if app.state.live_snapshot is not None:
-                self.assertEqual(app.state.cards_meta_data, app.state.live_snapshot["cards_meta"])
-                self.assertEqual(app.state.top_decks_data, app.state.live_snapshot["top_decks"])
-            else:
+        with patch.object(runtime_multi, "load_json_file", side_effect=AssertionError("legacy JSON read")), patch.object(
+            runtime_multi, "RUNTIME_ROLE", "all"
+        ), patch.object(runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", False):
+            async with lifespan(app):
+                self.assertEqual(app.state.schedule_data, [])
+                self.assertEqual(app.state.top_decks_data, [])
+                self.assertTrue(app.state.cards_meta_data)
                 self.assertEqual(app.state.cards_meta_data, app.state.bootstrap_cards_meta_data)
 
 

@@ -229,7 +229,15 @@ To run only the Python tests:
 python -m unittest discover -s tests
 ```
 
-To inspect or reproduce the deterministic evaluation report directly:
+The unit suite and deterministic contract corpus use anonymous values generated
+from the reviewed card-name catalog. They do not read a private snapshot. Run
+the public quality gate plus synthetic fault injection with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
+```
+
+To inspect or reproduce the anonymous parser/routing contract report directly:
 
 ```powershell
 python -m evaluation.run_eval
@@ -477,22 +485,25 @@ monitoring rules, quality gates, and recovery boundaries are in
 `data/corpus/corpus.sqlite` is the long-term source of truth. Business requests do
 not query it directly; they use the current atomically published snapshot group.
 `official_daily_snapshot.json`, `top_decks.json`, `cards_meta.json`, and the old
-Qdrant directory remain frozen compatibility artifacts until their consumers are
-fully retired. They are not the rolling publication authority.
+Qdrant directory are ignored local migration artifacts. Runtime startup and the
+public test suite do not read them; the active snapshot group is the publication
+authority.
 
-Run the deterministic corpus, snapshot-derived citation gate, and fault-injection
-gate with `run_tests.ps1`. Dense retrieval needs Ollama and is opt-in:
+Run the anonymous deterministic corpus and fault-injection gate with
+`run_tests.ps1`. Snapshot-derived retrieval, citation, and live-model checks are
+private local gates because they require the unpublished snapshot. Dense
+retrieval needs Ollama and is run separately:
 
 ```powershell
-$env:RUN_RAG_RETRIEVAL_BENCHMARK = "true"
-.\run_tests.ps1
+python -m evaluation.retrieval_benchmark `
+  --report evaluation/reports/retrieval-latest.json
 ```
 
-`schedule.json` remains historical/inactive infrastructure, but clan-war schedule
-and preparation capabilities are not registered in the product. In strict mode,
-`cards_meta.json` is retained only as a parser catalog for card names and aliases;
-it is never passed to card, deck, matchup, or RAG answer Skills. The snapshot
-status endpoint exposes this split through `data_sources`.
+Clan-war schedule and preparation capabilities are not registered in the
+product. Card-name normalization uses only `data/card_aliases.zh-CN.json`, which
+contains terminology but no battles, players, or performance metrics. Card,
+deck, matchup, and RAG answers use the selected private snapshot group. The
+snapshot status endpoint exposes this split through `data_sources`.
 
 This project intentionally does not scrape RoyaleAPI from an LLM prompt or call its retired public API: RoyaleAPI's own legacy documentation states that its [public API was sunset](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/getting_started.md), and its [legacy popular-decks endpoint is not implemented](https://github.com/RoyaleAPI/cr-api-docs/blob/master/docs/endpoints/popular_decks.md). A future live-data adapter should use a maintained, documented and authorized provider with a deterministic ingestion job, not unrestricted model browsing.
 

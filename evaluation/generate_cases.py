@@ -9,9 +9,10 @@ snapshot or adding a new intent.  Runtime evaluation always consumes the static
 import json
 from pathlib import Path
 
+from evaluation.contract_fixtures import sample_cards
+
 
 ROOT = Path(__file__).resolve().parent.parent
-CARDS_FILE = ROOT / "data" / "cards_meta.json"
 CASES_FILE = ROOT / "evaluation" / "cases.jsonl"
 
 
@@ -246,7 +247,7 @@ def build_cases(cards: list[dict]) -> list[dict]:
 
 
 def main() -> int:
-    cards = json.loads(CARDS_FILE.read_text(encoding="utf-8"))
+    cards = sample_cards()
     cases = build_cases(cards)
     ids = [case["id"] for case in cases]
     if len(cases) < 300:

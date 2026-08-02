@@ -37,6 +37,9 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         rolling_manifest = patch.object(runtime_multi, "_active_snapshot_group_manifest", return_value=None)
         rolling_manifest.start()
         self.addCleanup(rolling_manifest.stop)
+        live_data_enabled = patch.object(runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", True)
+        live_data_enabled.start()
+        self.addCleanup(live_data_enabled.stop)
 
     def test_path_of_legend_scope_accepts_only_the_official_battle_type(self):
         self.assertTrue(is_path_of_legend_battle({"type": "pathOfLegend"}))

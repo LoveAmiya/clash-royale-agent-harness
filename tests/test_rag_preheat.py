@@ -267,7 +267,8 @@ class RAGPreheatTests(unittest.TestCase):
         app.state.rag_status = "building"
         app.state.rag_error = "embedding endpoint failed with internal detail"
 
-        status = runtime_multi.get_live_snapshot_status(app)
+        with patch.object(runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", True):
+            status = runtime_multi.get_live_snapshot_status(app)
 
         self.assertEqual(status["rag"]["status"], "building")
         self.assertEqual(status["rag"]["snapshot_id"], "official-old")
@@ -317,7 +318,8 @@ class RAGPreheatTests(unittest.TestCase):
             )
         )
 
-        status = runtime_multi.get_live_snapshot_status(app)
+        with patch.object(runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", True):
+            status = runtime_multi.get_live_snapshot_status(app)
 
         self.assertEqual(status["status"], "missing")
         self.assertEqual(status["snapshot_status"], "missing")

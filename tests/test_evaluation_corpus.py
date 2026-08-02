@@ -1,11 +1,10 @@
 import unittest
-from pathlib import Path
 
-from evaluation.run_eval import evaluate_case, load_cases, load_json
+from evaluation.run_eval import evaluate_case, load_cases
 from skills.registry import build_default_registry
+from support import sample_cards, sample_decks, sample_schedule
 
 
-ROOT = Path(__file__).resolve().parents[1]
 CASES = load_cases()
 REQUIRED_CATEGORIES = {
     "card_metric_english",
@@ -24,9 +23,9 @@ REQUIRED_CATEGORIES = {
 class EvaluationCorpusContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.schedule = load_json(ROOT / "data" / "schedule.json")
-        cls.decks = load_json(ROOT / "data" / "top_decks.json")
-        cls.cards = load_json(ROOT / "data" / "cards_meta.json")
+        cls.schedule = sample_schedule()
+        cls.decks = sample_decks()
+        cls.cards = sample_cards()
         cls.registry = build_default_registry()
 
     def test_corpus_is_static_unique_and_covers_required_product_capabilities(self):

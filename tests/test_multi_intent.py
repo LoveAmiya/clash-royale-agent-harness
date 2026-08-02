@@ -1,11 +1,9 @@
 import asyncio
-import json
 import time
 import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from support import install_test_stubs
+from support import install_test_stubs, sample_cards
 
 install_test_stubs()
 
@@ -16,17 +14,10 @@ from runtime_events import RuntimeEventEmitter
 import runtime_multi
 
 
-DATA_DIR = Path("data")
-
-
-def load_json(name: str):
-    return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
-
-
 class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        cls.card_data = load_json("cards_meta.json")
+        cls.card_data = sample_cards()
 
     def test_compound_question_creates_direct_card_and_rag_meta_subqueries(self):
         question = "\u96f7\u7535\u5de8\u4eba\u7684\u4f7f\u7528\u7387\u3001\u80dc\u7387\uff0c\u8fd8\u6709\u5f53\u524d\u73af\u5883\u4e3b\u6d41\u5361\u7ec4"
@@ -262,7 +253,7 @@ class MultiIntentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["model_stream"], "fallback_chunked")
 
     async def test_keeps_direct_result_when_rag_subquery_cannot_run(self):
-        card_data = load_json("cards_meta.json")
+        card_data = sample_cards()
         parsed = {
             "intent": "multi_intent",
             "subqueries": [

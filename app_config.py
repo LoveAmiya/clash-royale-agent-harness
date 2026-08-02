@@ -4,9 +4,10 @@ from pathlib import Path
 
 
 DATA_DIR = Path("data")
-SCHEDULE_FILE = DATA_DIR / "schedule.json"
-TOP_DECKS_FILE = DATA_DIR / "top_decks.json"
-CARDS_META_FILE = DATA_DIR / "cards_meta.json"
+# This is reviewed terminology configuration, not a published snapshot.
+CARD_ALIAS_FILE = DATA_DIR / "card_aliases.zh-CN.json"
+# Legacy single-snapshot RAG fallback. Rolling snapshot groups provide the
+# production corpus, but the compatibility reader remains for old archives.
 RAG_DOCS_FILE = DATA_DIR / "rag_documents.json"
 
 # The credential is supplied by the process environment. Provider routing is a

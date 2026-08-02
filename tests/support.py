@@ -2,6 +2,8 @@ import importlib.util
 import sys
 import types
 
+from evaluation.contract_fixtures import sample_cards, sample_decks, sample_schedule
+
 
 def _has_module(name: str) -> bool:
     if name in sys.modules:

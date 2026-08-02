@@ -1,8 +1,6 @@
-import json
 import unittest
-from pathlib import Path
 
-from support import install_test_stubs
+from support import install_test_stubs, sample_cards, sample_schedule
 
 install_test_stubs()
 
@@ -18,18 +16,11 @@ from skills.schedule_summary_skill import ScheduleSummarySkill
 from skills.unsupported_clan_war_skill import UnsupportedClanWarSkill
 
 
-DATA_DIR = Path("data")
-
-
-def load_json(name: str):
-    return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
-
-
 class BusinessSkillTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.card_data = load_json("cards_meta.json")
-        cls.schedule_data = load_json("schedule.json")
+        cls.card_data = sample_cards()
+        cls.schedule_data = sample_schedule()
 
     def build_context(self, parsed: dict) -> SkillContext:
         return SkillContext(

@@ -1,9 +1,7 @@
-import json
 import unittest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from support import install_test_stubs
+from support import install_test_stubs, sample_cards
 
 install_test_stubs()
 
@@ -17,17 +15,10 @@ from query_parser import (
 from runtime_multi import parse_user_query
 
 
-DATA_DIR = Path("data")
-
-
-def load_json(name: str):
-    return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
-
-
 class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        cls.card_data = load_json("cards_meta.json")
+        cls.card_data = sample_cards()
 
     def test_local_schedule_parse_has_high_confidence_metadata(self):
         parsed = fallback_parse_query("我们第五轮打谁", self.card_data)

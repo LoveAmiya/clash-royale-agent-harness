@@ -13,18 +13,14 @@ if str(ROOT) not in sys.path:
 
 from evaluation.metrics import summarize_results
 from evaluation.scorecard import attach_scorecard
+from evaluation.contract_fixtures import sample_cards, sample_decks, sample_schedule
 from query_parser import fallback_parse_multi_intent
 from skills.base import SkillContext
 from skills.registry import build_default_registry
 
 
-DATA_DIR = ROOT / "data"
 CASES_FILE = ROOT / "evaluation" / "cases.jsonl"
 REPORTS_DIR = ROOT / "evaluation" / "reports"
-
-
-def load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def load_cases() -> list[dict]:
@@ -208,9 +204,9 @@ def run_evaluation(
     deck_data: list[dict] | None = None,
     card_data: list[dict] | None = None,
 ) -> dict[str, Any]:
-    schedule_data = schedule_data if schedule_data is not None else load_json(DATA_DIR / "schedule.json")
-    deck_data = deck_data if deck_data is not None else load_json(DATA_DIR / "top_decks.json")
-    card_data = card_data if card_data is not None else load_json(DATA_DIR / "cards_meta.json")
+    schedule_data = schedule_data if schedule_data is not None else sample_schedule()
+    deck_data = deck_data if deck_data is not None else sample_decks()
+    card_data = card_data if card_data is not None else sample_cards()
     cases = cases if cases is not None else load_cases()
     registry = registry if registry is not None else build_default_registry()
 

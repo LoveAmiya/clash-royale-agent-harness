@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from support import install_test_stubs
+from support import install_test_stubs, sample_cards, sample_decks, sample_schedule
 
 install_test_stubs()
 
@@ -19,19 +19,12 @@ from query_answering import build_snapshot_fallback_answer
 from runtime_events import RuntimeEventEmitter
 
 
-DATA_DIR = Path("data")
-
-
-def load_json(name: str):
-    return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
-
-
 class MetaEvidenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.schedule_data = load_json("schedule.json")
-        cls.deck_data = load_json("top_decks.json")
-        cls.card_data = load_json("cards_meta.json")
+        cls.schedule_data = sample_schedule()
+        cls.deck_data = sample_decks()
+        cls.card_data = sample_cards()
 
     def test_evidence_pack_contains_local_facts_and_source_urls(self):
         evidence, sources = build_meta_evidence_pack(
@@ -42,8 +35,8 @@ class MetaEvidenceTests(unittest.TestCase):
 
         self.assertIn(self.deck_data[0]["deck_name"], evidence)
         self.assertIn("Fireball", evidence)
-        self.assertIn("Supercell API live sample", evidence)
-        self.assertIn("Supercell API live sample", sources)
+        self.assertIn("unit-test fixture", evidence)
+        self.assertIn("top_decks.json", sources)
 
     def test_snapshot_fallback_exposes_facts_and_data_boundary(self):
         answer = build_snapshot_fallback_answer(
@@ -52,7 +45,7 @@ class MetaEvidenceTests(unittest.TestCase):
         )
 
         self.assertIn(self.deck_data[0]["deck_name"], answer)
-        self.assertIn(self.card_data[0]["card_name"], answer)
+        self.assertIn("使用率靠前的卡牌", answer)
         self.assertIn("数据边界", answer)
         self.assertIn("不是 LLM 的策略推演", answer)
     def test_evidence_pack_labels_supercell_records_as_live_sources(self):

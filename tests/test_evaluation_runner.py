@@ -3,18 +3,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evaluation.run_eval import evaluate_case, load_json, run_evaluation
+from evaluation.run_eval import evaluate_case, run_evaluation
 from skills.registry import build_default_registry
-
-
-ROOT = Path(__file__).resolve().parents[1]
+from support import sample_cards, sample_decks, sample_schedule
 
 
 class EvaluationRunnerTests(unittest.TestCase):
     def setUp(self):
-        self.schedule = load_json(ROOT / "data" / "schedule.json")
-        self.decks = load_json(ROOT / "data" / "top_decks.json")
-        self.cards = load_json(ROOT / "data" / "cards_meta.json")
+        self.schedule = sample_schedule()
+        self.decks = sample_decks()
+        self.cards = sample_cards()
         self.registry = build_default_registry()
 
     def test_expectation_mismatches_are_reported_as_case_failures(self):

@@ -13,6 +13,7 @@ from pathlib import Path
 from model_gateway import generate_model_text
 from app_config import OPENAI_MODEL
 from evaluation.scorecard import attach_scorecard
+from evaluation.contract_fixtures import sample_cards
 from query_parser import PARSER_SYSTEM_PROMPT, extract_json_block, normalize_parsed_query
 from skills.base import SkillContext
 from skills.registry import build_default_registry
@@ -105,8 +106,7 @@ async def run(args: argparse.Namespace, report_path: Path) -> dict:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise SystemExit("OPENAI_API_KEY is required; refusing to use the fallback parser.")
-    root = Path(__file__).resolve().parent.parent
-    cards = json.loads((root / "data" / "cards_meta.json").read_text(encoding="utf-8"))
+    cards = sample_cards()
     registry = build_default_registry()
     cases = CASES[: args.limit] if args.limit is not None else CASES
     results_by_id: dict[int, dict] = {}

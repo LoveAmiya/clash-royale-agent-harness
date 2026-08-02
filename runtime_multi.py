@@ -27,21 +27,19 @@ from answer_presentation import normalize_answer_text
 
 from app_config import (
     DATA_DIR,
-    CARDS_META_FILE,
+    CARD_ALIAS_FILE,
     RUNTIME_HOST,
     RUNTIME_PORT,
     RUNTIME_ROLE,
     SNAPSHOT_FOLLOWER_POLL_SECONDS,
     SNAPSHOT_AUTO_FOLLOW_ENABLED,
     RAG_INDEX_MODE,
-    SCHEDULE_FILE,
     OPENAI_CLIENT_KWARGS,
     OPENAI_MODEL,
     PARSER_REASONING_EFFORT,
     OPENAI_REASONING_EFFORT,
     OPENAI_WIRE_API,
     PARSER_CALL_TIMEOUT_SECONDS,
-    TOP_DECKS_FILE,
     SUPERCELL_API_TOKEN,
     SUPERCELL_LIVE_DATA_ENABLED,
     EXTERNAL_API_REQUIRED,
@@ -148,6 +146,28 @@ def load_json_file(path: Path):
         raise FileNotFoundError(f"没有找到数据文件: {path.resolve()}")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_card_catalog(path: Path = CARD_ALIAS_FILE) -> list[dict]:
+    """Load the committed name catalog without treating it as snapshot metrics."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("card alias configuration is unavailable: %s", exc)
+        return []
+    cards = payload.get("cards") if isinstance(payload, dict) else None
+    if not isinstance(cards, dict):
+        logger.warning("card alias configuration has an invalid cards object")
+        return []
+    return [
+        {
+            "card_name": name,
+            "aliases": entry.get("aliases", []),
+            "display_name": entry.get("display_name"),
+        }
+        for name, entry in cards.items()
+        if isinstance(name, str) and name.strip() and isinstance(entry, dict)
+    ]
 
 
 class ProcessRequest(BaseModel):
@@ -1929,14 +1949,14 @@ async def lifespan(app: FastAPI):
         fail_mode=PROCESS_QUOTA_FAIL_MODE,
     )
     await app.state.process_quota.probe()
-    app.state.schedule_data = load_json_file(SCHEDULE_FILE)
-    app.state.bootstrap_top_decks_data = load_json_file(TOP_DECKS_FILE)
-    app.state.bootstrap_cards_meta_data = load_json_file(CARDS_META_FILE)
-    # Repository snapshots are only a non-strict fallback. In strict mode the
-    # active answer data starts empty and is populated by a complete official
-    # weekly snapshot (or restored official snapshot) only.
-    app.state.top_decks_data = [] if EXTERNAL_API_REQUIRED else list(app.state.bootstrap_top_decks_data)
-    app.state.cards_meta_data = [] if EXTERNAL_API_REQUIRED else list(app.state.bootstrap_cards_meta_data)
+    # Metrics and RAG evidence come only from a published private snapshot.
+    # The committed card catalog is retained solely for name normalization before
+    # a snapshot-backed structured query is selected.
+    app.state.schedule_data = []
+    app.state.bootstrap_top_decks_data = []
+    app.state.bootstrap_cards_meta_data = load_card_catalog()
+    app.state.top_decks_data = []
+    app.state.cards_meta_data = list(app.state.bootstrap_cards_meta_data)
     app.state.card_deck_stats_data = {}
     app.state.retriever = None
     app.state.rolling_retriever = None

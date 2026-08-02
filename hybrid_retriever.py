@@ -458,7 +458,10 @@ class HybridRetriever:
 
 def load_docs():
     if not DOCS_FILE.exists():
-        raise FileNotFoundError(f"没有找到 {DOCS_FILE}，请先执行 py rag_data_builder.py")
+        raise FileNotFoundError(
+            f"missing legacy RAG document file: {DOCS_FILE}; "
+            "publish a rolling snapshot group instead"
+        )
     with open(DOCS_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 

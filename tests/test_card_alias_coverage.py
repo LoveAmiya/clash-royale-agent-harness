@@ -14,17 +14,23 @@ from query_parser import (
 )
 
 
-CARDS = json.loads((Path("data") / "cards_meta.json").read_text(encoding="utf-8"))
+CATALOG = json.loads(
+    (Path(__file__).resolve().parents[1] / "data" / "card_aliases.zh-CN.json").read_text(encoding="utf-8")
+)
+CARDS = [
+    {"card_name": name, "aliases": entry.get("aliases", [])}
+    for name, entry in CATALOG["cards"].items()
+]
 
 
 class CardAliasCoverageTests(unittest.TestCase):
-    def test_every_repository_card_resolves_from_its_standard_english_name(self):
+    def test_every_reviewed_card_resolves_from_its_standard_english_name(self):
         for card in CARDS:
             canonical = card["card_name"]
             with self.subTest(card=canonical):
                 self.assertEqual(resolve_card_name(canonical, CARDS), canonical)
 
-    def test_every_repository_card_resolves_from_a_chinese_or_derived_chinese_alias(self):
+    def test_every_reviewed_card_resolves_from_a_chinese_or_derived_chinese_alias(self):
         aliases = build_card_aliases(CARDS)
         for card in CARDS:
             canonical = card["card_name"]
@@ -35,7 +41,7 @@ class CardAliasCoverageTests(unittest.TestCase):
                 self.assertTrue(chinese_aliases)
                 self.assertEqual(resolve_card_name(chinese_aliases[0], CARDS), canonical)
 
-    def test_every_repository_card_has_three_noncanonical_aliases(self):
+    def test_every_reviewed_card_has_three_noncanonical_aliases(self):
         aliases = build_card_aliases(CARDS)
         for card in CARDS:
             canonical = card["card_name"]

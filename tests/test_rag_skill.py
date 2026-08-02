@@ -1,9 +1,8 @@
-import json
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from support import install_test_stubs
+from support import install_test_stubs, sample_cards, sample_decks, sample_schedule
 
 install_test_stubs()
 
@@ -16,19 +15,12 @@ from skills.rag_skill import RAGEvidenceSkill
 from skills.registry import SkillRegistry
 
 
-DATA_DIR = Path("data")
-
-
-def load_json(name: str):
-    return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
-
-
 class RAGEvidenceSkillTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        cls.schedule_data = load_json("schedule.json")
-        cls.deck_data = load_json("top_decks.json")
-        cls.card_data = load_json("cards_meta.json")
+        cls.schedule_data = sample_schedule()
+        cls.deck_data = sample_decks()
+        cls.card_data = sample_cards()
 
     def build_context(
         self,
@@ -180,9 +172,9 @@ class StubSkill:
 class AnswerQueryRAGRoutingTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        cls.schedule_data = load_json("schedule.json")
-        cls.deck_data = load_json("top_decks.json")
-        cls.card_data = load_json("cards_meta.json")
+        cls.schedule_data = sample_schedule()
+        cls.deck_data = sample_decks()
+        cls.card_data = sample_cards()
 
     async def test_answer_query_uses_skill_registry_for_direct_queries(self):
         stub_skill = StubSkill()

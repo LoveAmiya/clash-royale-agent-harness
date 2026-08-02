@@ -1,19 +1,3 @@
-import json
-from pathlib import Path
-
-
-DATA_DIR = Path("data")
-SCHEDULE_FILE = DATA_DIR / "schedule.json"
-TOP_DECKS_FILE = DATA_DIR / "top_decks.json"
-CARDS_META_FILE = DATA_DIR / "cards_meta.json"
-OUTPUT_FILE = DATA_DIR / "rag_documents.json"
-
-
-def load_json(path: Path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
 def build_schedule_docs(schedule_data: list[dict]) -> list[dict]:
     docs = []
 
@@ -200,20 +184,10 @@ def build_strategy_docs() -> list[dict]:
 
 
 def main():
-    schedule_data = load_json(SCHEDULE_FILE)
-    deck_data = load_json(TOP_DECKS_FILE)
-    card_data = load_json(CARDS_META_FILE)
-
-    docs = []
-    docs.extend(build_schedule_docs(schedule_data))
-    docs.extend(build_deck_docs(deck_data))
-    docs.extend(build_card_docs(card_data))
-    docs.extend(build_strategy_docs())
-
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(docs, f, ensure_ascii=False, indent=2)
-
-    print(f"已生成 {len(docs)} 条 RAG 文档到 {OUTPUT_FILE}")
+    raise SystemExit(
+        "The legacy JSON RAG builder is retired. Use "
+        "scripts/materialize_rolling_snapshot.py for snapshot-group publication."
+    )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
 import json
 import unittest
-from pathlib import Path
 
-from support import install_test_stubs
+from support import install_test_stubs, sample_cards, sample_decks, sample_schedule
 
 install_test_stubs()
 
@@ -16,19 +15,12 @@ from skills.schedule_skill import ScheduleQuerySkill
 from skills.unsupported_clan_war_skill import UnsupportedClanWarSkill
 
 
-DATA_DIR = Path("data")
-
-
-def load_json(name: str):
-    return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
-
-
 class SkillImplementationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.schedule_data = load_json("schedule.json")
-        cls.deck_data = load_json("top_decks.json")
-        cls.card_data = load_json("cards_meta.json")
+        cls.schedule_data = sample_schedule()
+        cls.deck_data = sample_decks()
+        cls.card_data = sample_cards()
 
     def test_schedule_query_skill_matches_existing_builder(self):
         parsed = {"intent": "schedule_query", "round": 1, "date": None, "ask_players": False}
