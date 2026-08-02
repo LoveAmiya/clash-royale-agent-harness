@@ -1358,7 +1358,9 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
             captured.update(kwargs)
             return result
 
-        with patch.object(runtime_multi, "SUPERCELL_API_TOKEN", "test-token"), patch.object(
+        with patch.dict(runtime_multi.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(
+            runtime_multi, "SUPERCELL_API_TOKEN", "test-token"
+        ), patch.object(
             runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", True
         ), patch.object(runtime_multi, "EXTERNAL_API_REQUIRED", True, create=True), patch.object(
             runtime_multi,
@@ -1489,7 +1491,9 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        with patch.object(runtime_multi, "SUPERCELL_API_TOKEN", "test-token"), patch.object(
+        with patch.dict(runtime_multi.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(
+            runtime_multi, "SUPERCELL_API_TOKEN", "test-token"
+        ), patch.object(
             runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", True
         ), patch.object(runtime_multi, "EXTERNAL_API_REQUIRED", True, create=True), patch.object(
             runtime_multi,
