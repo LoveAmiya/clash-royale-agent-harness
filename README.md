@@ -8,7 +8,7 @@
 
 Clash Royale Agent Harness is a FastAPI-based data QA workflow for answering Clash Royale card, deck, matchup, and meta questions from official evidence.
 
-The system combines rule-based query parsing, skill routing, local JSON grounding, optional retrieval augmentation, traceable execution, and a browser chat interface. It is designed around a controlled domain workflow rather than a generic chatbot loop.
+The system uses LLM-first query parsing with deterministic validation and fallback, skill routing, local JSON grounding, retrieval augmentation, traceable execution, and a browser chat interface. It is designed around a controlled domain workflow rather than a generic chatbot loop.
 
 ### Current Production Data Path
 
@@ -16,8 +16,8 @@ The active data path is a rolling, deduplicated Path of Legend fact store in
 `data/corpus/corpus.sqlite`. Every production collection freezes the global top
 1,000 and expands only through accepted Path of Legend battles until 200,000
 unique battles are collected. The legacy mode name is `weekly_expanded`, but it
-now runs every day. The API publishes thirty fixed scopes: current and historical
-seven-day windows plus cumulative 35 days, each crossed with top
+now runs every day. The API publishes thirty fixed scopes: `7d`, `7-14d`,
+`14-21d`, `21-28d`, `28-35d`, and `35d`, each crossed with top
 100/200/500/1000/all. The browser selects the scope explicitly, so the model
 never routes the data source.
 
@@ -34,10 +34,10 @@ single-snapshot compatibility path.
 
 - FastAPI backend
 - Browser chat interface
-- Structured query parsing with optional LLM fallback
+- LLM-first structured query parsing with deterministic validation and fallback
 - Multi-intent decomposition with per-subquery execution and partial results
 - Skill registry and skill routing
-- Grounded answers from ten rolling Path of Legend dataset scopes
+- Grounded answers from thirty rolling Path of Legend dataset scopes
 - Advanced RAG path for open-ended meta and deck analysis
 - Traceable execution harness
 - Local evaluation suite and unit tests
@@ -48,7 +48,13 @@ single-snapshot compatibility path.
 - Split collector/API deployment with Caddy, Prometheus, Grafana, Loki, and Promtail
 - Browser operations dashboard for snapshot lineage, RAG quality gates, model circuit state, quota, feedback, and Prometheus metrics
 
-Verified on 2026-07-28: `638` unit/integration tests passed with `1` documented skip; the deterministic evaluation passed all `344` active cases, with `4` optional RAG cases skipped.
+Verified locally on 2026-08-02:
+
+- `764` unit/integration tests passed, with `1` documented skip.
+- `344/344` active deterministic evaluation cases passed; `4` optional RAG-route cases were skipped by design.
+- `25/25` snapshot citation/grounding probes passed, with an invalid-citation rate of `0`.
+- `28/28` deterministic fault-injection scenarios passed.
+- A local live-model RAG smoke test passed through `llm_parser` -> `EvidenceSynthesisSkill` -> `rag_synthesis`; provider generation and numeric/citation grounding both passed.
 
 ### Repository Layout
 
@@ -537,7 +543,7 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方�
 - Dockerfile 和 PowerShell 辅助脚本
 - 浏览器系统面板，展示快照血缘、RAG 质量门槛、模型熔断、配额、反馈和 Prometheus 指标
 
-2026-07-28 本机验收：`674` 项单元/集成测试通过，`1` 项按设计跳过；确定性评测 `344/344` 有效用例通过，另有 `4` 项可选 RAG 用例跳过。
+2026-08-02 本机验收：`764` 项单元/集成测试通过，`1` 项按设计跳过；确定性评测 `344/344` 有效用例通过，另有 `4` 项可选 RAG 用例按设计跳过；`25/25` 快照引用/grounding 探针与 `28/28` 故障注入场景通过。本地真实模型 RAG 冒烟通过 LLM 解析、RAG 综合和数值/引用 grounding 校验。
 
 ### 项目结构
 

@@ -10,6 +10,45 @@ if (Test-Path $localPython) {
     $pythonExe = "python"
 }
 
+function Resolve-RagDocumentsPath {
+    $legacyPath = Join-Path $PSScriptRoot "data\rag_documents.json"
+    if (Test-Path $legacyPath) {
+        return $legacyPath
+    }
+
+    $activeGroupPath = Join-Path $PSScriptRoot "data\active_snapshot_group.json"
+    if (Test-Path $activeGroupPath) {
+        try {
+            $activeGroup = Get-Content -Raw -LiteralPath $activeGroupPath | ConvertFrom-Json
+            if ($activeGroup.snapshot_group_id) {
+                $groupDocs = Join-Path $PSScriptRoot ("data\snapshot_groups\{0}\rag_documents.json" -f $activeGroup.snapshot_group_id)
+                if (Test-Path $groupDocs) {
+                    return $groupDocs
+                }
+            }
+        } catch {
+            Write-Warning "Unable to read active snapshot group pointer: $($_.Exception.Message)"
+        }
+    }
+
+    $officialPointerPath = Join-Path $PSScriptRoot "data\official_snapshot_pointer.json"
+    if (Test-Path $officialPointerPath) {
+        try {
+            $officialPointer = Get-Content -Raw -LiteralPath $officialPointerPath | ConvertFrom-Json
+            if ($officialPointer.snapshot_id) {
+                $archiveDocs = Join-Path $PSScriptRoot ("data\snapshot_archives\{0}\rag_documents.json" -f $officialPointer.snapshot_id)
+                if (Test-Path $archiveDocs) {
+                    return $archiveDocs
+                }
+            }
+        } catch {
+            Write-Warning "Unable to read official snapshot pointer: $($_.Exception.Message)"
+        }
+    }
+
+    throw "No RAG documents found. Expected data\rag_documents.json, active snapshot group documents, or official snapshot archive documents."
+}
+
 $originalLiveDataEnabled = $env:SUPERCELL_LIVE_DATA_ENABLED
 $originalExternalApiRequired = $env:EXTERNAL_API_REQUIRED
 $originalSupercellToken = $env:SUPERCELL_API_TOKEN
@@ -34,8 +73,9 @@ try {
         exit $LASTEXITCODE
     }
 
+    $ragDocumentsPath = Resolve-RagDocumentsPath
     & $pythonExe -m evaluation.citation_benchmark `
-        --documents data\rag_documents.json `
+        --documents $ragDocumentsPath `
         --report evaluation\reports\citation-latest.json
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
