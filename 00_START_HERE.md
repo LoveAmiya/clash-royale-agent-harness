@@ -3,6 +3,30 @@
 本文只描述当前生效的本机运行方式。采集操作请交给独立任务，并先阅读
 [`docs/SNAPSHOT_COLLECTION_HANDOFF.md`](docs/SNAPSHOT_COLLECTION_HANDOFF.md)。
 
+## 先选择运行目标
+
+本项目有三种彼此隔离的运行目标，不要把它们的依赖混在一起：
+
+1. **公开质量门**：只验证源码、匿名契约 fixtures 和故障降级，不需要真实 API Key，
+   也不读取任何私有快照。首次克隆后先运行 `run_tests.ps1`。
+2. **本地业务界面**：读取本机已发布的 SQLite 派生快照组。结构化页面直接查询本地数据；
+   自由问答的模型解析和 RAG 综合需要 `OPENAI_API_KEY`。
+3. **独立采集**：调用 Supercell API 生成或更新私有事实库，只允许采集任务读取
+   `SUPERCELL_API_TOKEN`。API 角色和前端都不负责采集。
+
+首次安装：
+
+```powershell
+Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
+```
+
+公开仓库不包含业务快照，因此公开克隆可以完整运行质量门和容器存活检查，但在挂载或生成
+授权的私有数据之前，不能提供真实卡牌、卡组、对局和 RAG 结果。
+
 ## 当前数据架构
 
 - 长期事实库：`data/corpus/corpus.sqlite`。
@@ -30,7 +54,8 @@ PARSER_REASONING_EFFORT=medium
 SYNTHESIS_REASONING_EFFORT=medium
 ```
 
-真实凭证只从当前进程或 Windows 用户环境读取，不写入仓库：
+真实凭证只从当前进程或 Windows 用户环境读取，不写入仓库。`OPENAI_API_KEY` 只用于模型解析、
+审查与综合；`SUPERCELL_API_TOKEN` 只用于独立采集：
 
 ```powershell
 [Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "<key>", "User")
@@ -39,6 +64,9 @@ SYNTHESIS_REASONING_EFFORT=medium
 
 修改用户环境变量后必须重启对应进程。采集前还必须确保 Supercell Key
 白名单包含当前公网出口 IP。
+
+`run_tests.ps1` 不需要上述任何真实凭证。脚本会临时放入字面量 `test-key`，仅用于覆盖
+“凭证已配置”分支；外部调用在公开门禁中被禁用或 mock，脚本结束后会恢复原环境变量。
 
 ## 启动后端
 
@@ -166,6 +194,13 @@ d28_35   28-35 天前
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
+
+该命令与 GitHub Actions 使用同一公开门禁：单元/集成测试、348 条匿名契约评测和 28 条
+合成故障注入。它不读取 `data/corpus/corpus.sqlite`、活动快照组、真实 Key 或网络 provider。
+
+2026-08-02 本机验证结果：共发现 `764` 项单元/集成测试，其中 `763` 项通过、`1` 项按设计
+跳过；`344/344` 个启用的确定性评测用例通过，另有 `4` 个可选 RAG 路由用例跳过；
+`28/28` 个故障注入场景通过。
 
 只运行单元测试：
 

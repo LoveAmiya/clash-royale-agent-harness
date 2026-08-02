@@ -8,7 +8,7 @@
 
 Clash Royale Agent Harness is a FastAPI-based data QA workflow for answering Clash Royale card, deck, matchup, and meta questions from official evidence.
 
-The system uses LLM-first query parsing with deterministic validation and fallback, skill routing, local JSON grounding, retrieval augmentation, traceable execution, and a browser chat interface. It is designed around a controlled domain workflow rather than a generic chatbot loop.
+The system uses LLM-first query parsing with deterministic validation and fallback, skill routing, atomically published SQLite-derived snapshot grounding, retrieval augmentation, traceable execution, and a browser chat interface. It is designed around a controlled domain workflow rather than a generic chatbot loop.
 
 ### Current Production Data Path
 
@@ -50,7 +50,7 @@ single-snapshot compatibility path.
 
 Verified locally on 2026-08-02:
 
-- `764` unit/integration tests passed, with `1` documented skip.
+- `764` unit/integration tests were discovered: `763` passed and `1` was skipped by design.
 - `344/344` active deterministic evaluation cases passed; `4` optional RAG-route cases were skipped by design.
 - `25/25` snapshot citation/grounding probes passed, with an invalid-citation rate of `0`.
 - `28/28` deterministic fault-injection scenarios passed.
@@ -59,14 +59,14 @@ Verified locally on 2026-08-02:
 ### Repository Layout
 
 ```text
-data/                    Local schedule, card, deck, and retrieval data
+data/                    Private local snapshots plus the tracked safe alias catalog
 evaluation/              Evaluation cases and metrics
 harness/                 Skill execution and trace harness
 planner/                 Lightweight planning layer
 skills/                  Skill registry and domain skills
 tests/                   Unit tests
 app_config.py            Environment-driven configuration
-answer_builder.py        Local JSON answer builder
+answer_builder.py        Deterministic structured answer builder
 query_parser.py          Natural-language query parser
 query_answering.py       Direct query and RAG routing
 runtime_multi.py         FastAPI backend entry point
@@ -84,7 +84,15 @@ cd clash-royale-agent-harness
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+.\run_tests.ps1
 ```
+
+The public quality gate needs neither a real API key nor private snapshot data.
+It temporarily uses the literal sentinel `test-key` to exercise configured-key
+branches while external providers are disabled or mocked, then restores the
+caller's environment. A public clone can run all deterministic tests and
+container liveness checks; data-backed product features require a separately
+generated or mounted authorized private data volume.
 
 Create a local environment file only when optional providers are needed:
 
@@ -194,7 +202,7 @@ curl -X POST http://127.0.0.1:8091/process `
 .\run_tests.ps1
 ```
 
-This is the default quality gate. It runs the complete unit/integration suite,
+This is the default credential-free quality gate. It runs the complete unit/integration suite,
 then the static 348-case deterministic evaluation corpus. The corpus covers
 English card metrics, Chinese aliases, multiple requested metrics, card
 comparisons, rank lookups, deck rankings, schedule queries, out-of-domain
@@ -202,7 +210,8 @@ rejections, RAG routing, and multi-intent decomposition. Each invocation writes
 a new JSON report under `evaluation/reports/`; failure rows are retained and the
 script exits non-zero, so they cannot be hidden by a green unit-test run.
 
-GitHub Actions runs this deterministic gate and a container liveness check for
+Neither the test runner nor GitHub Actions reads a private snapshot or makes a
+real model/Supercell request. GitHub Actions runs this deterministic gate and a container liveness check for
 pull requests and `main` pushes without external credentials. The separate
 manual `Live API Smoke` workflow must run on a protected self-hosted runner whose
 public IP is registered with Supercell; it can use repository secrets and upload
@@ -525,7 +534,7 @@ User Question
 
 Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方数据问答工作流，用于回答单卡、卡组、对局和环境分析问题。
 
-系统结合了规则解析、Skill 路由、本地 JSON 事实数据、可选检索增强、可追踪执行链路和浏览器聊天界面。项目重点是受控领域工作流，而不是泛化聊天机器人。
+系统结合了大模型优先的结构化解析、确定性校验与降级、Skill 路由、SQLite 派生快照 grounding、检索增强、可追踪执行链路和浏览器界面。项目重点是受控领域工作流，而不是泛化聊天机器人。
 
 ### 当前生产数据路径
 
@@ -545,7 +554,7 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方�
 
 - FastAPI 后端
 - 浏览器多视图界面：总览、自由问答、单卡、双卡、卡组画像、精确对阵和环境体系
-- 结构化问题解析，并支持可选 LLM fallback
+- 大模型优先的结构化问题解析，并支持确定性校验与 fallback
 - Skill 注册表和 Skill 路由
 - 基于三十个滚动传奇之路范围的卡牌、卡组和对局事实回答
 - 面向开放环境分析的高级 RAG 链路
@@ -554,19 +563,19 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方�
 - Dockerfile 和 PowerShell 辅助脚本
 - 浏览器系统面板，展示快照血缘、RAG 质量门槛、模型熔断、配额、反馈和 Prometheus 指标
 
-2026-08-02 本机验收：`764` 项单元/集成测试通过，`1` 项按设计跳过；确定性评测 `344/344` 有效用例通过，另有 `4` 项可选 RAG 用例按设计跳过；`25/25` 快照引用/grounding 探针与 `28/28` 故障注入场景通过。本地真实模型 RAG 冒烟通过 LLM 解析、RAG 综合和数值/引用 grounding 校验。
+2026-08-02 本机验收：共发现 `764` 项单元/集成测试，其中 `763` 项通过、`1` 项按设计跳过；确定性评测 `344/344` 个启用用例通过，另有 `4` 项可选 RAG 用例按设计跳过；`25/25` 快照引用/grounding 探针与 `28/28` 故障注入场景通过。本地真实模型 RAG 冒烟通过 LLM 解析、RAG 综合和数值/引用 grounding 校验。
 
 ### 项目结构
 
 ```text
-data/                    官方快照、结构化索引和检索数据
+data/                    私有本地快照及可公开的安全别名配置
 evaluation/              评测用例和指标
 harness/                 Skill 执行与 trace harness
 planner/                 轻量规划层
 skills/                  Skill 注册表和领域技能
 tests/                   单元测试
 app_config.py            环境变量驱动配置
-answer_builder.py        本地 JSON 答案构建
+answer_builder.py        确定性结构化答案构建
 query_parser.py          自然语言问题解析
 query_answering.py       直接查询与 RAG 路由
 runtime_multi.py         FastAPI 后端入口
@@ -585,7 +594,13 @@ cd clash-royale-agent-harness
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+.\run_tests.ps1
 ```
+
+公开质量门不需要真实 API Key 或私有快照。脚本只会临时使用字面量 `test-key` 覆盖
+“已配置凭证”分支，公开测试中的外部 provider 均被禁用或 mock，结束后恢复调用者环境。
+因此公开克隆可以运行完整确定性门禁和容器存活检查；真实数据功能仍需单独生成或挂载
+经过授权的私有数据目录。
 
 只有在需要可选 provider 时，才需要创建本地环境变量文件：
 
@@ -678,6 +693,9 @@ curl -X POST http://127.0.0.1:8091/process `
 ```powershell
 .\run_tests.ps1
 ```
+
+该公开门禁与 GitHub Actions 一致：不读取私有 SQLite/活动快照，不使用真实模型或
+Supercell 凭证，也不发起真实 provider 请求。
 
 或：
 
