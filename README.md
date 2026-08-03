@@ -26,6 +26,23 @@ complete, `full_loadout` (tower, eight cards, evolutions, and elite slots). Raw
 battles are not embedded. Structured statistics and high-density RAG evidence
 are materialized locally and switched as one atomic snapshot group.
 
+#### Card identifiers by query mode
+
+The two deck modes intentionally use different identifiers and must not share a
+request catalog:
+
+| Mode | Request and storage key | Display text |
+|---|---|---|
+| `base8` | Exact Supercell canonical English card name, for example `Archers` or `Fireball` | Chinese names are UI labels and parser aliases |
+| `full_loadout` | Digits-only official tower/card IDs plus `evolution_level` and `elite`, for example card `26000001` | Chinese names come from the loadout catalog |
+
+The legacy field name `card_id` in base-eight responses may therefore contain
+an English canonical name. In full-loadout requests, `card_id` and `tower_id`
+must be official numeric IDs. The backend does not guess or silently convert
+between these contracts, and full-loadout queries never fall back to base-eight
+statistics. The authoritative contract is
+[`docs/FULL_LOADOUT_DATA_CONTRACT.md`](docs/FULL_LOADOUT_DATA_CONTRACT.md).
+
 Use `GET /api/datasets` and `data/active_snapshot_group.json` as the rolling
 publication authority. `GET /snapshot/status` is retained for the legacy
 single-snapshot compatibility path.
@@ -232,6 +249,10 @@ credentials, or aggregate performance data.
 Git history must not be used as a snapshot transport. Share an approved local
 export out of band when analysis access is intentional; never commit it or bake
 it into a container image.
+
+For a code-only push, stage an explicit allowlist of reviewed files. Never use
+`git add .` in this repository. The command-by-command explanation and privacy
+check are maintained in [`00_START_HERE.md`](00_START_HERE.md#远程仓库与私有数据).
 
 To run only the Python tests:
 
@@ -548,6 +569,20 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方�
 同一次 battlelog 同时产生 `base8` 和可用时的 `full_loadout`（塔楼、八卡、觉醒、精英）。
 单场对局不进入向量库；本地只物化结构化统计和高密度 RAG 聚合证据。
 
+#### 两种口径的标识符合同
+
+两种卡组口径故意使用不同主键，不允许共用请求目录：
+
+| 口径 | 请求与存储主键 | 页面显示 |
+|---|---|---|
+| `base8` | Supercell 英文标准名精确值，例如 `Archers`、`Fireball` | 中文名称只作为页面标签和解析别名 |
+| `full_loadout` | 纯数字官方塔楼/卡牌 ID，并携带 `evolution_level`、`elite`，例如卡牌 `26000001` | 中文名称来自完整配置目录 |
+
+因此，基础八卡响应中的历史字段 `card_id` 可能装载英文标准名；完整配置请求中的
+`card_id` 和 `tower_id` 则必须是官方数字 ID。后端不猜测、不静默转换两种合同，
+完整配置也不回退到基础八卡统计。权威定义见
+[`docs/FULL_LOADOUT_DATA_CONTRACT.md`](docs/FULL_LOADOUT_DATA_CONTRACT.md)。
+
 滚动发布状态以 `GET /api/datasets` 和 `data/active_snapshot_group.json` 为准。
 `GET /snapshot/status` 是保留的旧单快照兼容接口。
 
@@ -620,6 +655,9 @@ Git，也不打进 Docker 镜像。`data/` 下唯一允许跟踪的是人工审�
 
 因此，新克隆的公开代码仓库不会自带业务数据；运行数据功能前必须在本机单独采集，或挂载
 经过授权的私有数据目录。Git 历史不是数据分发渠道。
+
+推送代码时必须按已审查文件白名单显式暂存，禁止使用 `git add .`。逐条命令的作用和
+隐私检查步骤见 [`00_START_HERE.md`](00_START_HERE.md#远程仓库与私有数据)。
 
 ### 启动后端
 

@@ -26,7 +26,9 @@ docs/plans/rolling-path-of-legend-corpus.md，然后严格按文档接管传奇�
 
 采集同时保留 base8 和 full_loadout（塔楼、八卡、觉醒、精英），不能改变基础 battle_id。
 完整配置缺失或非法时只能排除 full_loadout，不能丢弃合法 base8 对局。采集、清洗、去重、
-统计、RAG 文档生成和审计禁止调用云端 LLM 或云端 embedding；本机 Ollama 只允许在验收
+统计和 API 必须保持标识符边界：base8 使用 Supercell 英文标准名，full_loadout 的塔楼和
+卡牌使用纯数字官方 ID，中文名称只用于显示和别名解析，不能混用两种主键。RAG 文档生成
+和审计禁止调用云端 LLM 或云端 embedding；本机 Ollama 只允许在验收
 通过后的三十范围发布阶段按现有链路运行。
 
 采集运行期间只做低 Token 只读监控。每小时读取一次

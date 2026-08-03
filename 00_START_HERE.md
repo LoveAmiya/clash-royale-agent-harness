@@ -154,6 +154,17 @@ d28_35   28-35 天前
 `base8` 会覆盖所有符合基础八卡合同的有效事实。`full_loadout` 只使用同时具备合法塔楼、
 八卡 ID 和觉醒/精英槽位的对局；没有精确样本时返回无证据，不自动回退到 `base8`。
 
+两种口径的标识符合同固定如下：
+
+| 口径 | 卡牌主键 | 请求目录 | 规则 |
+|---|---|---|---|
+| `base8` | Supercell 英文标准名，例如 `Archers` | `GET /api/cards/catalog` | 中文只用于显示和别名解析 |
+| `full_loadout` | 纯数字官方卡牌 ID，例如 `26000001` | `GET /api/loadouts/catalog` | 另需纯数字 `tower_id` 和每张卡的特殊状态 |
+
+不要把基础八卡目录中的英文标准名填进完整配置的 `card_id`。后端不会按中文或英文名称
+猜测官方 ID；此类请求固定返回 `INVALID_FULL_LOADOUT`。页面应显示中文名称，但普通模式
+提交英文标准名，完整配置模式提交官方数字 ID。这是接口合同，不是数据缺失或语言兼容问题。
+
 完整配置入口需要同时满足两个状态：
 
 - `complete_loadout_ready=true`：当前范围存在合法完整载荷或完整卡组统计。
@@ -227,4 +238,55 @@ Git 和 Docker 镜像只发布源码、测试、文档、配置模板，以及�
 配置。`data/` 中的原始对局、事实库、统计、RAG 文档、向量索引、状态与断点，连同日志和
 导出文件，都必须留在本机。公开克隆不附带业务数据，需要通过独立采集任务生成或挂载经
 授权的私有数据目录。
+
+### 安全推送代码
+
+每次推送都先列出允许公开的文件，显式暂存。下面的文件列表对应当前完整配置修复和文档
+更新；后续提交应按实际审查结果修改列表，不能为了省事改用 `git add .`：
+
+```powershell
+Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+
+$publicFiles = @(
+  'structured_query.py'
+  'web_ui_template.py'
+  'tests/test_structured_frontend.py'
+  'tests/test_structured_stats.py'
+  'README.md'
+  '00_START_HERE.md'
+  'docs/FULL_LOADOUT_DATA_CONTRACT.md'
+  'docs/SNAPSHOT_COLLECTION_HANDOFF.md'
+  'docs/SNAPSHOT_COLLECTION_PROMPT.md'
+  'docs/card_aliases.md'
+  'docs/decisions/ADR-010-base8-and-full-loadout-facts.md'
+)
+
+git status --short
+git add -- $publicFiles
+git diff --cached --name-only
+git diff --cached --stat
+git diff --cached --name-only |
+  Select-String -Pattern '^data/|^tmp/|\.env|\.sqlite|\.sqlite3|\.db|\.jsonl|\.key|\.pem'
+git commit -m 'fix: align full-loadout identifiers and documentation'
+git push origin main
+```
+
+各命令的作用：
+
+| 命令 | 作用 | 通过标准 |
+|---|---|---|
+| `Set-Location ...` | 进入本项目仓库，避免在错误目录操作 Git | 当前目录是项目根目录 |
+| `$publicFiles = @(...)` | 建立本次允许公开的文件白名单 | 列表中只有已审查源码、测试和文档 |
+| `git status --short` | 查看修改、未跟踪和暂存状态 | 先识别不应提交的私有或无关文件 |
+| `git add -- $publicFiles` | 只暂存白名单文件；`--` 结束 Git 选项解析 | 不会顺带加入 `data/`、日志或其他未跟踪文件 |
+| `git diff --cached --name-only` | 列出即将进入提交的文件 | 输出必须与白名单一致 |
+| `git diff --cached --stat` | 检查暂存变更规模 | 没有异常大文件或数据文件 |
+| `Select-String ...` | 扫描暂存路径中的常见私有数据和密钥文件类型 | 应当没有输出 |
+| `git commit -m ...` | 在本地创建一个包含当前暂存内容的提交 | 提交成功且不包含私有文件 |
+| `git push origin main` | 把本地 `main` 新提交发送到远程 `origin` | 远程更新成功 |
+
+`.gitignore` 是最后一道防误操作边界，不代替暂存清单审查。当前规则忽略 `data/**`、
+SQLite、日志、`tmp/`、导出和 `.env`；唯一允许跟踪的 `data/` 文件是
+`data/card_aliases.zh-CN.json`，其中只能包含人工审阅的名称和别名，不能包含对局、
+玩家标识、统计或凭据。
 

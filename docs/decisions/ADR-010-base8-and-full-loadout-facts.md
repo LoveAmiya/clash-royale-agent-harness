@@ -6,6 +6,8 @@
 
 一次官方 battlelog 采集保留足够的结构化字段，同时派生 `base8` 和 `full_loadout`。完整配置不改变稳定对局 ID，而是以可补全的一对一载荷表关联基础事实。旧快照只参与 `base8`；从首个新周采开始才产生真实完整配置统计。
 
+两种口径的主键不同且不得混用：`base8` 使用 Supercell 英文标准名，`full_loadout` 使用纯数字官方塔楼和卡牌 ID；中文名称只用于显示与别名解析。前端分别从 `/api/cards/catalog` 和 `/api/loadouts/catalog` 取得请求值，后端不猜测转换，也不把完整配置请求回退到基础统计。
+
 官方 `evolutionLevel` 的当前载荷编码按 `0=普通、1=觉醒、2=精英` 处理。未知编码不猜测，降级为仅基础 8 卡。塔楼读取官方 `supportCards`，并兼容 `towerTroop`。
 
 ## 原因
