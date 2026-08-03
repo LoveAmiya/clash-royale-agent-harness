@@ -552,7 +552,8 @@ HTML_PAGE = r"""
           renderLoadoutDetails("deck-profile", "deckLoadoutDetails");
           renderLoadoutDetails("matchup-a", "matchupALoadoutDetails");
           renderLoadoutDetails("matchup-b", "matchupBLoadoutDetails");
-          ["single-card", "compare-cards"].forEach(name => state.pickers.get(name)?.render());
+          ["single-card", "compare-cards", "deck-profile", "matchup-a", "matchup-b"]
+            .forEach(name => state.pickers.get(name)?.render());
         }).catch(error => {
           ["deckLoadoutDetails", "matchupALoadoutDetails", "matchupBLoadoutDetails"].forEach(id => {
             const element = document.getElementById(id);
@@ -568,11 +569,15 @@ HTML_PAGE = r"""
         dataset.complete_loadout_ready !== true || dataset.entity_stats_ready !== true
       )) return;
       state.entityMode = mode;
-      ["single-card", "compare-cards"].forEach(name => {
+      ["single-card", "compare-cards", "deck-profile", "matchup-a", "matchup-b"].forEach(name => {
         const picker = state.pickers.get(name);
         if (picker) picker.selection.splice(0, picker.selection.length);
       });
       applyDataMode();
+      if (state.deckMode === "base8") {
+        ["single-card", "compare-cards", "deck-profile", "matchup-a", "matchup-b"]
+          .forEach(name => state.pickers.get(name)?.render());
+      }
       const activeView = document.querySelector(".view:not([hidden])")?.dataset.page;
       if (activeView === "rankings") loadCardRankings();
     }
@@ -607,9 +612,10 @@ HTML_PAGE = r"""
       const tower = make("select", "loadout-select");
       tower.appendChild(make("option", "", "请选择塔楼"));
       (state.loadoutCatalog.towers || []).forEach(item => {
-        const option = make("option", "", item.display_name_zh || item.id);
-        option.value = item.id;
-        option.selected = config.towerId === item.id;
+        const towerId = item.tower_id || item.id;
+        const option = make("option", "", item.display_name_zh || towerId);
+        option.value = towerId;
+        option.selected = config.towerId === towerId;
         tower.appendChild(option);
       });
       tower.addEventListener("change", () => { config.towerId = tower.value; });
@@ -718,6 +724,10 @@ HTML_PAGE = r"""
     document.querySelectorAll(".nav-button").forEach(button => button.addEventListener("click", () => activateView(button.dataset.view)));
 
     function pickerCatalog(pickerName) {
+      const fullLoadoutPickers = ["deck-profile", "matchup-a", "matchup-b"];
+      if (state.deckMode === "full_loadout" && fullLoadoutPickers.includes(pickerName)) {
+        return state.loadoutCatalog?.cards || [];
+      }
       return state.entityMode === "loadout_entity" && ["single-card", "compare-cards"].includes(pickerName)
         ? state.entityCatalog
         : state.catalog;
@@ -808,7 +818,9 @@ HTML_PAGE = r"""
       parent.appendChild(make("div", "warning", warning.code === "LOW_SAMPLE_WARNING" ? `低样本：${warning.matched_sample_count} 场` : warning.message));
     }
     function displayCard(cardId) {
-      return state.catalog.find(card => card.card_id === cardId)?.display_name_zh || cardId;
+      return state.loadoutCatalog?.cards?.find(card => card.card_id === cardId)?.display_name_zh
+        || state.catalog.find(card => card.card_id === cardId)?.display_name_zh
+        || cardId;
     }
     function formatLoadout(loadout) {
       if (!loadout) return "-";

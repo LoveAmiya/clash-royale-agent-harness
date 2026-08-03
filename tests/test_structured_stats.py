@@ -379,6 +379,10 @@ class StructuredStatsBuildTests(unittest.TestCase):
             full_matchup = repository.full_loadout_matchup(full_a, full_b)
             self.assertEqual(full_matchup["matched_sample_count"], 3)
             self.assertEqual(full_matchup["loadout_a"]["clean_win_rate"], 50.0)
+            invalid_tower = {**full_a, "tower": {"id": "undefined"}}
+            with self.assertRaises(StructuredQueryError) as invalid:
+                repository.full_loadout_profile(invalid_tower)
+            self.assertEqual(invalid.exception.code, "INVALID_FULL_LOADOUT")
             catalog = repository.loadout_catalog()
             self.assertEqual(len(catalog["towers"]), 2)
             self.assertEqual(len(catalog["cards"]), 16)

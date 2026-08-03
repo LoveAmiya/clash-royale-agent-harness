@@ -112,6 +112,23 @@ class StructuredFrontendContractTests(unittest.TestCase):
         self.assertIn('deck_mode: state.deckMode', html)
         self.assertIn('entity_mode: state.entityMode', html)
 
+    def test_frontend_uses_tower_id_from_full_loadout_catalog(self):
+        html = web_app.HTML_PAGE
+
+        self.assertIn("const towerId = item.tower_id || item.id", html)
+        self.assertIn("option.value = towerId", html)
+        self.assertNotIn("option.value = item.id", html)
+
+    def test_full_loadout_deck_pickers_use_official_card_ids(self):
+        html = web_app.HTML_PAGE
+
+        self.assertIn('const fullLoadoutPickers = ["deck-profile", "matchup-a", "matchup-b"]', html)
+        self.assertIn(
+            'if (state.deckMode === "full_loadout" && fullLoadoutPickers.includes(pickerName))',
+            html,
+        )
+        self.assertIn("return state.loadoutCatalog?.cards || []", html)
+
     def test_free_answer_and_environment_analysis_share_selected_deck_mode(self):
         html = web_app.HTML_PAGE
 

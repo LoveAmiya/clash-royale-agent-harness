@@ -266,6 +266,11 @@ class StructuredStatsRepository:
     @staticmethod
     def _validate_loadout(loadout: dict) -> tuple[dict, str]:
         normalized = canonical_loadout(loadout)
+        official_ids_valid = bool(
+            normalized
+            and re.fullmatch(r"\d+", str(normalized["tower"]["id"]))
+            and all(re.fullmatch(r"\d+", str(card.get("id") or "")) for card in normalized["cards"])
+        )
         signature = full_loadout_signature(normalized)
         special_modes_valid = bool(
             normalized
@@ -275,7 +280,7 @@ class StructuredStatsRepository:
                 for card in normalized.get("cards", [])
             )
         )
-        if not normalized or not signature or not special_modes_valid:
+        if not normalized or not signature or not special_modes_valid or not official_ids_valid:
             raise StructuredQueryError(
                 "INVALID_FULL_LOADOUT",
                 "A full loadout requires one official tower ID, 8 official card IDs, and official special modes 0=ordinary, 1=evolution, or 2=elite.",
