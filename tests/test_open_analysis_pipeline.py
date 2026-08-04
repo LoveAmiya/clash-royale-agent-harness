@@ -14,7 +14,8 @@ from hybrid_retriever import HybridRetriever
 from rag_data_builder import build_strategy_docs
 from runtime_events import RuntimeEventEmitter
 from runtime_multi import emit_semantic_content, query_needs_rag, split_answer_semantic_chunks, split_stream_chunks
-from query_answering import AnswerResult, DATA_ANALYSIS_SYSTEM_PROMPT
+import query_answering
+from query_answering import AnswerResult, DATA_ANALYSIS_SYSTEM_PROMPT, answer_query
 from skills.base import SkillContext
 from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
 
@@ -62,6 +63,33 @@ class SemanticContentPacingTests(unittest.IsolatedAsyncioTestCase):
             events.append(await emitter.next_event())
         self.assertEqual("".join(event["text"] for event in events), answer)
         self.assertEqual(sleep.await_count, len(events) - 1)
+
+
+class BufferedAnswerEventTests(unittest.IsolatedAsyncioTestCase):
+    async def test_buffered_single_intent_keeps_execution_event_sink(self):
+        emitter = RuntimeEventEmitter()
+        observed = {}
+
+        async def execute(context):
+            observed["event_sink"] = context.event_sink
+            observed["stream_content"] = context.stream_content
+            return "answer"
+
+        with patch.object(query_answering.SKILL_EXECUTOR, "execute", side_effect=execute):
+            await answer_query(
+                user_text="当前环境如何",
+                parsed={"intent": "meta_analysis_query"},
+                schedule_data=[],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=object(),
+                api_key="test-key",
+                event_sink=emitter,
+                stream_content=False,
+            )
+
+        self.assertIs(observed["event_sink"], emitter)
+        self.assertFalse(observed["stream_content"])
 
 
 class TraceReadTests(unittest.TestCase):

@@ -125,12 +125,14 @@ from query_parser import (
     LOCAL_PARSE_CONFIDENCE_LOW,
     LOCAL_PARSE_CONFIDENCE_MEDIUM,
     PARSER_SYSTEM_PROMPT,
+    apply_selected_entity_mode,
     build_parse_metadata,
     extract_json_block,
     extract_text_content,
     fallback_parse_multi_intent,
     merge_parse_metadata,
     normalize_multi_intent_query,
+    subquery_semantic_key,
 )
 
 
@@ -357,8 +359,29 @@ async def parse_user_query(user_text: str, cards_meta_data: list[dict], api_key:
         normalized = normalize_multi_intent_query(parsed, user_text, cards_meta_data)
         local_intents = [item.get("intent") for item in local_parsed.get("subqueries", [])]
         normalized_intents = [item.get("intent") for item in normalized.get("subqueries", [])]
+        local_semantic_keys = [
+            subquery_semantic_key(item)
+            for item in local_parsed.get("subqueries", [])
+            if isinstance(item, dict)
+        ]
+        normalized_semantic_keys = [
+            subquery_semantic_key(item)
+            for item in normalized.get("subqueries", [])
+            if isinstance(item, dict)
+        ]
+        if (
+            local_parsed.get("intent") != "multi_intent"
+            and local_parsed.get("intent") != "reject"
+            and local_parsed.get("parse_confidence") == LOCAL_PARSE_CONFIDENCE_HIGH
+            and normalized.get("intent") != local_parsed.get("intent")
+        ):
+            return reconciled_local_parse(
+                "gpt-5.5 parser output was reconciled to the high-confidence local structured intent",
+            )
         if local_parsed.get("intent") == "multi_intent" and (
-            normalized.get("intent") != "multi_intent" or normalized_intents != local_intents
+            normalized.get("intent") != "multi_intent"
+            or normalized_intents != local_intents
+            or normalized_semantic_keys != local_semantic_keys
         ):
             return reconciled_local_parse(
                 "gpt-5.5 parser output was reconciled to the high-confidence local multi-intent decomposition",
@@ -402,14 +425,15 @@ def query_needs_rag(parsed: dict) -> bool:
         return True
     if intent == "deck_query":
         return (
-            parsed.get("card_name") is None
+            not parsed.get("deck_cards")
+            and parsed.get("card_name") is None
             and parsed.get("rank") is None
             and parsed.get("top_n") is None
         )
     if intent == "card_query":
-        if parsed.get("entity_mode") == "loadout_entity":
-            return True
         return (
+            parsed.get("entity_mode") != "loadout_entity"
+            and
             parsed.get("card_name") is None
             and parsed.get("rank") is None
             and parsed.get("top_n") is None
@@ -1500,7 +1524,7 @@ def describe_parsed_request(parsed: dict) -> str:
         metrics = "、".join(metric_labels.get(metric, str(metric)) for metric in metric_values)
         return f"{card} 的{metrics or '数据'}查询"
     if intent == "card_compare_query":
-        names = [str(name) for name in parsed.get("card_names", []) if name]
+        names = [str(name) for name in (parsed.get("card_names") or []) if name]
         metric_labels = {
             "usage_rate": "使用率",
             "win_rate": "胜率",
@@ -1508,6 +1532,11 @@ def describe_parsed_request(parsed: dict) -> str:
         }
         metric = metric_labels.get(parsed.get("compare_metric"), "表现")
         return f"{' 与 '.join(names) or '两张卡牌'}的{metric}比较"
+    if intent == "card_cooccurrence_query":
+        names = [str(name) for name in (parsed.get("card_names") or []) if name]
+        if len(names) >= 2:
+            return f"{' 与 '.join(names[:2])}共同出现次数查询"
+        return f"{parsed.get('card_name') or '卡牌'}的常见搭配查询"
     if intent == "card_rank_lookup_query":
         metric_labels = {
             "usage_rate": "使用率",
@@ -1517,6 +1546,8 @@ def describe_parsed_request(parsed: dict) -> str:
         metric = metric_labels.get(parsed.get("metric"), "表现")
         return f"卡牌{metric}第 {parsed.get('rank') or '?'} 名查询"
     if intent == "deck_query":
+        if parsed.get("deck_cards"):
+            return "精确八卡卡组查询"
         return f"{parsed.get('card_name') or '热门'}卡组查询"
     if intent == "meta_analysis_query":
         return "当前环境与主流卡组的开放分析"
@@ -1622,6 +1653,7 @@ async def build_answer(
         }
     else:
         parsed = await parse_user_query(user_text, bootstrap_cards_meta_data, api_key)
+    parsed = apply_selected_entity_mode(parsed, entity_mode)
     parsed_subqueries = parsed.get("subqueries") if isinstance(parsed.get("subqueries"), list) else []
     if parsed.get("entity_mode") == "loadout_entity" or any(
         subquery.get("entity_mode") == "loadout_entity"
@@ -1686,8 +1718,10 @@ async def build_answer(
     }
     live_metadata = {"status": "not_required" if not needs_official_snapshot else "disabled"}
     rolling_manifest = _active_snapshot_group_manifest(DATA_DIR)
+    structured_repository = None
     if rolling_manifest is not None and needs_official_snapshot:
         rolling_repository = get_structured_repository(app, dataset_scope)
+        structured_repository = rolling_repository
         rolling_payload = rolling_repository.answer_payload()
         rolling_provenance = rolling_payload["provenance"]
         cards_meta_data = rolling_payload["cards_meta"]
@@ -1816,7 +1850,9 @@ async def build_answer(
             detail=(
                 "多意图子任务将并发执行并按提问顺序汇总。"
                 if parsed.get("intent") == "multi_intent"
-                else "将执行已验证的结构化查询或 RAG 证据分析。"
+                else "将执行 RAG 证据分析。"
+                if query_needs_rag(parsed)
+                else "将执行已验证的结构化查询，不调用 RAG。"
             ),
         )
 
@@ -1827,6 +1863,7 @@ async def build_answer(
         top_decks_data=top_decks_data,
         cards_meta_data=cards_meta_data,
         card_deck_stats=card_deck_stats_data,
+        structured_repository=structured_repository,
         retriever=retriever,
         api_key=api_key or "",
         include_metadata=True,

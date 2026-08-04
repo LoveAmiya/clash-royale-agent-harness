@@ -1,10 +1,26 @@
+def _is_supercell_source(item: dict) -> bool:
+    return str(item.get("source", "")).strip().startswith("Supercell API")
+
+
 def build_card_source_reference(card: dict, index: int = 1) -> str:
-    if card.get("source") == "Supercell API live sample":
+    if _is_supercell_source(card):
+        source = str(card.get("source")).strip()
+        scope = f" | dataset_scope={card.get('dataset_scope')}" if card.get("dataset_scope") else ""
         return (
-            f"[{index}] Supercell API live sample | rank={card.get('rank')} | {card.get('card_name')} "
-            f"| sample_battles={card.get('sample_battles', 0)}"
+            f"[{index}] {source} | rank={card.get('rank')} | {card.get('card_name')}"
+            f"{scope} | sample_battles={card.get('sample_battles', 0)}"
         )
     return f"[{index}] cards_meta.json | rank={card.get('rank')} | {card.get('card_name')} | source={card.get('source')}"
+
+
+def build_deck_source_reference(deck: dict, index: int = 1) -> str:
+    if _is_supercell_source(deck):
+        scope = f" | dataset_scope={deck.get('dataset_scope')}" if deck.get("dataset_scope") else ""
+        return (
+            f"[{index}] {deck.get('source')} | rank={deck.get('rank')} | {deck.get('deck_name')}"
+            f"{scope} | sample_battles={deck.get('sample_battles', 0)}"
+        )
+    return f"[{index}] top_decks.json | rank={deck.get('rank')} | {deck.get('deck_name')} | source={deck.get('source')}"
 
 
 def get_next_round_matches(schedule_data: list[dict]) -> list[dict]:
@@ -75,6 +91,30 @@ def build_schedule_answer(parsed: dict, schedule_data: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _deck_fact_lines(deck: dict, *, compact: bool = False) -> list[str]:
+    facts: list[str] = []
+    if deck.get("rank") is not None:
+        facts.append(f"排名：{deck['rank']}")
+    if deck.get("battles") is not None:
+        facts.append(f"对局：{deck['battles']} 场")
+    if deck.get("usage_rate") is not None:
+        facts.append(f"使用率：{deck['usage_rate']}%")
+    win_rate = deck.get("sample_win_rate", deck.get("win_rate"))
+    if win_rate is not None:
+        facts.append(f"净胜率：{win_rate}%")
+    if deck.get("avg_elixir") is not None:
+        facts.append(f"平均费用：{deck['avg_elixir']}")
+    if deck.get("trophies") is not None:
+        facts.append(f"奖杯：{deck['trophies']}")
+    player_name = str(deck.get("player_name") or "").strip()
+    if player_name and player_name != "Rolling Path of Legend sample":
+        clan_name = str(deck.get("clan_name") or "").strip()
+        facts.append(f"玩家：{player_name}" + (f"（{clan_name}）" if clan_name else ""))
+    if compact:
+        return [" | ".join(facts)] if facts else []
+    return [f"- {fact}" for fact in facts]
+
+
 def build_deck_answer(
     parsed: dict,
     top_decks_data: list[dict],
@@ -124,45 +164,37 @@ def build_deck_answer(
             return "我不知道，当前数据里没有这个排名的卡组。\n参考来源：无"
 
         d = selected[0]
+        detail_lines = _deck_fact_lines(d)
         return (
             f"当前按热度看的第 {rank_target} 名卡组是 **{d.get('deck_name')}**。\n"
-            f"- 排名：{d.get('rank')}\n"
-            f"- 玩家：{d.get('player_name')}（{d.get('clan_name')}）\n"
-            f"- 平均费用：{d.get('avg_elixir')}\n"
-            f"- 近期战斗数：{d.get('battles')}\n"
-            f"- 奖杯：{d.get('trophies')}\n"
+            + "\n".join(detail_lines)
+            + "\n"
             f"- 卡组构成：{', '.join(d.get('cards', []))}\n\n"
             f"参考来源：\n"
-            f"[1] top_decks.json | rank={d.get('rank')} | {d.get('deck_name')} | source={d.get('source')}"
+            f"{build_deck_source_reference(d)}"
         )
 
     selected = sorted_decks[:top_n]
 
     if len(selected) == 1:
         d = selected[0]
+        detail_lines = _deck_fact_lines(d)
         return (
             f"当前最热门的卡组之一是 **{d.get('deck_name')}**。\n"
-            f"- 排名：{d.get('rank')}\n"
-            f"- 玩家：{d.get('player_name')}（{d.get('clan_name')}）\n"
-            f"- 平均费用：{d.get('avg_elixir')}\n"
-            f"- 近期战斗数：{d.get('battles')}\n"
-            f"- 奖杯：{d.get('trophies')}\n"
+            + "\n".join(detail_lines)
+            + "\n"
             f"- 卡组构成：{', '.join(d.get('cards', []))}\n\n"
             f"参考来源：\n"
-            f"[1] top_decks.json | rank={d.get('rank')} | {d.get('deck_name')} | source={d.get('source')}"
+            f"{build_deck_source_reference(d)}"
         )
 
     lines = [f"当前热门卡组前 {len(selected)} 个如下：\n"]
     refs = []
     for i, d in enumerate(selected, start=1):
-        lines.append(
-            f"{i}. **{d.get('deck_name')}**\n"
-            f"   排名：{d.get('rank')} | 玩家：{d.get('player_name')} | 平均费用：{d.get('avg_elixir')} | 奖杯：{d.get('trophies')}\n"
-            f"   构成：{', '.join(d.get('cards', []))}\n"
-        )
-        refs.append(
-            f"[{i}] top_decks.json | rank={d.get('rank')} | {d.get('deck_name')} | source={d.get('source')}"
-        )
+        lines.append(f"{i}. **{d.get('deck_name')}**")
+        lines.extend(f"   {fact}" for fact in _deck_fact_lines(d, compact=True))
+        lines.append(f"   构成：{', '.join(d.get('cards', []))}\n")
+        refs.append(build_deck_source_reference(d, i))
 
     lines.append("参考来源：")
     lines.extend(refs)
@@ -185,8 +217,10 @@ def build_single_card_answer(card: dict) -> str:
 
 
 def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
-    if card.get("source") == "Supercell API live sample":
+    if _is_supercell_source(card):
         fetched_at = card.get("fetched_at") or "未知"
+        source = str(card.get("source")).strip()
+        scope = card.get("dataset_scope") or "当前请求范围"
         labels = {
             "usage_rate": "\u4f7f\u7528\u7387",
             "win_rate": "\u80dc\u7387",
@@ -201,10 +235,10 @@ def build_named_card_metrics_answer(card: dict, metrics: list[str]) -> str:
         lines.extend(
             [
                 "",
-                "\u6570\u636e\u8fb9\u754c\uff1a\u4ee5\u4e0a\u4e3a Supercell \u5b98\u65b9\u5168\u7403\u6392\u884c\u699c\u73a9\u5bb6\u8fd1\u671f\u6218\u6597\u8bb0\u5f55\u7684\u6709\u9650\u6837\u672c"
+                f"\u6570\u636e\u8fb9\u754c\uff1a\u4ee5\u4e0a\u6765\u81ea {source} \u7684 {scope} \u8303\u56f4"
                 f"\uff08{card.get('sample_battles', 0)} \u573a\uff0c\u6293\u53d6\u4e8e {fetched_at}\uff09\uff0c\u5e76\u975e\u5168\u7403\u5b8c\u6574\u73af\u5883\u7edf\u8ba1\u3002",
                 "\u53c2\u8003\u6765\u6e90\uff1a",
-                f"[1] Supercell API live sample | {card.get('card_name')}",
+                build_card_source_reference(card),
             ]
         )
         return "\n".join(lines)
@@ -297,7 +331,7 @@ def build_card_answer(parsed: dict, cards_meta_data: list[dict]) -> str:
 
         sample_card = next((item for item in cards_meta_data if item.get("source")), {})
         source = str(sample_card.get("source", ""))
-        if source == "Supercell API live sample":
+        if source.startswith("Supercell API"):
             sample_battles = sample_card.get("sample_battles")
             target_battles = sample_card.get("target_battles") or sample_battles
             observed = f"0/{sample_battles}" if sample_battles else "0/unknown"

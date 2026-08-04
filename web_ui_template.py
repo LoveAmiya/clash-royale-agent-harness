@@ -822,9 +822,17 @@ HTML_PAGE = r"""
         || state.catalog.find(card => card.card_id === cardId)?.display_name_zh
         || cardId;
     }
+    function displayTower(tower) {
+      const towerId = tower?.id || tower?.tower_id;
+      return tower?.display_name_zh
+        || state.loadoutCatalog?.towers?.find(item => (item.tower_id || item.id) === towerId)?.display_name_zh
+        || tower?.name
+        || towerId
+        || "未知塔楼";
+    }
     function formatLoadout(loadout) {
       if (!loadout) return "-";
-      const tower = loadout.tower?.display_name_zh || loadout.tower?.id || loadout.tower_id || "未知塔楼";
+      const tower = displayTower(loadout.tower || { id: loadout.tower_id });
       const cards = (loadout.cards || []).map(card => {
         const name = displayCard(card.card_id || card.id);
         const mode = card.elite ? "精英" : Number(card.evolution_level || 0) > 0 ? "觉醒" : "普通";
@@ -1031,7 +1039,7 @@ HTML_PAGE = r"""
         if (data.deck_mode === "full_loadout") {
           const profile = data.loadout || {};
           target.appendChild(make("h2", "", "完整配置画像"));
-          target.appendChild(metricGrid([["塔楼", profile.loadout?.tower?.id || profile.tower_id || "-"], ["使用率", formatPercent(profile.usage_rate)], ["干净胜率", formatPercent(profile.clean_win_rate)], ["对局", formatNumber(profile.games)], ["胜 / 负 / 平", `${profile.wins || 0} / ${profile.losses || 0} / ${profile.draws || 0}`]]));
+          target.appendChild(metricGrid([["塔楼", displayTower(profile.loadout?.tower)], ["使用率", formatPercent(profile.usage_rate)], ["干净胜率", formatPercent(profile.clean_win_rate)], ["对局", formatNumber(profile.games)], ["胜 / 负 / 平", `${profile.wins || 0} / ${profile.losses || 0} / ${profile.draws || 0}`]]));
           target.appendChild(make("h3", "", "常见完整配置对手"));
           target.appendChild(table(["对手配置", "场数", "胜率"], (data.common_opponents || []).map(item => [formatLoadout(item.loadout), item.games, formatPercent(item.clean_win_rate)])));
         } else {

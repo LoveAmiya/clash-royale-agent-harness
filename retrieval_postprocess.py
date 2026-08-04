@@ -76,6 +76,47 @@ def rerank_results(
     return reranked[:top_n]
 
 
+def select_diverse_results(
+    results: List[Dict[str, Any]],
+    *,
+    top_n: int,
+    per_source_limit: int = 3,
+) -> List[Dict[str, Any]]:
+    """Preserve evidence-type coverage, then fill remaining slots by score."""
+    if top_n <= 0:
+        return []
+    ordered = sorted(
+        results,
+        key=lambda item: float(item.get("rerank_score", item.get("final_score", 0.0))),
+        reverse=True,
+    )
+    selected: list[dict] = []
+    selected_ids: set[str] = set()
+    source_counts: dict[str, int] = {}
+
+    for item in ordered:
+        source_type = str(item.get("doc", {}).get("source_type") or "unknown")
+        if source_type in source_counts:
+            continue
+        selected.append(item)
+        selected_ids.add(str(item.get("doc", {}).get("doc_id")))
+        source_counts[source_type] = 1
+        if len(selected) >= top_n:
+            return selected
+
+    for item in ordered:
+        doc_id = str(item.get("doc", {}).get("doc_id"))
+        source_type = str(item.get("doc", {}).get("source_type") or "unknown")
+        if doc_id in selected_ids or source_counts.get(source_type, 0) >= per_source_limit:
+            continue
+        selected.append(item)
+        selected_ids.add(doc_id)
+        source_counts[source_type] = source_counts.get(source_type, 0) + 1
+        if len(selected) >= top_n:
+            break
+    return selected
+
+
 def compress_doc(doc: Dict[str, Any]) -> str:
     source_type = doc.get("source_type")
     meta = doc.get("metadata", {})
@@ -134,6 +175,21 @@ def compress_doc(doc: Dict[str, Any]) -> str:
             f"使用率：{meta.get('usage_rate')}%；"
             f"胜率：{meta.get('win_rate')}%；"
             f"净胜率：{meta.get('clean_win_rate')}%"
+        )
+
+    if source_type == "archetype":
+        raw_text = str(doc.get("text", ""))
+        if meta.get("archetype") is None or meta.get("games") is None or meta.get("win_rate") is None:
+            return raw_text
+        usage_rate = meta.get("usage_rate")
+        if usage_rate is None:
+            usage_match = re.search(r"\busage\s+([0-9.]+)%", raw_text, re.IGNORECASE)
+            usage_rate = usage_match.group(1) if usage_match else "未知"
+        return (
+            f"体系：{meta.get('archetype')}；"
+            f"出现次数：{meta.get('games')} 次（卡组侧记录）；"
+            f"使用率：{usage_rate}%；"
+            f"干净胜率：{meta.get('win_rate')}%"
         )
 
     if source_type == "strategy":

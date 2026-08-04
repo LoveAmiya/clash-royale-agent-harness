@@ -245,6 +245,41 @@ class StructuredStatsBuildTests(unittest.TestCase):
             self.assertEqual(len(comparison["cards"]), 2)
             self.assertIn("clean_win_rate", comparison["differences"])
 
+            payload = repository.answer_payload()
+            self.assertIn("Hog Rider", payload["card_deck_stats"])
+            self.assertEqual(payload["card_deck_stats"]["Hog Rider"][0]["battles"], 3)
+            self.assertIsNotNone(payload["top_decks"][0]["usage_rate"])
+            self.assertIsNotNone(payload["top_decks"][0]["sample_win_rate"])
+
+    def test_card_pair_stats_returns_exact_teammate_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            _create_archive(data_dir)
+            build_structured_stats(data_dir, SNAPSHOT_ID)
+            repository = StructuredStatsRepository(data_dir, SNAPSHOT_ID)
+
+            result = repository.card_pair_stats(["Hog Rider", "Earthquake"])
+
+            self.assertEqual(result["cards"], ["Hog Rider", "Earthquake"])
+            self.assertGreater(result["games"], 0)
+            self.assertEqual(result["matched_sample_count"], result["games"])
+
+    def test_card_teammate_rankings_return_requested_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            _create_archive(data_dir)
+            build_structured_stats(data_dir, SNAPSHOT_ID)
+            repository = StructuredStatsRepository(data_dir, SNAPSHOT_ID)
+
+            result = repository.card_teammate_rankings("Hog Rider", top_n=3)
+
+            self.assertEqual(result["card_id"], "Hog Rider")
+            self.assertEqual(len(result["teammates"]), 3)
+            self.assertGreaterEqual(
+                result["teammates"][0]["games"],
+                result["teammates"][1]["games"],
+            )
+
     def test_card_rankings_support_usage_win_rate_and_rating_with_stable_ties(self):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
@@ -376,6 +411,11 @@ class StructuredStatsBuildTests(unittest.TestCase):
             full_profile = repository.full_loadout_profile(full_a)
             self.assertEqual(full_profile["deck_mode"], "full_loadout")
             self.assertEqual(full_profile["matched_sample_count"], 3)
+            self.assertEqual(full_profile["loadout"]["loadout"]["tower"]["display_name_zh"], "公主塔")
+            self.assertEqual(
+                full_profile["common_opponents"][0]["loadout"]["tower"]["display_name_zh"],
+                "炮塔",
+            )
             full_matchup = repository.full_loadout_matchup(full_a, full_b)
             self.assertEqual(full_matchup["matched_sample_count"], 3)
             self.assertEqual(full_matchup["loadout_a"]["clean_win_rate"], 50.0)
@@ -395,6 +435,10 @@ class StructuredStatsBuildTests(unittest.TestCase):
             entity = repository.entity_stats("card:26000000:evolution")
             self.assertEqual(entity["entity"]["display_name_zh"], "觉醒地震法术")
             self.assertEqual(entity["matched_sample_count"], 3)
+            resolved_entity = repository.entity_stats_by_reference("card", "Earthquake", "evolution")
+            self.assertEqual(resolved_entity["entity"]["entity_id"], "card:26000000:evolution")
+            resolved_tower = repository.entity_stats_by_reference("tower", "Tower Princess", "tower")
+            self.assertEqual(resolved_tower["entity"]["entity_id"], "tower:159000000")
             comparison = repository.compare_entities(["card:26000000:evolution", "tower:159000000"])
             self.assertEqual(len(comparison["entities"]), 2)
             self.assertIn("clean_win_rate", comparison["differences"])

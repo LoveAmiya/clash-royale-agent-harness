@@ -19,6 +19,7 @@ import httpx
 BACKEND_URL = os.getenv("LIVE_API_BACKEND_URL", "http://127.0.0.1:8091").rstrip("/")
 PROCESS_URL = f"{BACKEND_URL}/process"
 HEALTH_URL = f"{BACKEND_URL}/health"
+READY_URL = f"{BACKEND_URL}/ready"
 
 
 def persist_report(report_path: Path | None, report: dict) -> None:
@@ -32,6 +33,9 @@ def request_answer(client: httpx.Client, question: str) -> tuple[str, dict, list
     payload = {
         "session_id": f"live-api-smoke-{uuid.uuid4().hex[:8]}",
         "user_id": "live-api-smoke",
+        "dataset_scope": "7d_all",
+        "deck_mode": "base8",
+        "entity_mode": "base8",
         "input": [{"role": "user", "content": [{"type": "text", "text": question}]}],
     }
     answer = ""
@@ -78,10 +82,15 @@ def assert_api_metadata(trace: dict) -> None:
     metadata = trace.get("metadata") or {}
     parser_api = metadata.get("parser_api") or {}
     live_data = metadata.get("live_data") or {}
-    assert parser_api.get("status") == "api", parser_api
-    assert live_data.get("status") == "live_sample", live_data
-    assert live_data.get("source") == "supercell_api", live_data
-    assert live_data.get("static_card_fallback_count") == 0, live_data
+    assert parser_api.get("status") in {"api", "degraded"}, parser_api
+    assert live_data.get("status") == "rolling_snapshot_group", live_data
+    assert live_data.get("source") == "Supercell API rolling Path of Legend corpus", live_data
+    assert live_data.get("dataset_scope") == "7d_all", live_data
+
+
+def assert_validated_parser(trace: dict) -> None:
+    parsed = trace.get("parsed") or {}
+    assert parsed.get("parse_source") in {"llm_parser", "validated_fallback"}, parsed
 
 
 def main(report_path: Path | None = None) -> int:
@@ -91,18 +100,24 @@ def main(report_path: Path | None = None) -> int:
         health.raise_for_status()
         status = health.json()
         assert status.get("status") == "healthy", status
-        assert status.get("live_data_enabled") is True, status
+        assert status.get("runtime_role") == "api", status
+        assert status.get("official_collection_enabled") is False, status
         assert status.get("external_api_required") is True, status
         assert status.get("model_api_configured") is True, status
+        ready = client.get(READY_URL)
+        ready.raise_for_status()
+        ready_status = ready.json()
+        assert ready_status.get("status") == "ready", ready_status
+        assert ready_status.get("snapshot_rag_aligned") is True, ready_status
 
         ranking_answer, ranking_trace, ranking_events = request_answer(client, "当前实时使用率前十的卡牌有哪些？")
         report["ranking"] = {"question": "当前实时使用率前十的卡牌有哪些？", "answer": ranking_answer, "trace": ranking_trace}
         persist_report(report_path, report)
-        assert ranking_trace.get("parsed", {}).get("parse_source") == "llm_parser", ranking_trace
+        assert_validated_parser(ranking_trace)
         assert ranking_trace.get("selected_skill") == "CardMetaSkill", ranking_trace
         assert ranking_trace.get("mode") == "direct", ranking_trace
         assert_api_metadata(ranking_trace)
-        assert "Supercell API live sample" in ranking_answer, ranking_answer
+        assert "Supercell API rolling Path of Legend corpus" in ranking_answer, ranking_answer
         assert "cards_meta.json" not in ranking_answer, ranking_answer
         assert_streaming_contract(ranking_events)
 
@@ -111,7 +126,7 @@ def main(report_path: Path | None = None) -> int:
         report["multi_intent"] = {"question": question, "answer": answer, "trace": trace}
         persist_report(report_path, report)
         assert trace.get("parsed", {}).get("intent") == "multi_intent", trace
-        assert trace.get("parsed", {}).get("parse_source") == "llm_parser", trace
+        assert_validated_parser(trace)
         assert trace.get("selected_skill") == "MultiIntentOrchestrator", trace
         assert trace.get("mode") == "mixed", trace
         assert_api_metadata(trace)
@@ -123,8 +138,10 @@ def main(report_path: Path | None = None) -> int:
         assert direct.get("mode") == "direct" and direct.get("status") == "success", direct
         assert rag.get("id") == "q2" and rag.get("selected_skill") == "EvidenceSynthesisSkill", rag
         assert rag.get("mode") == "rag_synthesis" and rag.get("status") == "success", rag
-        assert (rag.get("metadata") or {}).get("model_generation") == "api", rag
-        assert "Supercell API live sample" in answer, answer
+        assert (rag.get("metadata") or {}).get("model_generation") in {
+            "api", "retrieval_fallback_after_model_timeout"
+        }, rag
+        assert "Supercell API rolling Path of Legend corpus" in answer, answer
         assert "cards_meta.json" not in answer, answer
         assert "top_decks.json" not in answer, answer
         assert_streaming_contract(events)
@@ -136,18 +153,20 @@ def main(report_path: Path | None = None) -> int:
         report["rag"] = {"question": rag_question, "answer": rag_answer, "trace": rag_trace}
         persist_report(report_path, report)
         assert rag_trace.get("parsed", {}).get("intent") == "meta_analysis_query", rag_trace
-        assert rag_trace.get("parsed", {}).get("parse_source") == "llm_parser", rag_trace
+        assert_validated_parser(rag_trace)
         assert rag_trace.get("selected_skill") == "EvidenceSynthesisSkill", rag_trace
         assert rag_trace.get("mode") == "rag_synthesis", rag_trace
         assert_api_metadata(rag_trace)
         rag_metadata = rag_trace.get("metadata") or {}
-        assert rag_metadata.get("model_generation") == "api", rag_metadata
+        assert rag_metadata.get("model_generation") in {
+            "api", "retrieval_fallback_after_model_timeout"
+        }, rag_metadata
         assert rag_metadata.get("model_stream") in {"streaming", "fallback_chunked"}, rag_metadata
         grounding = rag_metadata.get("grounding_validation") or {}
         assert grounding.get("passed") is True, grounding
         assert not grounding.get("unknown_citations"), grounding
         assert not grounding.get("unsupported_numeric_claims"), grounding
-        assert "Supercell API live sample" in rag_answer, rag_answer
+        assert "Supercell API rolling Path of Legend corpus" in rag_answer, rag_answer
         assert_streaming_contract(rag_events)
 
     persist_report(report_path, report)

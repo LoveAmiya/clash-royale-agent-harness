@@ -4,11 +4,46 @@ from support import install_test_stubs
 
 install_test_stubs()
 
-from retrieval_postprocess import build_context_and_refs, compress_doc, strip_generated_reference_section
+from retrieval_postprocess import (
+    build_context_and_refs,
+    compress_doc,
+    select_diverse_results,
+    strip_generated_reference_section,
+)
 from snapshot_store import DAILY_TARGET_BATTLES, build_snapshot_rag_documents
 
 
 class RetrievalEvidencePreservationTests(unittest.TestCase):
+    def test_diverse_selection_keeps_multiple_evidence_types_before_filling(self):
+        results = [
+            {
+                "doc": {"doc_id": f"deck-{index}", "source_type": "deck_profile"},
+                "rerank_score": 1.0 - index / 100,
+            }
+            for index in range(5)
+        ] + [
+            {
+                "doc": {"doc_id": "archetype-1", "source_type": "archetype"},
+                "rerank_score": 0.7,
+            },
+            {
+                "doc": {"doc_id": "pair-1", "source_type": "card_pair"},
+                "rerank_score": 0.6,
+            },
+        ]
+
+        selected = select_diverse_results(results, top_n=5, per_source_limit=3)
+
+        self.assertEqual(len(selected), 5)
+        self.assertEqual(
+            {item["doc"]["source_type"] for item in selected},
+            {"deck_profile", "archetype", "card_pair"},
+        )
+        self.assertLessEqual(
+            sum(item["doc"]["source_type"] == "deck_profile" for item in selected),
+            3,
+        )
+
     def test_verified_retrieval_references_continue_after_structured_sources(self):
         result = {
             "doc": {
@@ -101,6 +136,26 @@ class RetrievalEvidencePreservationTests(unittest.TestCase):
         self.assertIn("80 games", compressed)
         self.assertIn("52.5%", compressed)
         self.assertNotIn("None", compressed)
+
+    def test_archetype_compression_uses_groundable_side_record_units(self):
+        compressed = compress_doc(
+            {
+                "doc_id": "scope:archetype:野猪速转",
+                "source_type": "archetype",
+                "text": "Archetype evidence for 野猪速转: 136798 side records, usage 7.293225%, win rate 49.534264%.",
+                "metadata": {
+                    "archetype": "野猪速转",
+                    "games": 136798,
+                    "usage_rate": 7.293225,
+                    "win_rate": 49.534264,
+                },
+            }
+        )
+
+        self.assertIn("野猪速转", compressed)
+        self.assertIn("136798 次", compressed)
+        self.assertIn("7.293225%", compressed)
+        self.assertIn("49.534264%", compressed)
 
 
 if __name__ == "__main__":

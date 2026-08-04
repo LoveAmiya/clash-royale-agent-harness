@@ -14,6 +14,10 @@ from answer_builder import build_retrieval_query
 from app_config import (
     COMPRESS_CHAR_BUDGET,
     COMPRESS_MAX_ITEMS,
+    META_COMPRESS_CHAR_BUDGET,
+    META_COMPRESS_MAX_ITEMS,
+    META_RERANK_TOP_N,
+    META_RETRIEVAL_LANE_TOP_K,
     RERANK_TOP_N,
     RETRIEVAL_ALPHA,
     RETRIEVAL_FINAL_TOP_K,
@@ -35,11 +39,12 @@ from model_gateway import generate_model_text, generate_model_text_stream, uses_
 from rag_quality import GroundedStreamBuffer, GroundingValidationError, validate_answer_grounding
 from runtime_events import RuntimeEventEmitter
 from planner.planner import RuleBasedPlanner
-from query_parser import extract_text_content
+from query_parser import extract_text_content, subquery_semantic_key
 from retrieval_postprocess import (
     build_context_and_refs,
     compress_results,
     rerank_results,
+    select_diverse_results,
     strip_generated_reference_section,
 )
 from skills.base import SkillContext
@@ -49,6 +54,7 @@ from skills.registry import build_default_registry
 
 logger = logging.getLogger(__name__)
 FALLBACK_CONTENT_INTERVAL_SECONDS = 0.12
+META_EVIDENCE_LANES = ("archetype", "deck_profile", "card_pair")
 DATA_ANALYSIS_SYSTEM_PROMPT = (
     "你是皇室战争数据分析助手，使用中文回答。\n"
     "所有卡牌名必须使用系统标准中文名，不得直接输出英文卡牌名。\n"
@@ -129,6 +135,64 @@ def build_snapshot_fallback_answer(
         + "\n\n"
         "数据边界：该项目保存的是排行榜和单卡静态快照，不含全量卡组使用率分布、版本更新时间或实时对局样本；"
         "因此可以展示榜单前列构筑，但不能严谨断言它们就是整个实时环境中占比最高的流派。"
+    )
+
+
+def retrieve_meta_candidates(
+    retriever: HybridRetriever,
+    query: str,
+    *,
+    dataset_scope: str | None,
+    deck_mode: str | None,
+    entity_mode: str | None,
+    source_type: str | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Recall global and typed evidence lanes, deduplicated by stable document ID."""
+    lane_types: tuple[str | None, ...] = (source_type,) if source_type else (None, *META_EVIDENCE_LANES)
+    merged: dict[str, dict] = {}
+    lanes: list[str] = []
+    for lane_type in lane_types:
+        lane_name = lane_type or "global"
+        lane_results = retriever.hybrid_search(
+            query=query,
+            top_k_bm25=RETRIEVAL_TOP_K_BM25,
+            top_k_dense=RETRIEVAL_TOP_K_DENSE,
+            final_top_k=(
+                RETRIEVAL_FINAL_TOP_K if lane_type is None else META_RETRIEVAL_LANE_TOP_K
+            ),
+            alpha=RETRIEVAL_ALPHA,
+            source_type=lane_type,
+            dataset_scope=dataset_scope,
+            deck_mode=deck_mode,
+            entity_mode=entity_mode,
+        )
+        lanes.append(lane_name)
+        for item in lane_results:
+            doc_id = str(item.get("doc", {}).get("doc_id") or "")
+            if not doc_id:
+                continue
+            previous = merged.get(doc_id)
+            if previous is None or float(item.get("final_score", 0.0)) > float(previous.get("final_score", 0.0)):
+                merged[doc_id] = item
+    return list(merged.values()), lanes
+
+
+def build_retrieved_evidence_fallback(compressed_results: list[dict]) -> str:
+    """Expose retrieved current-scope evidence when synthesis times out."""
+    evidence_lines = []
+    for item in compressed_results:
+        doc = item.get("doc") if isinstance(item, dict) else None
+        if not isinstance(doc, dict):
+            continue
+        text = str(item.get("compressed_text") or doc.get("text") or "").strip()
+        if not text:
+            continue
+        title = str(doc.get("metadata", {}).get("title") or doc.get("source_type") or "检索证据")
+        evidence_lines.append(f"- {title}：{text}")
+    return (
+        "模型综合请求超时，已保留本次检索到的当前数据范围证据。"
+        "以下内容是证据原文摘要，未进行额外推演：\n"
+        + ("\n".join(evidence_lines) if evidence_lines else "- 当前没有可显示的检索证据。")
     )
 
 
@@ -473,16 +537,13 @@ async def build_evidence_synthesis_answer(
             title="正在检索环境证据",
             detail="使用当前官方快照 RAG 检索相关证据。",
         )
-    results = retriever.hybrid_search(
-        query=user_text,
-        top_k_bm25=RETRIEVAL_TOP_K_BM25,
-        top_k_dense=RETRIEVAL_TOP_K_DENSE,
-        final_top_k=RETRIEVAL_FINAL_TOP_K,
-        alpha=RETRIEVAL_ALPHA,
-        source_type=retrieval_source_type,
+    results, retrieval_lanes = retrieve_meta_candidates(
+        retriever,
+        user_text,
         dataset_scope=(metadata or {}).get("dataset_scope"),
         deck_mode=(metadata or {}).get("deck_mode"),
         entity_mode=(metadata or {}).get("entity_mode"),
+        source_type=retrieval_source_type,
     )
     if parsed.get("analysis_type") == "meta_delta":
         selected_scope = str((metadata or {}).get("dataset_scope") or "")
@@ -496,6 +557,17 @@ async def build_evidence_synthesis_answer(
         metadata["retrieval_mode"] = results[0].get("retrieval_mode", "none") if results else "none"
         metadata["retrieved_doc_ids"] = [item["doc"].get("doc_id") for item in results]
         metadata["retrieval_source_type"] = retrieval_source_type
+        metadata["retrieval_lanes"] = retrieval_lanes
+        metadata["retrieval_source_counts"] = {
+            source: sum(
+                str(item.get("doc", {}).get("source_type") or "unknown") == source
+                for item in results
+            )
+            for source in sorted({
+                str(item.get("doc", {}).get("source_type") or "unknown")
+                for item in results
+            })
+        }
         metadata["synthesis_reasoning_effort"] = SYNTHESIS_REASONING_EFFORT
     if event_sink is not None:
         await event_sink.execution(
@@ -515,7 +587,17 @@ async def build_evidence_synthesis_answer(
             title="正在重排序环境证据",
             detail="按问题相关性对环境候选证据进行确定性重排序。",
         )
-    reranked = rerank_results(user_text, parsed, results, top_n=RERANK_TOP_N)
+    reranked_candidates = rerank_results(
+        user_text,
+        parsed,
+        results,
+        top_n=max(len(results), META_RERANK_TOP_N),
+    )
+    reranked = select_diverse_results(
+        reranked_candidates,
+        top_n=META_RERANK_TOP_N,
+        per_source_limit=3,
+    )
     if event_sink is not None:
         await event_sink.execution(
             step_id=f"{subquery_id}.rerank",
@@ -527,8 +609,8 @@ async def build_evidence_synthesis_answer(
         )
     compressed = compress_results(
         reranked,
-        max_items=COMPRESS_MAX_ITEMS,
-        char_budget=COMPRESS_CHAR_BUDGET,
+        max_items=META_COMPRESS_MAX_ITEMS,
+        char_budget=META_COMPRESS_CHAR_BUDGET,
     )
     if not compressed:
         return (
@@ -556,7 +638,7 @@ async def build_evidence_synthesis_answer(
         DATA_ANALYSIS_SYSTEM_PROMPT
         + "\n可按‘结论、数据依据、配卡分析、数据边界’组织回答，小标题直接写中文，不添加井号或星号。"
     )
-    evidence_label = "Supercell API 实时样本（有限战斗日志）" if EXTERNAL_API_REQUIRED else "本地快照证据包"
+    evidence_label = "当前选定的 Supercell API 数据范围" if EXTERNAL_API_REQUIRED else "本地快照证据包"
     if parsed.get("intent") == "meta_analysis_query":
         reviewer_instructions = (
             DATA_ANALYSIS_SYSTEM_PROMPT
@@ -565,7 +647,7 @@ async def build_evidence_synthesis_answer(
             "对手侦察、三局两胜备战、赛程或推荐。不要输出参考来源标题或来源列表，运行时会追加已校验来源。"
         )
     strict_live_instruction = (
-        "\n当前证据包来自 Supercell API 的有限实时战斗日志：不得称其为本地快照或全局环境统计；"
+        "\n当前证据包来自选定的 Supercell API 对局范围：不得称其为本地静态文件或全局环境统计；"
         "RAG 文档只提供通用策略，不得把其中的卡组当作当前主流排行。"
         if EXTERNAL_API_REQUIRED
         else ""
@@ -677,12 +759,21 @@ async def build_evidence_synthesis_answer(
     except asyncio.TimeoutError:
         logger.warning("evidence synthesis model call timed out")
         if metadata is not None:
-            metadata["model_generation"] = "unavailable" if EXTERNAL_API_REQUIRED else "fallback_after_model_timeout"
+            metadata["model_generation"] = "retrieval_fallback_after_model_timeout"
             metadata["model_failure_type"] = "TimeoutError"
-            metadata["model_stream"] = "unavailable"
-        if EXTERNAL_API_REQUIRED:
-            raise RequiredExternalAPIError("RAG model API call failed: TimeoutError")
-        answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
+            metadata["model_stream"] = "fallback_chunked"
+            metadata["degraded"] = True
+            metadata["degraded_reason"] = "model_timeout"
+        if event_sink is not None:
+            await event_sink.execution(
+                step_id=f"{subquery_id}.degraded",
+                phase="generate",
+                status="completed",
+                subquery_id=subquery_id,
+                title="模型综合超时，已返回检索证据",
+                detail="没有使用旧静态榜单，也没有生成证据之外的结论。",
+            )
+        answer = build_retrieved_evidence_fallback(compressed)
     except GroundingValidationError as exc:
         logger.warning("evidence grounding validation failed detail=%s", str(exc)[:1000])
         if metadata is not None:
@@ -796,11 +887,15 @@ def subquery_needs_rag(parsed: dict) -> bool:
     if intent == "meta_analysis_query":
         return True
     if intent == "deck_query":
-        return parsed.get("rank") is None and parsed.get("top_n") is None
-    if intent == "card_query":
-        if parsed.get("entity_mode") == "loadout_entity":
-            return True
         return (
+            not parsed.get("deck_cards")
+            and parsed.get("rank") is None
+            and parsed.get("top_n") is None
+        )
+    if intent == "card_query":
+        return (
+            parsed.get("entity_mode") != "loadout_entity"
+            and
             parsed.get("card_name") is None
             and parsed.get("rank") is None
             and parsed.get("top_n") is None
@@ -812,11 +907,27 @@ def subquery_title(parsed: dict) -> str:
     intent = parsed.get("intent")
     if intent == "card_query":
         return f"卡牌数据：{parsed.get('card_name') or '卡牌排行'}"
+    if intent == "card_compare_query":
+        names = [str(name) for name in (parsed.get("card_names") or []) if name]
+        metric_labels = {
+            "usage_rate": "使用率",
+            "win_rate": "胜率",
+            "clean_win_rate": "净胜率",
+        }
+        metric = metric_labels.get(parsed.get("compare_metric"), "表现")
+        return f"{' 与 '.join(names[:2]) or '两张卡牌'} {metric}比较"
     if intent == "meta_analysis_query":
         return "环境分析：当前主流卡组"
     if intent == "match_preparation_query":
         return "已移除的战队备战功能"
+    if intent == "card_cooccurrence_query":
+        names = [str(name) for name in (parsed.get("card_names") or []) if name]
+        if len(names) >= 2:
+            return f"{' 与 '.join(names[:2])} 共现统计"
+        return f"{parsed.get('card_name') or '卡牌'} 常见搭配"
     if intent == "deck_query":
+        if parsed.get("deck_cards"):
+            return "精确八卡卡组统计"
         if parsed.get("card_name"):
             return f"{parsed['card_name']} 卡组"
         return "热门卡组"
@@ -828,7 +939,7 @@ def subquery_title(parsed: dict) -> str:
 def subquery_user_text(parsed: dict, original_text: str) -> str:
     intent = parsed.get("intent")
     if intent == "meta_analysis_query":
-        return "当前环境主流卡组与构筑分析"
+        return original_text
     if intent == "match_preparation_query":
         return "已移除的战队备战功能"
     if (
@@ -868,6 +979,7 @@ async def execute_subquery(
     trace_id: str,
     runtime_metadata: dict | None = None,
     card_deck_stats: dict[str, list[dict]] | None = None,
+    structured_repository=None,
     event_sink: RuntimeEventEmitter | None = None,
     stream_content: bool = False,
 ) -> dict:
@@ -880,6 +992,7 @@ async def execute_subquery(
         top_decks_data=top_decks_data,
         cards_meta_data=cards_meta_data,
         card_deck_stats=card_deck_stats or {},
+        structured_repository=structured_repository,
         retriever=retriever,
         api_key=api_key,
         metadata={"trace_id": trace_id, "subquery_id": subquery_id, **(runtime_metadata or {})},
@@ -974,12 +1087,22 @@ async def answer_multi_intent_query(
     api_key: str,
     runtime_metadata: dict | None = None,
     card_deck_stats: dict[str, list[dict]] | None = None,
+    structured_repository=None,
     event_sink: RuntimeEventEmitter | None = None,
     stream_content: bool = False,
 ) -> AnswerResult:
     trace_id = SKILL_EXECUTOR.recorder.new_trace_id()
     started_at = time.perf_counter()
-    subqueries = [item for item in parsed.get("subqueries", []) if isinstance(item, dict)]
+    subqueries = []
+    seen_subqueries: set[tuple] = set()
+    for item in parsed.get("subqueries", []):
+        if not isinstance(item, dict):
+            continue
+        key = subquery_semantic_key(item)
+        if key in seen_subqueries:
+            continue
+        seen_subqueries.add(key)
+        subqueries.append(item)
     results = await asyncio.gather(
         *[
             execute_subquery(
@@ -993,6 +1116,7 @@ async def answer_multi_intent_query(
                 trace_id=trace_id,
                 runtime_metadata=runtime_metadata,
                 card_deck_stats=card_deck_stats,
+                structured_repository=structured_repository,
                 event_sink=event_sink,
                 stream_content=stream_content,
             )
@@ -1047,6 +1171,7 @@ async def answer_query(
     include_metadata: bool = False,
     runtime_metadata: dict | None = None,
     card_deck_stats: dict[str, list[dict]] | None = None,
+    structured_repository=None,
     event_sink: RuntimeEventEmitter | None = None,
     stream_content: bool = True,
 ) -> str | AnswerResult:
@@ -1062,6 +1187,7 @@ async def answer_query(
             api_key=api_key,
             runtime_metadata=runtime_metadata,
             card_deck_stats=card_deck_stats,
+            structured_repository=structured_repository,
             event_sink=event_sink,
             stream_content=stream_content,
         )
@@ -1073,10 +1199,12 @@ async def answer_query(
         top_decks_data=top_decks_data,
         cards_meta_data=cards_meta_data,
         card_deck_stats=card_deck_stats or {},
+        structured_repository=structured_repository,
         retriever=retriever,
         api_key=api_key,
         metadata=dict(runtime_metadata or {}),
-        event_sink=event_sink if stream_content else None,
+        event_sink=event_sink,
+        stream_content=stream_content,
     )
     plan = RULE_BASED_PLANNER.build_plan(context)
     if plan is not None:

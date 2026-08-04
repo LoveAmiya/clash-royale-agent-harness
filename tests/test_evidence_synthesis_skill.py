@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ from skills.registry import SkillRegistry
 from harness.executor import SkillExecutor
 from harness.trace import TraceRecorder
 import query_answering
-from query_answering import build_snapshot_fallback_answer
+from query_answering import build_snapshot_fallback_answer, retrieve_meta_candidates
 from runtime_events import RuntimeEventEmitter
 
 
@@ -48,6 +49,43 @@ class MetaEvidenceTests(unittest.TestCase):
         self.assertIn("使用率靠前的卡牌", answer)
         self.assertIn("数据边界", answer)
         self.assertIn("不是 LLM 的策略推演", answer)
+
+    def test_meta_retrieval_combines_global_and_typed_evidence_lanes(self):
+        class FakeRetriever:
+            def __init__(self):
+                self.source_types = []
+
+            def hybrid_search(self, **kwargs):
+                source_type = kwargs.get("source_type")
+                self.source_types.append(source_type)
+                name = source_type or "global"
+                return [{
+                    "doc": {
+                        "doc_id": f"doc:{name}",
+                        "source_type": name,
+                        "text": f"{name} evidence",
+                        "metadata": {"dataset_scope": "7d_all"},
+                    },
+                    "final_score": 1.0,
+                    "retrieval_mode": "hybrid",
+                }]
+
+        retriever = FakeRetriever()
+
+        results, lanes = retrieve_meta_candidates(
+            retriever,
+            "为什么低费循环卡组很多",
+            dataset_scope="7d_all",
+            deck_mode="base8",
+            entity_mode="base8",
+        )
+
+        self.assertEqual(
+            retriever.source_types,
+            [None, "archetype", "deck_profile", "card_pair"],
+        )
+        self.assertEqual(len(results), 4)
+        self.assertEqual(lanes, ["global", "archetype", "deck_profile", "card_pair"])
     def test_evidence_pack_labels_supercell_records_as_live_sources(self):
         evidence, sources = build_meta_evidence_pack(
             [],
@@ -60,6 +98,38 @@ class MetaEvidenceTests(unittest.TestCase):
         self.assertIn("Supercell API live sample", sources)
         self.assertNotIn("top_decks.json", sources)
         self.assertNotIn("cards_meta.json", sources)
+
+    def test_evidence_pack_labels_rolling_supercell_records_as_official_sources(self):
+        source = "Supercell API rolling Path of Legend corpus"
+        evidence, sources = build_meta_evidence_pack(
+            [],
+            [{"rank": 1, "deck_name": "Rolling Deck", "source": source, "sample_battles": 937843}],
+            [{"rank": 1, "card_name": "Zap", "usage_rate": 10, "source": source}],
+        )
+
+        self.assertIn(source, sources)
+        self.assertNotIn("静态快照", evidence)
+        self.assertNotIn("top_decks.json", sources)
+        self.assertNotIn("cards_meta.json", sources)
+
+    def test_evidence_pack_omits_unknown_deck_fields(self):
+        evidence, _ = build_meta_evidence_pack(
+            [],
+            [{
+                "rank": 1,
+                "deck_name": "Rolling Deck",
+                "cards": ["Fireball", "Hog Rider"],
+                "battles": 100,
+                "sample_win_rate": 51.0,
+                "avg_elixir": None,
+                "source": "Supercell API rolling Path of Legend corpus",
+            }],
+            [],
+        )
+
+        self.assertNotIn("None", evidence)
+        self.assertIn("对局=100", evidence)
+        self.assertIn("净胜率=51.0%", evidence)
 
     def test_live_evidence_pack_includes_snapshot_sample_boundary(self):
         evidence, _ = build_meta_evidence_pack(
@@ -165,13 +235,63 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(metadata["model_generation"], "unavailable")
 
+    async def test_strict_mode_returns_retrieved_evidence_when_model_times_out(self):
+        class StaticRetriever:
+            def hybrid_search(self, *args, **kwargs):
+                return [
+                    {
+                        "final_score": 1.0,
+                        "retrieval_mode": "hybrid",
+                        "doc": {
+                            "doc_id": "archetype_fixture",
+                            "source_type": "archetype",
+                            "text": "野猪速转在当前范围内共有 123 场对局。",
+                            "metadata": {
+                                "title": "野猪速转",
+                                "scope": "7d_all",
+                                "source": "Supercell API rolling Path of Legend corpus",
+                            },
+                        },
+                    }
+                ]
+
+        metadata = {}
+        emitter = RuntimeEventEmitter()
+        with patch.object(query_answering, "EXTERNAL_API_REQUIRED", True, create=True), patch.object(
+            query_answering, "uses_responses_api", return_value=True
+        ), patch.object(
+            query_answering, "generate_model_text", AsyncMock(side_effect=asyncio.TimeoutError())
+        ):
+            answer = await query_answering.build_evidence_synthesis_answer(
+                user_text="野猪速转卡组有多少？",
+                parsed={"intent": "meta_analysis_query"},
+                schedule_data=[],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=StaticRetriever(),
+                api_key="test-key",
+                metadata=metadata,
+                event_sink=emitter,
+                stream_content=False,
+            )
+
+        self.assertIn("野猪速转在当前范围内共有 123 场对局。", answer)
+        self.assertNotIn("本地排行榜前五卡组", answer)
+        self.assertEqual(metadata["model_generation"], "retrieval_fallback_after_model_timeout")
+        self.assertEqual(metadata["model_failure_type"], "TimeoutError")
+
+        events = []
+        while not emitter.empty():
+            events.append(await emitter.next_event())
+        self.assertTrue(any(event.get("step_id") == "q.degraded" and "超时" in event.get("title", "") for event in events))
+
     async def test_strict_mode_retrieves_only_active_snapshot_documents(self):
         class RecordingRetriever:
             def __init__(self):
-                self.kwargs = None
+                self.calls = []
 
             def hybrid_search(self, **kwargs):
-                self.kwargs = kwargs
+                self.calls.append(kwargs)
                 return [
                     {
                         "final_score": 1.0,
@@ -200,8 +320,13 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
                 metadata={"dataset_scope": "35d_top_500"},
             )
 
-        self.assertIsNone(retriever.kwargs["source_type"])
-        self.assertEqual(retriever.kwargs["dataset_scope"], "35d_top_500")
+        self.assertEqual(
+            [call["source_type"] for call in retriever.calls],
+            [None, "archetype", "deck_profile", "card_pair"],
+        )
+        self.assertTrue(
+            all(call["dataset_scope"] == "35d_top_500" for call in retriever.calls)
+        )
 
     async def test_environment_change_query_retrieves_only_meta_delta_documents(self):
         class RecordingRetriever:

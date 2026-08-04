@@ -1,7 +1,10 @@
+import asyncio
+import json
 import unittest
 import re
 import shutil
 import subprocess
+from unittest.mock import patch
 
 from support import install_test_stubs
 
@@ -11,6 +14,38 @@ import web_app
 
 
 class StructuredFrontendContractTests(unittest.TestCase):
+    def test_loopback_backend_proxy_ignores_external_proxy_environment(self):
+        class FakeResponse:
+            def __init__(self, status_code, payload=None):
+                self.status_code = status_code
+                self._payload = payload
+
+            def json(self):
+                if self._payload is None:
+                    raise ValueError("proxy returned non-JSON")
+                return self._payload
+
+        class ProxySensitiveClient:
+            def __init__(self, *, trust_env=True, **_kwargs):
+                self.trust_env = trust_env
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def request(self, *_args, **_kwargs):
+                if self.trust_env:
+                    return FakeResponse(502)
+                return FakeResponse(200, {"ok": True})
+
+        with patch.object(web_app.httpx, "AsyncClient", ProxySensitiveClient):
+            response = asyncio.run(web_app.proxy_structured_api("GET", "/datasets"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body), {"ok": True})
+
     def test_frontend_has_all_structured_views_and_keeps_free_form_qa(self):
         html = web_app.HTML_PAGE
 
@@ -118,6 +153,12 @@ class StructuredFrontendContractTests(unittest.TestCase):
         self.assertIn("const towerId = item.tower_id || item.id", html)
         self.assertIn("option.value = towerId", html)
         self.assertNotIn("option.value = item.id", html)
+
+    def test_full_loadout_profile_renders_backend_tower_display_name(self):
+        html = web_app.HTML_PAGE
+
+        self.assertIn("function displayTower(tower)", html)
+        self.assertIn('["塔楼", displayTower(profile.loadout?.tower)]', html)
 
     def test_full_loadout_deck_pickers_use_official_card_ids(self):
         html = web_app.HTML_PAGE

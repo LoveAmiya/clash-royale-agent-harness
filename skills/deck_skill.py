@@ -8,6 +8,7 @@ class DeckRankingSkill(DirectJSONSkill):
     def can_handle(self, parsed: dict) -> bool:
         return (
             parsed.get("intent") == "deck_query"
+            and not parsed.get("deck_cards")
             and (
                 parsed.get("card_name") is not None
                 or parsed.get("rank") is not None

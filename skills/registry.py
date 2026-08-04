@@ -38,16 +38,22 @@ def build_default_registry(
     from skills.card_rank_lookup_skill import CardRankLookupSkill
     from skills.card_skill import CardMetaSkill
     from skills.deck_skill import DeckRankingSkill
+    from skills.exact_deck_skill import ExactDeckSkill
     from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
+    from skills.loadout_entity_skill import LoadoutEntitySkill
     from skills.rag_skill import RAGEvidenceSkill
+    from skills.structured_relationship_skill import StructuredRelationshipSkill
     from skills.unsupported_clan_war_skill import UnsupportedClanWarSkill
 
     return SkillRegistry(
         [
             UnsupportedClanWarSkill(),
+            ExactDeckSkill(),
+            StructuredRelationshipSkill(),
             DeckRankingSkill(),
             CardCompareSkill(),
             CardRankLookupSkill(),
+            LoadoutEntitySkill(),
             EvidenceSynthesisSkill(answer_builder=evidence_synthesis_builder),
             CardMetaSkill(),
             RAGEvidenceSkill(

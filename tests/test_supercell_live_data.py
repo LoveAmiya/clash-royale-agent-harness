@@ -951,6 +951,34 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("样本出场：2 次", answer)
         self.assertNotIn("cards_meta.json", answer)
 
+    def test_rolling_card_answer_labels_the_selected_official_scope(self):
+        answer = build_card_answer(
+            {
+                "intent": "card_query",
+                "card_name": "Hog Rider",
+                "metrics": ["usage_rate", "win_rate"],
+                "rank": None,
+                "top_n": None,
+            },
+            [
+                {
+                    "card_name": "Hog Rider",
+                    "usage_rate": 10.895854,
+                    "win_rate": 49.534543,
+                    "source": "Supercell API rolling Path of Legend corpus",
+                    "dataset_scope": "7d_all",
+                    "sample_battles": 937843,
+                    "appearance_count": 204376,
+                }
+            ],
+        )
+
+        self.assertIn("Supercell API rolling Path of Legend corpus", answer)
+        self.assertIn("7d_all", answer)
+        self.assertIn("937843", answer)
+        self.assertNotIn("静态快照", answer)
+        self.assertNotIn("cards_meta.json", answer)
+
     def test_live_named_card_missing_from_sample_does_not_fall_back_to_ranking(self):
         answer = build_card_answer(
             {

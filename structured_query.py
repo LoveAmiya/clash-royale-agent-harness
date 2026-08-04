@@ -289,6 +289,23 @@ class StructuredStatsRepository:
         return normalized, signature
 
     @staticmethod
+    def _display_loadout(loadout: dict | None) -> dict | None:
+        """Add presentation names without changing the canonical ID contract."""
+        if not isinstance(loadout, dict):
+            return None
+        displayed = json.loads(json.dumps(loadout, ensure_ascii=False))
+        tower = displayed.get("tower")
+        if isinstance(tower, dict):
+            tower_name = str(tower.get("name") or tower.get("id") or "")
+            tower["display_name_zh"] = TOWER_DISPLAY_NAMES_ZH.get(tower_name, tower_name)
+        for card in displayed.get("cards") or []:
+            if not isinstance(card, dict):
+                continue
+            card_name = str(card.get("name") or card.get("id") or "")
+            card["display_name_zh"] = CARD_ALIAS_OVERRIDES.get(card_name, [card_name])[0]
+        return displayed
+
+    @staticmethod
     def _card_row(row: sqlite3.Row) -> dict:
         keys = (
             "card_name",
@@ -440,6 +457,33 @@ class StructuredStatsRepository:
             "provenance": {**self._provenance(), "entity_mode": "loadout_entity"},
         }
 
+    def entity_stats_by_reference(
+        self,
+        entity_type: str | None,
+        entity_name: str | None,
+        special_state: str | None,
+    ) -> dict:
+        name = str(entity_name or "").strip()
+        state = str(special_state or "").strip()
+        if entity_type == "tower" and state == "tower":
+            for tower in self.loadout_catalog()["towers"]:
+                if name in {str(tower.get("name")), str(tower.get("display_name_zh"))}:
+                    return self.entity_stats(f"tower:{tower['tower_id']}")
+        elif entity_type == "card" and state in {"ordinary", "evolution", "elite"}:
+            for card in self.loadout_catalog()["cards"]:
+                if name in {str(card.get("name")), str(card.get("display_name_zh"))}:
+                    return self.entity_stats(f"card:{card['card_id']}:{state}")
+        raise StructuredQueryError(
+            "ENTITY_NOT_FOUND",
+            "No evidence is available for this entity in the selected dataset scope.",
+            status_code=404,
+            details={
+                "entity_type": entity_type,
+                "entity_name": name,
+                "special_state": state,
+            },
+        )
+
     def compare_entities(self, entity_ids: list[str]) -> dict:
         if not isinstance(entity_ids, list) or len(entity_ids) != 2 or len(set(entity_ids)) != 2:
             raise StructuredQueryError(
@@ -580,6 +624,7 @@ class StructuredStatsRepository:
     def answer_payload(self) -> dict:
         """Return rolling-scope facts in the legacy Skill input shape."""
         provenance = self._provenance()
+        sample_battles = provenance.get("unique_battles", provenance.get("total_sample_battles", 0))
         with self._connect() as connection:
             card_rows = connection.execute(
                 "SELECT * FROM card_stats ORDER BY usage_rate DESC, card_name"
@@ -602,7 +647,7 @@ class StructuredStatsRepository:
                     "clean_win_rate": card["clean_win_rate"],
                     "appearance_count": card["appearances"],
                     "source": provenance["source"],
-                    "sample_battles": provenance["unique_battles"],
+                    "sample_battles": sample_battles,
                     "snapshot_id": self.snapshot_id,
                     "snapshot_group_id": self.snapshot_group_id,
                     "dataset_scope": self.dataset_scope,
@@ -619,19 +664,29 @@ class StructuredStatsRepository:
                     "deck_name": " / ".join(deck_cards),
                     "avg_elixir": None,
                     "battles": row["games"],
+                    "usage_rate": row["usage_rate"],
                     "cards": deck_cards,
                     "sample_win_rate": row["clean_win_rate"],
+                    "wins": row["wins"],
+                    "losses": row["losses"],
+                    "draws": row["draws"],
                     "source": provenance["source"],
-                    "sample_battles": provenance["unique_battles"],
+                    "sample_battles": sample_battles,
                     "snapshot_id": self.snapshot_id,
                     "snapshot_group_id": self.snapshot_group_id,
                     "dataset_scope": self.dataset_scope,
                 }
             )
+        card_deck_stats: dict[str, list[dict]] = {}
+        for deck in decks:
+            for card_name in deck["cards"]:
+                card_deck_stats.setdefault(card_name, []).append(deck)
+        for card_name, variants in card_deck_stats.items():
+            card_deck_stats[card_name] = variants[:10]
         return {
             "cards_meta": cards,
             "top_decks": decks,
-            "card_deck_stats": {},
+            "card_deck_stats": card_deck_stats,
             "provenance": provenance,
         }
 
@@ -681,6 +736,87 @@ class StructuredStatsRepository:
             "differences": {metric: round(float(cards[0][metric]) - float(cards[1][metric]), 6) for metric in metrics},
             "matched_sample_count": [card["appearances"] for card in cards],
             "warnings": [result["warning"] for result in results if result["warning"]],
+            "provenance": self._provenance(),
+        }
+
+    def card_pair_stats(self, card_ids: list[str]) -> dict:
+        if not isinstance(card_ids, list) or len(card_ids) != 2 or len(set(card_ids)) != 2:
+            raise StructuredQueryError(
+                "INVALID_CARD_PAIR",
+                "Card pair statistics require exactly 2 distinct card IDs.",
+            )
+        first, second = [self._validate_card(card_id) for card_id in card_ids]
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT games, wins, losses, draws FROM card_teammates "
+                "WHERE card_name=? AND teammate_name=?",
+                (first, second),
+            ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    "SELECT games, wins, losses, draws FROM card_teammates "
+                    "WHERE card_name=? AND teammate_name=?",
+                    (second, first),
+                ).fetchone()
+        if row is None:
+            raise StructuredQueryError(
+                "NO_CARD_PAIR_EVIDENCE",
+                "No same-deck observations were found for this card pair.",
+                status_code=404,
+                details={"card_ids": [first, second], "matched_sample_count": 0},
+            )
+        decisions = int(row["wins"]) + int(row["losses"])
+        games = int(row["games"])
+        return {
+            "cards": [first, second],
+            "games": games,
+            "wins": int(row["wins"]),
+            "losses": int(row["losses"]),
+            "draws": int(row["draws"]),
+            "clean_win_rate": round(int(row["wins"]) / decisions * 100, 6) if decisions else 0.0,
+            "matched_sample_count": games,
+            "warning": self._warning(games),
+            "provenance": self._provenance(),
+        }
+
+    def card_teammate_rankings(self, card_id: str, top_n: int = 10) -> dict:
+        card_id = self._validate_card(card_id)
+        if not isinstance(top_n, int) or not 1 <= top_n <= 30:
+            raise StructuredQueryError(
+                "INVALID_TOP_N",
+                "top_n must be an integer from 1 to 30.",
+                details={"top_n": top_n},
+            )
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT teammate_name AS card_id, games, wins, losses, draws "
+                "FROM card_teammates WHERE card_name=? "
+                "ORDER BY games DESC, teammate_name LIMIT ?",
+                (card_id, top_n),
+            ).fetchall()
+        teammates = []
+        for row in rows:
+            decisions = int(row["wins"]) + int(row["losses"])
+            teammate_name = str(row["card_id"])
+            teammates.append(
+                {
+                    "card_id": teammate_name,
+                    "display_name_zh": CARD_ALIAS_OVERRIDES.get(teammate_name, [teammate_name])[0],
+                    "games": int(row["games"]),
+                    "wins": int(row["wins"]),
+                    "losses": int(row["losses"]),
+                    "draws": int(row["draws"]),
+                    "clean_win_rate": (
+                        round(int(row["wins"]) / decisions * 100, 6) if decisions else 0.0
+                    ),
+                }
+            )
+        return {
+            "card_id": card_id,
+            "display_name_zh": CARD_ALIAS_OVERRIDES.get(card_id, [card_id])[0],
+            "top_n": top_n,
+            "teammates": teammates,
+            "matched_sample_count": sum(item["games"] for item in teammates),
             "provenance": self._provenance(),
         }
 
@@ -831,7 +967,7 @@ class StructuredStatsRepository:
                 details={"matched_sample_count": 0, "deck_mode": "full_loadout"},
             )
         profile = dict(row)
-        profile["loadout"] = json.loads(profile.pop("loadout_json"))
+        profile["loadout"] = self._display_loadout(json.loads(profile.pop("loadout_json")))
         opponents = []
         for matchup in matchup_rows:
             is_a = matchup["loadout_a_signature"] == signature
@@ -848,7 +984,7 @@ class StructuredStatsRepository:
                 ).fetchone()
             opponents.append(
                 {
-                    "loadout": json.loads(opponent_row[0]) if opponent_row else None,
+                    "loadout": self._display_loadout(json.loads(opponent_row[0])) if opponent_row else None,
                     "games": matchup["games"],
                     "wins": wins,
                     "losses": losses,
@@ -902,13 +1038,13 @@ class StructuredStatsRepository:
         return {
             "deck_mode": "full_loadout",
             "loadout_a": {
-                "loadout": normalized_a,
+                "loadout": self._display_loadout(normalized_a),
                 "wins": wins_a,
                 "clean_win_rate": rate_a,
                 "average_crowns": round(crowns_a / games, 6),
             },
             "loadout_b": {
-                "loadout": normalized_b,
+                "loadout": self._display_loadout(normalized_b),
                 "wins": wins_b,
                 "clean_win_rate": round(100 - rate_a, 6) if decisions else 0.0,
                 "average_crowns": round(crowns_b / games, 6),

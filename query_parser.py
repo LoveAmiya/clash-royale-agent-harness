@@ -497,7 +497,7 @@ PARSER_SYSTEM_PROMPT = (
     "请把用户问题解析成 JSON，不要输出多余解释。\n\n"
     "输出格式固定为：\n"
     "{\n"
-    '  "intent": "schedule_query | schedule_summary_query | deck_query | card_query | card_compare_query | card_rank_lookup_query | meta_analysis_query | match_preparation_query | reject",\n'
+    '  "intent": "schedule_query | schedule_summary_query | deck_query | card_query | card_compare_query | card_cooccurrence_query | card_rank_lookup_query | meta_analysis_query | match_preparation_query | reject",\n'
     '  "metric": "usage_rate | win_rate | clean_win_rate | null",\n'
     '  "compare_metric": "usage_rate | win_rate | clean_win_rate | null",\n'
     '  "rank": 具体名次或 null,\n'
@@ -535,6 +535,9 @@ intent="multi_intent" and a "subqueries" array. Each subquery must have a stable
 asking more than one statistic, include metrics as an ordered array of usage_rate,
 win_rate, and/or clean_win_rate while retaining metric as the first item. Never merge
 an exact JSON statistic with an open-ended meta-analysis into one subquery.
+For an exact eight-card deck, retain all canonical names in deck_cards. Questions about
+two cards appearing together or the most common teammates use card_cooccurrence_query;
+use card_names for an exact pair and card_name plus top_n for teammate rankings.
 """
 
 LOCAL_PARSE_CONFIDENCE_HIGH = "high"
@@ -694,6 +697,18 @@ def extract_rank_target(question: str, max_n: int = 30) -> int | None:
 
 
 def extract_top_n(question: str, default: int | None = None, max_n: int = 30) -> int | None:
+    ranked_count_patterns = [
+        r"(?:最高|最多|最常见|最常用|排名靠前)(?:的)?\s*(\d+)\s*(?:张|个)?",
+        r"(?:最高|最多|最常见|最常用|排名靠前)(?:的)?\s*([一二两三四五六七八九十]+)\s*(?:张|个)?",
+    ]
+    for pattern in ranked_count_patterns:
+        match = re.search(pattern, question)
+        if not match:
+            continue
+        value = int(match.group(1)) if match.group(1).isdigit() else extract_cn_number(match.group(1))
+        if value is not None:
+            return max(1, min(value, max_n))
+
     patterns = [
         r"前\s*(\d+)",
         r"给我看\s*(\d+)\s*个",
@@ -783,10 +798,11 @@ def detect_entity_reference(question: str, cards_meta_data: list[dict]) -> dict:
         or _has_form_keyword(normalized, card_name, "evolved")
         or _has_form_keyword(normalized, card_name, "evolution")
     ):
+        base_card_name = card_name.removesuffix(" Evolution")
         return {
             "entity_mode": "loadout_entity",
             "entity_type": "card",
-            "entity_name": card_name,
+            "entity_name": base_card_name,
             "special_state": "evolution",
         }
     if card_name and (
@@ -983,6 +999,21 @@ def is_card_compare_query(question: str, cards_meta_data: list[dict]) -> bool:
     return len(resolve_card_names(question, cards_meta_data)) >= 2 and any(k in q for k in compare_keywords)
 
 
+def is_card_cooccurrence_query(question: str, cards_meta_data: list[dict]) -> bool:
+    q = question.lower()
+    card_names = resolve_card_names(question, cards_meta_data)
+    pair_markers = ("共同出现", "一起出现", "同时出现", "共现", "搭配了多少", "appear together")
+    teammate_markers = (
+        "最常和", "最常与", "经常和", "经常与", "常和", "常与",
+        "一起使用", "一起出现", "常见搭配", "队友", "teammate",
+    )
+    return (
+        len(card_names) >= 2 and any(marker in q for marker in pair_markers)
+    ) or (
+        len(card_names) >= 1 and any(marker in q for marker in teammate_markers)
+    )
+
+
 def is_card_rank_lookup_query(question: str, cards_meta_data: list[dict]) -> bool:
     if resolve_card_name(question, cards_meta_data) is None:
         return False
@@ -1009,6 +1040,8 @@ def has_explicit_rank_signal(question: str) -> bool:
 
 def has_explicit_top_n_signal(question: str) -> bool:
     patterns = [
+        r"(?:最高|最多|最常见|最常用|排名靠前)(?:的)?\s*\d+\s*(?:张|个)?",
+        r"(?:最高|最多|最常见|最常用|排名靠前)(?:的)?\s*[一二两三四五六七八九十]+\s*(?:张|个)?",
         r"前\s*\d+",
         r"给我看\s*\d+\s*个",
         r"来\s*\d+\s*个",
@@ -1156,6 +1189,16 @@ def infer_local_parse_metadata(parsed: dict, question: str) -> dict:
             strong_signals += 1
             reasons.append("compare metric matched")
 
+    elif intent == "card_cooccurrence_query":
+        if len(card_names) >= 2 or card_name is not None:
+            strong_signals += 1
+            reasons.append("card relationship entities matched")
+        if is_card_cooccurrence_query(question, [] if not card_names and not card_name else [
+            {"card_name": name} for name in ([card_name] if card_name else card_names)
+        ]):
+            strong_signals += 1
+            reasons.append("cooccurrence keyword matched")
+
     elif intent == "card_rank_lookup_query":
         if card_name is not None:
             strong_signals += 1
@@ -1196,6 +1239,8 @@ def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
         intent = "match_preparation_query"
     elif is_meta_analysis_query(question):
         intent = "meta_analysis_query"
+    elif is_card_cooccurrence_query(question, cards_meta_data):
+        intent = "card_cooccurrence_query"
     elif is_card_compare_query(question, cards_meta_data):
         intent = "card_compare_query"
     elif is_card_rank_lookup_query(question, cards_meta_data):
@@ -1260,8 +1305,14 @@ def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
         round_no = None
         target_date = None
 
+    deck_cards = card_names if intent == "deck_query" and len(card_names) == 8 else None
+
     if intent == "deck_query":
         card_names = None
+        if deck_cards:
+            card_name = None
+            rank_target = None
+            top_n = None
 
     if intent == "card_query":
         card_names = None
@@ -1283,6 +1334,24 @@ def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
         target_date = None
         if not card_names:
             card_names = None
+
+    if intent == "card_cooccurrence_query":
+        metric = None
+        compare_metric = None
+        rank_target = None
+        round_no = None
+        target_date = None
+        if len(card_names) >= 2:
+            card_name = None
+            top_n = None
+        else:
+            card_name = card_names[0] if card_names else card_name
+            card_names = None
+            top_n = (
+                extract_top_n(question, default=10, max_n=30)
+                if has_explicit_top_n_signal(question)
+                else 10
+            )
 
     if intent == "deck_query" and rank_target is None and top_n is None:
         if any(keyword in question for keyword in ["热门卡组", "高使用率卡组", "最热门卡组", "卡组"]):
@@ -1307,6 +1376,7 @@ def fallback_parse_query(question: str, cards_meta_data: list[dict]) -> dict:
         "top_n": top_n,
         "card_name": card_name,
         "card_names": card_names,
+        "deck_cards": deck_cards,
         "round": round_no,
         "date": target_date,
         "ask_players": is_asking_players(question),
@@ -1330,6 +1400,7 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         "top_n": parsed.get("top_n"),
         "card_name": parsed.get("card_name"),
         "card_names": parsed.get("card_names"),
+        "deck_cards": parsed.get("deck_cards"),
         "round": parsed.get("round"),
         "date": parsed.get("date"),
         "ask_players": parsed.get("ask_players", False),
@@ -1343,7 +1414,7 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         "analysis_type": parsed.get("analysis_type"),
     }
 
-    if result["intent"] not in {"schedule_query", "schedule_summary_query", "deck_query", "card_query", "card_compare_query", "card_rank_lookup_query", "meta_analysis_query", "match_preparation_query", "reject"}:
+    if result["intent"] not in {"schedule_query", "schedule_summary_query", "deck_query", "card_query", "card_compare_query", "card_cooccurrence_query", "card_rank_lookup_query", "meta_analysis_query", "match_preparation_query", "reject"}:
         return fallback_parse_query(question, cards_meta_data)
 
     # Model-provided Chinese aliases must become the same canonical keys used by JSON Skills.
@@ -1362,6 +1433,13 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
             if canonical_name not in canonical_names:
                 canonical_names.append(canonical_name)
         result["card_names"] = canonical_names
+    if isinstance(result["deck_cards"], list):
+        canonical_deck_cards: list[str] = []
+        for raw_name in result["deck_cards"]:
+            canonical_name = resolve_card_name(str(raw_name), cards_meta_data)
+            if canonical_name and canonical_name not in canonical_deck_cards:
+                canonical_deck_cards.append(canonical_name)
+        result["deck_cards"] = canonical_deck_cards if len(canonical_deck_cards) == 8 else None
 
     if result["metric"] not in {"usage_rate", "win_rate", "clean_win_rate", None}:
         result["metric"] = get_metric(question)
@@ -1428,14 +1506,20 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         result["analysis_type"] = None
 
     if result["intent"] == "deck_query":
+        resolved_deck_cards = resolve_card_names(question, cards_meta_data)
+        if len(resolved_deck_cards) == 8:
+            result["deck_cards"] = resolved_deck_cards
+            result["card_name"] = None
+            result["rank"] = None
+            result["top_n"] = None
         result["card_names"] = None
-        if not result["card_name"]:
+        if not result["deck_cards"] and not result["card_name"]:
             result["card_name"] = resolve_card_name(question, cards_meta_data)
         if result["metric"] is None:
             result["metric"] = "usage_rate"
-        if result["card_name"] and result["rank"] is None and result["top_n"] is None:
+        if not result["deck_cards"] and result["card_name"] and result["rank"] is None and result["top_n"] is None:
             result["top_n"] = 5
-        elif result["rank"] is None and result["top_n"] is None and any(
+        elif not result["deck_cards"] and result["rank"] is None and result["top_n"] is None and any(
             keyword in question for keyword in ["热门卡组", "主流卡组", "卡组有哪些", "哪些卡组"]
         ):
             result["top_n"] = 5
@@ -1477,6 +1561,27 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         if result["compare_metric"] is None:
             result["compare_metric"] = get_metric(question)
 
+    if result["intent"] == "card_cooccurrence_query":
+        resolved_names = resolve_card_names(question, cards_meta_data)
+        result["metric"] = None
+        result["compare_metric"] = None
+        result["rank"] = None
+        result["round"] = None
+        result["date"] = None
+        result["deck_cards"] = None
+        if len(resolved_names) >= 2:
+            result["card_name"] = None
+            result["card_names"] = resolved_names[:2]
+            result["top_n"] = None
+        else:
+            result["card_name"] = resolved_names[0] if resolved_names else result["card_name"]
+            result["card_names"] = None
+            result["top_n"] = (
+                coerce_top_n_value(result["top_n"], max_n=30) or 10
+                if has_explicit_top_n_signal(question)
+                else 10
+            )
+
     if not result["parse_source"]:
         result["parse_source"] = "llm_parser"
     if result["parse_confidence"] not in {
@@ -1497,15 +1602,50 @@ def normalize_parsed_query(parsed: dict, question: str, cards_meta_data: list[di
         result["entity_name"] = None
         result["special_state"] = None
 
+    if result["intent"] != "deck_query":
+        result["deck_cards"] = None
+
     return result
 
 
-def _subquery_key(parsed: dict) -> tuple:
+def apply_selected_entity_mode(parsed: dict, selected_entity_mode: str) -> dict:
+    """Apply the UI data contract after parsing without overriding explicit forms."""
+    result = dict(parsed)
+    if result.get("intent") == "multi_intent":
+        result["subqueries"] = [
+            apply_selected_entity_mode(item, selected_entity_mode)
+            if isinstance(item, dict)
+            else item
+            for item in result.get("subqueries", [])
+        ]
+        return result
+    if (
+        selected_entity_mode == "loadout_entity"
+        and result.get("intent") == "card_query"
+        and result.get("card_name")
+        and result.get("entity_mode") != "loadout_entity"
+    ):
+        result.update(
+            {
+                "entity_mode": "loadout_entity",
+                "entity_type": "card",
+                "entity_name": result["card_name"],
+                "special_state": "ordinary",
+            }
+        )
+    return result
+
+
+def subquery_semantic_key(parsed: dict) -> tuple:
+    intent = parsed.get("intent")
+    if intent == "meta_analysis_query":
+        return (intent, parsed.get("analysis_type"))
     return (
-        parsed.get("intent"),
+        intent,
         parsed.get("card_name"),
         tuple(parsed.get("metrics") or []),
         tuple(parsed.get("card_names") or []),
+        tuple(parsed.get("deck_cards") or []),
         parsed.get("rank"),
         parsed.get("top_n"),
         parsed.get("round"),
@@ -1544,7 +1684,7 @@ def fallback_parse_multi_intent(question: str, cards_meta_data: list[dict]) -> d
                 existing["metrics"] = merged_metrics
                 existing["metric"] = merged_metrics[0] if merged_metrics else existing.get("metric")
                 return
-        key = _subquery_key(candidate)
+        key = subquery_semantic_key(candidate)
         if key in seen or len(candidates) >= MAX_SUBQUERIES:
             return
         seen.add(key)
@@ -1582,7 +1722,13 @@ def fallback_parse_multi_intent(question: str, cards_meta_data: list[dict]) -> d
 
         if segment_card_names:
             last_card_name = segment_card_names[-1]
-        elif segment_metrics and last_card_name and candidate.get("card_name") is None:
+        elif (
+            segment_metrics
+            and last_card_name
+            and candidate.get("card_name") is None
+            and candidate.get("top_n") is None
+            and not is_card_ranking_query(segment)
+        ):
             # Follow-up fragments such as "usage and win rate?" inherit the
             # nearest preceding card mention instead of becoming a generic RAG query.
             candidate = fallback_parse_query(f"{last_card_name} {segment}", cards_meta_data)
@@ -1634,7 +1780,7 @@ def normalize_multi_intent_query(parsed: dict, question: str, cards_meta_data: l
         normalized = normalize_parsed_query(raw_subquery, question, cards_meta_data)
         if normalized.get("intent") == "reject":
             continue
-        key = _subquery_key(normalized)
+        key = subquery_semantic_key(normalized)
         if key in seen:
             continue
         seen.add(key)

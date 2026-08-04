@@ -55,7 +55,7 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(evolved["special_state"], "evolution")
         self.assertEqual(elite["special_state"], "elite")
         self.assertEqual(tower["entity_type"], "tower")
-        self.assertTrue(query_needs_rag(evolved))
+        self.assertFalse(query_needs_rag(evolved))
 
     def test_official_elite_barbarians_name_is_not_an_elite_form_modifier(self):
         ordinary = fallback_parse_query("Elite Barbarians usage rate", self.card_data)

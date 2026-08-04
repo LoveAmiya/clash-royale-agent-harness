@@ -9,7 +9,7 @@ install_test_stubs()
 
 from answer_builder import build_card_answer
 from query_parser import fallback_parse_multi_intent
-from query_answering import AnswerResult, answer_query
+from query_answering import AnswerResult, answer_query, subquery_user_text
 from runtime_events import RuntimeEventEmitter
 import runtime_multi
 
@@ -46,6 +46,60 @@ class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("胜率比较", description)
         self.assertNotIn("未支持", description)
 
+    def test_execution_description_names_structured_relationship_and_exact_deck_queries(self):
+        relationship = runtime_multi.describe_parsed_request(
+            {
+                "intent": "card_cooccurrence_query",
+                "card_names": ["Fireball", "Hog Rider"],
+            }
+        )
+        teammates = runtime_multi.describe_parsed_request(
+            {
+                "intent": "card_cooccurrence_query",
+                "card_name": "Giant",
+                "card_names": None,
+            }
+        )
+        exact_deck = runtime_multi.describe_parsed_request(
+            {
+                "intent": "deck_query",
+                "deck_cards": [f"Card {index}" for index in range(8)],
+            }
+        )
+
+        self.assertIn("共同出现", relationship)
+        self.assertIn("常见搭配", teammates)
+        self.assertIn("精确八卡", exact_deck)
+        self.assertNotIn("未支持", relationship)
+
+    def test_subquery_title_accepts_relationship_query_without_card_names(self):
+        from query_answering import subquery_title
+
+        title = subquery_title(
+            {
+                "intent": "card_cooccurrence_query",
+                "card_name": "Giant",
+                "card_names": None,
+            }
+        )
+
+        self.assertIn("常见搭配", title)
+
+    def test_subquery_title_names_card_compare_query(self):
+        from query_answering import subquery_title
+
+        title = subquery_title(
+            {
+                "intent": "card_compare_query",
+                "card_names": ["Fireball", "Poison"],
+                "compare_metric": "usage_rate",
+            }
+        )
+
+        self.assertIn("Fireball", title)
+        self.assertIn("Poison", title)
+        self.assertIn("使用率比较", title)
+
     def test_english_compound_question_deduplicates_card_metrics_and_routes_meta_to_synthesis(self):
         parsed = fallback_parse_multi_intent(
             "Electro Giant usage rate, win rate, and current meta decks",
@@ -68,6 +122,14 @@ class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["intent"] for item in parsed["subqueries"]].count("meta_analysis_query"), 1)
         self.assertEqual([item["intent"] for item in parsed["subqueries"]].count("card_query"), 2)
         self.assertEqual({item.get("card_name") for item in parsed["subqueries"]}, {None, "Fireball", "Poison"})
+
+    def test_meta_question_with_archetype_card_word_is_one_semantic_query(self):
+        question = "现在的环境怎么样，野猪速转卡组有多少"
+
+        parsed = fallback_parse_multi_intent(question, self.card_data)
+
+        self.assertEqual(parsed["intent"], "meta_analysis_query")
+        self.assertEqual(subquery_user_text(parsed, question), question)
 
     def test_environment_deck_and_metrics_keep_three_bound_subqueries_in_user_order(self):
         parsed = fallback_parse_multi_intent(
@@ -162,8 +224,137 @@ class MultiIntentParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["intent"], "multi_intent")
         self.assertEqual([item["card_name"] for item in parsed["subqueries"]], ["Fireball", "Poison"])
 
+    async def test_llm_cannot_downgrade_structured_pair_query_to_single_card(self):
+        with patch.object(
+            runtime_multi,
+            "generate_model_text",
+            AsyncMock(return_value='{"intent":"card_query","card_name":"火球","metrics":["usage_rate"]}'),
+        ):
+            parsed = await runtime_multi.parse_user_query(
+                "火球和野猪骑士共同出现了多少次？",
+                self.card_data,
+                "test-key",
+            )
+
+        self.assertEqual(parsed["intent"], "card_cooccurrence_query")
+        self.assertEqual(parsed["card_names"], ["Fireball", "Hog Rider"])
+        self.assertEqual(parsed["model_parser_status"], "validated_reconciled")
+
+    async def test_llm_cannot_expand_high_confidence_meta_question_into_extra_deck_query(self):
+        payload = (
+            '{"intent":"multi_intent","subqueries":['
+            '{"id":"q1","intent":"meta_analysis_query"},'
+            '{"id":"q2","intent":"deck_query","card_name":"野猪骑士"}]}'
+        )
+        question = "现在的环境怎么样，野猪速转卡组有多少"
+
+        with patch.object(runtime_multi, "generate_model_text", AsyncMock(return_value=payload)):
+            parsed = await runtime_multi.parse_user_query(question, self.card_data, "test-key")
+
+        self.assertEqual(parsed["intent"], "meta_analysis_query")
+        self.assertEqual(parsed["model_parser_status"], "validated_reconciled")
+
+    async def test_llm_cannot_pollute_high_confidence_compound_card_and_meta_query(self):
+        question = (
+            "巨人的使用率是多少？最常见的十张卡胜率是多少？"
+            "另外分析一下当前环境为什么会出现这么多低费循环卡组，"
+            "比较火球和毒药法术的使用率，并说明当前环境更偏向哪一种法术。"
+        )
+        payload = (
+            '{"intent":"multi_intent","subqueries":['
+            '{"id":"q1","intent":"card_query","card_name":"Giant","metrics":["usage_rate","win_rate"]},'
+            '{"id":"q2","intent":"card_query","card_name":"Giant","metrics":["usage_rate","win_rate"],"top_n":10},'
+            '{"id":"q3","intent":"meta_analysis_query","card_name":"Giant"},'
+            '{"id":"q4","intent":"card_compare_query","card_names":["Fireball","Poison","Giant"],"compare_metric":"win_rate"}'
+            ']}'
+        )
+
+        with patch.object(runtime_multi, "generate_model_text", AsyncMock(return_value=payload)):
+            parsed = await runtime_multi.parse_user_query(question, self.card_data, "test-key")
+
+        self.assertEqual(parsed["intent"], "multi_intent")
+        self.assertEqual(parsed["model_parser_status"], "validated_reconciled")
+        self.assertEqual(parsed["subqueries"][0]["card_name"], "Giant")
+        self.assertEqual(parsed["subqueries"][0]["metrics"], ["usage_rate"])
+        self.assertIsNone(parsed["subqueries"][1]["card_name"])
+        self.assertEqual(parsed["subqueries"][1]["metric"], "win_rate")
+        self.assertEqual(parsed["subqueries"][1]["top_n"], 10)
+        self.assertEqual(parsed["subqueries"][2]["intent"], "meta_analysis_query")
+        self.assertIsNone(parsed["subqueries"][2]["card_name"])
+        self.assertEqual(parsed["subqueries"][3]["card_names"], ["Fireball", "Poison"])
+        self.assertEqual(parsed["subqueries"][3]["compare_metric"], "usage_rate")
+
+    def test_two_card_rankings_keep_both_structured_top_ten_queries(self):
+        parsed = fallback_parse_multi_intent(
+            "使用率最高的10张卡是什么？胜率最高的10张卡呢？",
+            self.card_data,
+        )
+
+        self.assertEqual(parsed["intent"], "multi_intent")
+        self.assertEqual(
+            [
+                (item["intent"], item["metric"], item["top_n"])
+                for item in parsed["subqueries"]
+            ],
+            [
+                ("card_query", "usage_rate", 10),
+                ("card_query", "win_rate", 10),
+            ],
+        )
+
+    def test_compound_query_does_not_merge_card_ranking_into_named_card(self):
+        question = (
+            "巨人的使用率是多少？最常见的十张卡胜率是多少？"
+            "另外分析一下当前环境为什么会出现这么多低费循环卡组，"
+            "比较火球和毒药法术的使用率，并说明当前环境更偏向哪一种法术。"
+        )
+
+        parsed = fallback_parse_multi_intent(question, self.card_data)
+
+        self.assertEqual(parsed["intent"], "multi_intent")
+        self.assertEqual(len(parsed["subqueries"]), 4)
+        self.assertEqual(parsed["subqueries"][0]["card_name"], "Giant")
+        self.assertEqual(parsed["subqueries"][0]["metrics"], ["usage_rate"])
+        ranking = parsed["subqueries"][1]
+        self.assertEqual(ranking["intent"], "card_query")
+        self.assertIsNone(ranking["card_name"])
+        self.assertEqual(ranking["metric"], "win_rate")
+        self.assertEqual(ranking["top_n"], 10)
+        self.assertEqual(parsed["subqueries"][2]["intent"], "meta_analysis_query")
+        self.assertEqual(parsed["subqueries"][3]["intent"], "card_compare_query")
+
 
 class MultiIntentOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execution_deduplicates_semantically_identical_meta_subqueries(self):
+        parsed = {
+            "intent": "multi_intent",
+            "subqueries": [
+                {"id": "q1", "intent": "meta_analysis_query", "card_name": None},
+                {"id": "q2", "intent": "meta_analysis_query", "card_name": "Hog Rider"},
+            ],
+        }
+        result_item = {
+            "id": "q1", "title": "meta", "parsed": parsed["subqueries"][0],
+            "plan": None, "selected_skill": "EvidenceSynthesisSkill", "mode": "rag_synthesis",
+            "status": "success", "answer": "meta answer", "metadata": {}, "error": None,
+            "latency_ms": 1,
+        }
+
+        with patch("query_answering.execute_subquery", AsyncMock(return_value=result_item)) as execute:
+            result = await answer_query(
+                user_text="现在的环境怎么样，野猪速转卡组有多少",
+                parsed=parsed,
+                schedule_data=[],
+                top_decks_data=[],
+                cards_meta_data=[],
+                retriever=object(),
+                api_key="test-key",
+                include_metadata=True,
+            )
+
+        self.assertEqual(execute.await_count, 1)
+        self.assertEqual(result.metadata["subquery_count"], 1)
+
     async def test_subqueries_execute_concurrently_and_keep_question_order(self):
         parsed = {
             "intent": "multi_intent",

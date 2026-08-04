@@ -7,7 +7,7 @@
 import json
 import uuid
 from typing import Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 import uvicorn
@@ -29,6 +29,11 @@ MODEL_STATUS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/model/status"
 METRICS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/metrics"
 FEEDBACK_STATS_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/feedback/stats"
 STRUCTURED_API_BASE_URL = f"{BACKEND_URL.rsplit('/', 1)[0]}/api"
+BACKEND_HTTPX_TRUST_ENV = (urlsplit(BACKEND_URL).hostname or "").casefold() not in {
+    "127.0.0.1",
+    "localhost",
+    "::1",
+}
 
 
 HTML_PAGE = """
@@ -1199,7 +1204,7 @@ async def health():
 
 async def proxy_backend_json(url: str, *, unavailable: str, failed: str, invalid: str) -> dict:
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=BACKEND_HTTPX_TRUST_ENV) as client:
             response = await client.get(url)
     except httpx.ConnectError as exc:
         raise HTTPException(status_code=503, detail=unavailable) from exc
@@ -1217,7 +1222,7 @@ async def proxy_backend_json(url: str, *, unavailable: str, failed: str, invalid
 
 async def proxy_backend_text(url: str, *, unavailable: str, failed: str) -> str:
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=BACKEND_HTTPX_TRUST_ENV) as client:
             response = await client.get(url)
     except httpx.ConnectError as exc:
         raise HTTPException(status_code=503, detail=unavailable) from exc
@@ -1241,7 +1246,7 @@ async def proxy_structured_api(
     if dataset_scope is not None:
         params["dataset_scope"] = dataset_scope
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=BACKEND_HTTPX_TRUST_ENV) as client:
             response = await client.request(
                 method,
                 f"{STRUCTURED_API_BASE_URL}{path}",
@@ -1305,7 +1310,7 @@ async def get_backend_metrics():
 
 async def proxy_live_sample_settings(method: str, payload: dict | None = None) -> dict:
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=BACKEND_HTTPX_TRUST_ENV) as client:
             response = await client.request(method, LIVE_SAMPLE_SETTINGS_URL, json=payload)
     except httpx.ConnectError as exc:
         raise HTTPException(status_code=503, detail="无法连接后端实时采样设置服务") from exc
@@ -1334,7 +1339,7 @@ async def update_live_sample_settings(request: LiveSampleSettingsRequest):
 @app.get("/snapshot/status")
 async def get_snapshot_status():
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=BACKEND_HTTPX_TRUST_ENV) as client:
             response = await client.get(SNAPSHOT_STATUS_URL)
     except httpx.ConnectError as exc:
         raise HTTPException(status_code=503, detail="backend snapshot status service is unavailable") from exc
@@ -1438,7 +1443,7 @@ async def structured_archetypes_proxy(dataset_scope: str = DEFAULT_DATASET_SCOPE
 @app.post("/feedback")
 async def submit_feedback(request: FeedbackProxyRequest):
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=BACKEND_HTTPX_TRUST_ENV) as client:
             response = await client.post(FEEDBACK_URL, json=request.model_dump())
     except httpx.ConnectError as exc:
         raise HTTPException(status_code=503, detail="backend feedback service is unavailable") from exc
@@ -1481,7 +1486,7 @@ async def chat(req: ChatRequest):
 
     async def proxy_stream():
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
+            async with httpx.AsyncClient(timeout=None, trust_env=BACKEND_HTTPX_TRUST_ENV) as client:
                 async with client.stream("POST", BACKEND_URL, json=backend_payload) as resp:
                     if resp.status_code >= 400:
                         yield sse_data(

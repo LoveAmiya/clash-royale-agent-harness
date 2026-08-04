@@ -541,6 +541,7 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                         "deck_mode": "base8",
                         "archetype": row["archetype"],
                         "games": row["games"],
+                        "usage_rate": row["usage_rate"],
                         "win_rate": row["clean_win_rate"],
                         "classification": row["classification"],
                     },

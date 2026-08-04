@@ -26,8 +26,15 @@ def _source_url(items: list[dict], fallback: str) -> str:
     return fallback
 
 
-def _uses_supercell_live_sample(items: list[dict]) -> bool:
-    return any(str(item.get("source", "")).strip() == "Supercell API live sample" for item in items)
+def _supercell_source(items: list[dict]) -> str | None:
+    return next(
+        (
+            source
+            for item in items
+            if (source := str(item.get("source", "")).strip()).startswith("Supercell API")
+        ),
+        None,
+    )
 
 
 def _live_snapshot_boundary(items: list[dict]) -> str | None:
@@ -35,7 +42,7 @@ def _live_snapshot_boundary(items: list[dict]) -> str | None:
         (
             item
             for item in items
-            if str(item.get("source", "")).strip() == "Supercell API live sample"
+            if str(item.get("source", "")).strip().startswith("Supercell API")
             and item.get("sample_battles") is not None
         ),
         None,
@@ -73,8 +80,8 @@ def build_meta_evidence_pack(
         evidence_cards,
         key=lambda item: (-_as_float(item.get("usage_rate")), _as_int(item.get("rank"))),
     )[:card_limit]
-    uses_live_deck_sample = _uses_supercell_live_sample(ranked_decks)
-    uses_live_card_sample = _uses_supercell_live_sample(popular_cards)
+    deck_supercell_source = _supercell_source(ranked_decks)
+    card_supercell_source = _supercell_source(popular_cards)
     upcoming = sorted(
         [item for item in schedule_data if str(item.get("status", "")).lower() == "upcoming"],
         key=lambda item: (str(item.get("match_date", "")), _as_int(item.get("round"))),
@@ -84,13 +91,20 @@ def build_meta_evidence_pack(
     for deck in ranked_decks:
         card_frequency.update(str(card) for card in deck.get("cards", []) if str(card).strip())
 
-    deck_lines = [
-        (
-            f"- rank={deck.get('rank')} | {deck.get('deck_name')} | "
-            f"均费={deck.get('avg_elixir')} | 组件={', '.join(map(str, deck.get('cards', [])))}"
-        )
-        for deck in ranked_decks
-    ]
+    deck_lines = []
+    for deck in ranked_decks:
+        facts = [f"rank={deck.get('rank')}", str(deck.get("deck_name") or "未命名卡组")]
+        if deck.get("battles") is not None:
+            facts.append(f"对局={deck.get('battles')}")
+        win_rate = deck.get("sample_win_rate", deck.get("win_rate"))
+        if win_rate is not None:
+            facts.append(f"净胜率={win_rate}%")
+        if deck.get("usage_rate") is not None:
+            facts.append(f"使用率={deck.get('usage_rate')}%")
+        if deck.get("avg_elixir") is not None:
+            facts.append(f"均费={deck.get('avg_elixir')}")
+        facts.append(f"组件={', '.join(map(str, deck.get('cards', [])))}")
+        deck_lines.append("- " + " | ".join(facts))
     card_lines = [
         (
             f"- rank={card.get('rank')} | {card.get('card_name')} | "
@@ -112,9 +126,10 @@ def build_meta_evidence_pack(
     snapshot_boundary = _live_snapshot_boundary([*ranked_decks, *popular_cards])
     evidence_sections = [
             (
-                "Data freshness boundary: Supercell API live sample; deck and card evidence is a bounded battle-log sample "
-                "collected for this request. It is not a global or full-season leaderboard."
-                if uses_live_deck_sample or uses_live_card_sample
+                f"Data freshness boundary: {deck_supercell_source or card_supercell_source}; "
+                "deck and card evidence is limited to the selected official data scope. "
+                "It is not a global or full-season leaderboard."
+                if deck_supercell_source or card_supercell_source
                 else "数据时效边界：这是仓库内保存的静态快照（repository static snapshots），不是实时游戏数据。"
             ),
             *([snapshot_boundary] if snapshot_boundary else []),
@@ -134,13 +149,13 @@ def build_meta_evidence_pack(
         )
     evidence = "\n".join(evidence_sections)
     deck_source = (
-        "[1] Supercell API live sample | bounded battle-log deck sample"
-        if uses_live_deck_sample
+        f"[1] {deck_supercell_source} | selected-scope deck statistics"
+        if deck_supercell_source
         else "[1] top_decks.json | 静态快照 | " + _source_url(ranked_decks, "https://royaleapi.com/decks/leaderboard")
     )
     card_source = (
-        "[2] Supercell API live sample | bounded battle-log card sample"
-        if uses_live_card_sample
+        f"[2] {card_supercell_source} | selected-scope card statistics"
+        if card_supercell_source
         else "[2] cards_meta.json | 静态快照 | " + _source_url(popular_cards, "https://royaleapi.com/cards/popular")
     )
     sources_list = [deck_source, card_source]

@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from answer_presentation import localize_card_names, normalize_answer_text
+from answer_builder import build_deck_answer
 from query_parser import CARD_ALIAS_OVERRIDES, resolve_card_name
 
 
@@ -83,14 +84,37 @@ class CardNamePresentationTests(unittest.TestCase):
         self.assertNotIn("data boundaries", normalized.lower())
 
     def test_legacy_chinese_names_in_model_output_are_normalized(self):
-        answer = "攻城槌、巨型骷髅、掘地矿工、雪球、滚木、连弩"
+        answer = "攻城槌、巨型骷髅、掘地矿工、雪球、滚木、连弩、野蛮人滚筒、寒戈仑冰人"
 
         normalized = normalize_answer_text(answer)
 
         self.assertEqual(
             normalized,
-            "野蛮人攻城锤、骷髅巨人、矿工、大雪球、复仇滚木、X连弩",
+            "野蛮人攻城锤、骷髅巨人、矿工、大雪球、复仇滚木、X连弩、野蛮人滚桶、戈仑冰人",
         )
+
+    def test_deck_ranking_omits_unknown_player_elixir_and_trophies(self):
+        answer = build_deck_answer(
+            {"intent": "deck_query", "top_n": 1},
+            [{
+                "rank": 1,
+                "deck_name": "A / B / C / D / E / F / G / H",
+                "cards": ["A", "B", "C", "D", "E", "F", "G", "H"],
+                "battles": 123,
+                "sample_win_rate": 51.5,
+                "player_name": "Rolling Path of Legend sample",
+                "avg_elixir": None,
+                "trophies": None,
+                "source": "Supercell API rolling Path of Legend corpus",
+                "sample_battles": 1000,
+            }],
+        )
+
+        self.assertIn("123", answer)
+        self.assertIn("51.5%", answer)
+        self.assertNotIn("None", answer)
+        self.assertNotIn("玩家", answer)
+        self.assertNotIn("奖杯", answer)
 
 
 if __name__ == "__main__":

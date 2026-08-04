@@ -17,9 +17,9 @@ class RAGEvidenceSkill(Skill):
                 and parsed.get("top_n") is None
             )
         if intent == "card_query":
-            if parsed.get("entity_mode") == "loadout_entity":
-                return True
             return (
+                parsed.get("entity_mode") != "loadout_entity"
+                and
                 parsed.get("card_name") is None
                 and parsed.get("rank") is None
                 and parsed.get("top_n") is None
@@ -28,11 +28,7 @@ class RAGEvidenceSkill(Skill):
 
     async def run(self, context: SkillContext) -> str:
         intent = context.parsed.get("intent")
-        source_type = "deck" if intent == "deck_query" else (
-            "tower" if context.parsed.get("entity_type") == "tower" else
-            "card_variant" if context.parsed.get("entity_mode") == "loadout_entity" else
-            "card"
-        )
+        source_type = "deck" if intent == "deck_query" else "card"
 
         if context.retriever is None:
             if source_type == "deck":

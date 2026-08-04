@@ -4,12 +4,14 @@ from support import install_test_stubs, sample_cards, sample_schedule
 
 install_test_stubs()
 
-from query_parser import fallback_parse_query
+from query_parser import apply_selected_entity_mode, fallback_parse_query
 from skills.base import SkillContext
 from skills.card_compare_skill import CardCompareSkill
 from skills.card_rank_lookup_skill import CardRankLookupSkill
 from skills.card_skill import CardMetaSkill
 from skills.evidence_synthesis_skill import EvidenceSynthesisSkill
+from skills.loadout_entity_skill import LoadoutEntitySkill
+from skills.structured_relationship_skill import StructuredRelationshipSkill
 from skills.rag_skill import RAGEvidenceSkill
 from skills.registry import build_default_registry
 from skills.schedule_summary_skill import ScheduleSummarySkill
@@ -77,14 +79,101 @@ class BusinessSkillTests(unittest.TestCase):
         self.assertEqual(parsed["intent"], "card_query")
         self.assertIsInstance(selected_skill, CardMetaSkill)
 
-    def test_explicit_card_form_routes_to_rag_entity_evidence(self):
+    def test_explicit_card_form_routes_to_structured_entity_skill(self):
         registry = build_default_registry()
         parsed = fallback_parse_query("觉醒骑士的使用率是多少", self.card_data)
 
         selected_skill = registry.resolve(parsed)
 
         self.assertEqual(parsed["entity_mode"], "loadout_entity")
-        self.assertIsInstance(selected_skill, RAGEvidenceSkill)
+        self.assertIsInstance(selected_skill, LoadoutEntitySkill)
+
+    def test_structured_entity_skill_returns_requested_metric_without_rag(self):
+        class FakeRepository:
+            def entity_stats_by_reference(self, entity_type, entity_name, special_state):
+                self.reference = (entity_type, entity_name, special_state)
+                return {
+                    "entity": {
+                        "display_name_zh": "觉醒骑士",
+                        "usage_rate": 8.5,
+                        "clean_win_rate": 51.25,
+                        "net_win_rate": 2.5,
+                        "rating": 0.73,
+                        "appearances": 1234,
+                    },
+                    "matched_sample_count": 1234,
+                    "provenance": {
+                        "source": "Supercell API rolling Path of Legend corpus",
+                        "dataset_scope": "7d_all",
+                        "unique_battles": 937843,
+                    },
+                }
+
+        parsed = fallback_parse_query("觉醒骑士的使用率是多少", self.card_data)
+        repository = FakeRepository()
+        context = self.build_context(parsed)
+        context.structured_repository = repository
+
+        answer = LoadoutEntitySkill().run(context)
+
+        self.assertEqual(repository.reference, ("card", "Knight", "evolution"))
+        self.assertIn("觉醒骑士", answer)
+        self.assertIn("使用率：8.5%", answer)
+        self.assertNotIn("胜率：", answer)
+        self.assertIn("1234 次", answer)
+        self.assertIn("Supercell API rolling Path of Legend corpus", answer)
+
+    def test_selected_full_configuration_promotes_bare_card_to_ordinary_entity(self):
+        parsed = fallback_parse_query("巨人的使用率是多少？", self.card_data)
+
+        promoted = apply_selected_entity_mode(parsed, "loadout_entity")
+
+        self.assertEqual(promoted["entity_mode"], "loadout_entity")
+        self.assertEqual(promoted["entity_type"], "card")
+        self.assertEqual(promoted["entity_name"], "Giant")
+        self.assertEqual(promoted["special_state"], "ordinary")
+        self.assertIsInstance(build_default_registry().resolve(promoted), LoadoutEntitySkill)
+
+    def test_selected_base8_keeps_bare_card_in_base8(self):
+        parsed = fallback_parse_query("巨人的使用率是多少？", self.card_data)
+
+        unchanged = apply_selected_entity_mode(parsed, "base8")
+
+        self.assertEqual(unchanged["entity_mode"], "base8")
+        self.assertIsInstance(build_default_registry().resolve(unchanged), CardMetaSkill)
+
+    def test_card_pair_cooccurrence_routes_to_structured_relationship_skill(self):
+        parsed = fallback_parse_query("火球和野猪骑士共同出现了多少次？", self.card_data)
+
+        self.assertEqual(parsed["intent"], "card_cooccurrence_query")
+        self.assertEqual(parsed["card_names"], ["Fireball", "Hog Rider"])
+        self.assertIsInstance(build_default_registry().resolve(parsed), StructuredRelationshipSkill)
+
+    def test_common_teammates_routes_to_structured_relationship_skill(self):
+        parsed = fallback_parse_query("哪些卡最常和巨人一起使用？", self.card_data)
+
+        self.assertEqual(parsed["intent"], "card_cooccurrence_query")
+        self.assertEqual(parsed["card_name"], "Giant")
+        self.assertEqual(parsed["top_n"], 10)
+        self.assertIsInstance(build_default_registry().resolve(parsed), StructuredRelationshipSkill)
+
+    def test_exact_eight_card_deck_query_preserves_all_cards(self):
+        parsed = fallback_parse_query(
+            "野猪骑士、火枪手、火球、加农炮、戈仑冰人、冰雪精灵、骷髅兵、复仇滚木这套卡组有多少场？",
+            self.card_data,
+        )
+
+        self.assertEqual(parsed["intent"], "deck_query")
+        self.assertEqual(len(parsed["deck_cards"]), 8)
+        self.assertIsNone(parsed["card_name"])
+        self.assertIsNone(parsed["top_n"])
+        self.assertEqual(
+            set(parsed["deck_cards"]),
+            {
+                "Hog Rider", "Musketeer", "Fireball", "Cannon",
+                "Ice Golem", "Ice Spirit", "Skeletons", "The Log",
+            },
+        )
 
     def test_card_compare_skill_returns_controlled_failure_for_single_recognized_card(self):
         parsed = {

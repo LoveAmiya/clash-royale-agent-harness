@@ -11,6 +11,7 @@ class SkillContext:
     top_decks_data: list[dict]
     cards_meta_data: list[dict]
     card_deck_stats: dict[str, list[dict]] = field(default_factory=dict)
+    structured_repository: Any | None = None
     retriever: Any | None = None
     api_key: str = ""
     metadata: dict | None = None
