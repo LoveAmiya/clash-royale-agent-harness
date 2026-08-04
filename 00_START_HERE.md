@@ -190,8 +190,10 @@ d28_35   28-35 天前
 - `GET /api/meta/archetypes?dataset_scope=7d_all`
 - `POST /process` 与 `/process/stream`
 
-结构化页面不调用模型。自由问答保留自然语言解析、多意图拆分和高级 RAG；环境分析先
-检索当前范围的聚合证据，再由配置模型综合。战队赛赛程与备战功能已移除。
+结构化页面不调用模型。自由问答保留自然语言解析、多意图拆分和高级 RAG，但不是所有
+子问题都会进入 RAG：排行、单卡、双卡、精确八卡、对阵、共现和常见搭配在解析后由本地
+SQLite 直答；开放式环境、体系或趋势分析才检索当前范围的聚合证据，再由配置模型综合。
+战队赛赛程与备战功能已移除。
 
 自由问答的普通结构化问题通常只调用一次模型解析，随后由本地 SQLite 生成答案；开放 RAG
 问题通常调用一次解析和一次证据综合。综合完成后，本地质量门逐句校验数值和引用，不再调用
@@ -209,7 +211,7 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 该命令与 GitHub Actions 使用同一公开门禁：单元/集成测试、348 条匿名契约评测和 28 条
 合成故障注入。它不读取 `data/corpus/corpus.sqlite`、活动快照组、真实 Key 或网络 provider。
 
-2026-08-02 本机验证结果：当前公开 inventory 发现 `766` 项测试，分为 L0 单元/契约 `147`、L1 API/UI 集成 `42`、L2 AI/RAG 回归 `429`、L3 韧性/安全/运维 `148`。确定性评测 `344/344` 个启用用例通过，另有 `4` 个可选 RAG 路由用例跳过；`28/28` 个故障注入场景通过。检索消融 80 个用例中，MRR@5 从 BM25 的 `0.7556` 提升到 Hybrid + rerank 的 `0.9875`。完整方法见 `docs/QUALITY_EVALUATION_STRATEGY.md`。
+2026-08-02 本机完整门禁：公开 inventory 发现 `766` 项测试，分为 L0 单元/契约 `147`、L1 API/UI 集成 `42`、L2 AI/RAG 回归 `429`、L3 韧性/安全/运维 `148`；确定性评测 `344/344` 个启用用例通过，另有 `4` 个可选 RAG 路由用例跳过；`28/28` 个故障注入场景通过。2026-08-04 针对结构化/RAG 分流、完整配置实体、精确八卡、共现和多意图仲裁的聚焦回归套件 `106/106` 通过。检索消融 80 个用例中，MRR@5 从 BM25 的 `0.7556` 提升到 Hybrid + rerank 的 `0.9875`。完整方法见 `docs/QUALITY_EVALUATION_STRATEGY.md`。
 
 只运行单元测试：
 
@@ -241,15 +243,42 @@ Git 和 Docker 镜像只发布源码、测试、文档、配置模板，以及�
 
 ### 安全推送代码
 
-每次推送都先列出允许公开的文件，显式暂存。下面的文件列表对应当前完整配置修复和文档
-更新；后续提交应按实际审查结果修改列表，不能为了省事改用 `git add .`：
+每次推送都先列出允许公开的文件，显式暂存。下面的文件列表对应当前结构化/RAG 分流、
+完整配置实体、精确八卡、共现、前端展示和文档口径修复；后续提交应按实际审查结果修改
+列表，不能为了省事改用 `git add .`：
 
 ```powershell
 Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
 
 $publicFiles = @(
   'structured_query.py'
+  'answer_builder.py'
+  'app_config.py'
+  'query_answering.py'
+  'query_parser.py'
+  'retrieval_postprocess.py'
+  'rolling_materializer.py'
+  'runtime_multi.py'
+  'skills/base.py'
+  'skills/deck_skill.py'
+  'skills/exact_deck_skill.py'
+  'skills/loadout_entity_skill.py'
+  'skills/meta_evidence.py'
+  'skills/rag_skill.py'
+  'skills/registry.py'
+  'skills/structured_relationship_skill.py'
   'web_ui_template.py'
+  'web_app.py'
+  'evaluation/run_live_api_smoke.py'
+  'data/card_aliases.zh-CN.json'
+  'tests/test_answer_presentation.py'
+  'tests/test_business_skills.py'
+  'tests/test_evidence_synthesis_skill.py'
+  'tests/test_multi_intent.py'
+  'tests/test_open_analysis_pipeline.py'
+  'tests/test_query_logic.py'
+  'tests/test_retrieval_postprocess.py'
+  'tests/test_supercell_live_data.py'
   'tests/test_structured_frontend.py'
   'tests/test_structured_stats.py'
   'README.md'

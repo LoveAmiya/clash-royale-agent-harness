@@ -8,7 +8,7 @@
 
 Clash Royale Agent Harness is a FastAPI-based data QA workflow for answering Clash Royale card, deck, matchup, and meta questions from official evidence.
 
-The system uses LLM-first query parsing with deterministic validation and fallback, skill routing, atomically published SQLite-derived snapshot grounding, retrieval augmentation, traceable execution, and a browser chat interface. It is designed around a controlled domain workflow rather than a generic chatbot loop.
+The system uses LLM-first query parsing with deterministic validation and fallback, skill routing, atomically published SQLite-derived snapshot grounding, structured direct answers, retrieval augmentation for open synthesis, traceable execution, and a browser chat interface. It is designed around a controlled domain workflow rather than a generic chatbot loop.
 
 ### Current Production Data Path
 
@@ -55,7 +55,7 @@ single-snapshot compatibility path.
 - Multi-intent decomposition with per-subquery execution and partial results
 - Skill registry and skill routing
 - Grounded answers from thirty rolling Path of Legend dataset scopes
-- Advanced RAG path for open-ended meta and deck analysis
+- Advanced RAG path for open-ended meta, archetype, and environment analysis; exact card, deck, matchup, ranking, and co-occurrence questions answer from structured SQLite facts after parsing
 - Traceable execution harness
 - Local evaluation suite and unit tests
 - Dockerfile and PowerShell helper scripts
@@ -777,7 +777,7 @@ MODEL_CALL_TIMEOUT_SECONDS=120
 
 本地运行前，请在 Windows 用户级或当前 PowerShell 环境设置 `OPENAI_API_KEY`。项目固定使用 `https://crs.ruinique.com`、Responses API、`gpt-5.5` 和 `medium`；不要把真实 Key 或个人目录写进源码、文档或 Git。
 
-直接结构化查询只依赖当前官方快照的本地 SQLite 索引。自由问答中的结构化问题通常调用一次模型解析，随后由本地查询生成答案；开放式环境分析通常再调用一次模型完成证据综合。综合后的数字和引用由本地质量门逐句校验，模型必须原样引用证据精度。未受支持的数值句会被省略，其余已验证内容继续返回并标注边界，不会为修复再次调用模型；最终校验失败时返回带验证来源的安全拒答，而不是通用“生成回答失败”。战队赛赛程与战队备战请求会返回已移除边界，不进入模型。Ollama embedding 不可用时，检索会在短超时后自动降级为 BM25。浏览器会直接消费后端 SSE，显示处理中状态和最终执行 Trace。
+直接结构化查询只依赖当前官方快照的本地 SQLite 索引。自由问答中的结构化问题通常调用一次模型解析，随后由本地查询生成答案；多意图问题按子问题分别路由，排行、精确八卡、对阵、共现和常见搭配仍走结构化直答，只有开放式环境、体系或趋势分析再调用 RAG 检索和模型证据综合。综合后的数字和引用由本地质量门逐句校验，模型必须原样引用证据精度。未受支持的数值句会被省略，其余已验证内容继续返回并标注边界，不会为修复再次调用模型；最终校验失败时返回带验证来源的安全拒答，而不是通用“生成回答失败”。战队赛赛程与战队备战请求会返回已移除边界，不进入模型。Ollama embedding 不可用时，检索会在短超时后自动降级为 BM25。浏览器会直接消费后端 SSE，显示处理中状态和最终执行 Trace。
 
 ### 数据时效与来源
 
@@ -794,8 +794,8 @@ MODEL_CALL_TIMEOUT_SECONDS=120
 User Question
   -> Query Parser
   -> Skill Router
-  -> Selected Rolling Structured Scope or Scope-filtered RAG Retrieval
-  -> Evidence-grounded Model Synthesis
+  -> Structured SQLite Skill for exact stats, rankings, deck/matchup, co-occurrence, and loadout entities
+  -> Scope-filtered RAG Retrieval plus evidence-grounded Model Synthesis only for open meta/archetype/environment analysis
   -> Trace Harness
   -> API Response / Browser UI
 ```
