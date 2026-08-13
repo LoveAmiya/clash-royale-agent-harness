@@ -7,11 +7,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run_daily_ranked_supervisor.ps1"
-POWERSHELL = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+SYSTEM_ROOT = os.environ.get("SystemRoot")
+POWERSHELL = (
+    Path(SYSTEM_ROOT) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if SYSTEM_ROOT
+    else None
+)
+WINDOWS_POWERSHELL_AVAILABLE = os.name == "nt" and POWERSHELL is not None and POWERSHELL.is_file()
 
 
 class DailyRankedSupervisorScriptTests(unittest.TestCase):
     def run_plan(self, started_at: str, finished_at: str) -> dict:
+        assert POWERSHELL is not None
         completed = subprocess.run(
             [
                 str(POWERSHELL),
@@ -34,6 +41,7 @@ class DailyRankedSupervisorScriptTests(unittest.TestCase):
         )
         return json.loads(completed.stdout)
 
+    @unittest.skipUnless(WINDOWS_POWERSHELL_AVAILABLE, "requires Windows PowerShell")
     def test_short_run_waits_until_two_hours_from_actual_start(self):
         plan = self.run_plan("2026-08-10T10:00:00+08:00", "2026-08-10T11:30:00+08:00")
 
@@ -41,6 +49,7 @@ class DailyRankedSupervisorScriptTests(unittest.TestCase):
         self.assertEqual(plan["delay_seconds"], 1800)
         self.assertFalse(plan["catch_up"])
 
+    @unittest.skipUnless(WINDOWS_POWERSHELL_AVAILABLE, "requires Windows PowerShell")
     def test_overdue_run_restarts_immediately_and_reanchors_from_that_start(self):
         plan = self.run_plan("2026-08-10T10:00:00+08:00", "2026-08-10T12:10:00+08:00")
 
@@ -48,6 +57,7 @@ class DailyRankedSupervisorScriptTests(unittest.TestCase):
         self.assertEqual(plan["delay_seconds"], 0)
         self.assertTrue(plan["catch_up"])
 
+    @unittest.skipUnless(WINDOWS_POWERSHELL_AVAILABLE, "requires Windows PowerShell")
     def test_multiple_missed_intervals_collapse_to_one_immediate_run(self):
         plan = self.run_plan("2026-08-10T10:00:00+08:00", "2026-08-10T16:30:00+08:00")
 

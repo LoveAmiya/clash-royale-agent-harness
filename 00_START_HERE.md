@@ -12,7 +12,7 @@
 2. **本地业务界面**：读取本机已发布的 SQLite 派生快照组。结构化页面直接查询本地数据；
    自由问答的模型解析和 RAG 综合需要 `OPENAI_API_KEY`。
 3. **独立采集**：调用 Supercell API 生成或更新私有事实库，只允许采集任务读取
-   `SUPERCELL_API_TOKEN`。API 角色和前端都不负责采集。
+   `SUPERCELL_API_TOKENS`（推荐双 Key）或兼容变量 `SUPERCELL_API_TOKEN`。API 角色和前端都不负责采集。
 
 首次安装：
 
@@ -52,6 +52,9 @@ OPENAI_REVIEW_MODEL=gpt-5.5
 OPENAI_REASONING_EFFORT=medium
 PARSER_REASONING_EFFORT=medium
 SYNTHESIS_REASONING_EFFORT=medium
+MODEL_CALL_TIMEOUT_SECONDS=120
+MODEL_FIRST_TOKEN_TIMEOUT_SECONDS=75
+MODEL_PROGRESS_INTERVAL_SECONDS=2
 ```
 
 真实凭证只从当前进程或 Windows 用户环境读取，不写入仓库。`OPENAI_API_KEY` 只用于模型解析、
@@ -116,6 +119,16 @@ powershell -ExecutionPolicy Bypass -File .\run_web.ps1
 ```
 
 应返回 `200`。
+
+自由问答界面的流式规则：
+
+- 用户输入立即完整显示，不做逐字动画。
+- 助手的执行步骤通过 SSE 写入当前回答气泡；已通过证据校验的答案文本渐进显示。
+- 模型静默推理时，执行区只保留一条稳定的“模型正在组织回答”，等待秒数只更新状态栏，
+  不反复替换执行记录。
+- 不展示私有思维链、原始 prompt、token、请求头或未经证据校验的模型草稿。
+- 首段公开文本默认最多等待 75 秒；模型调用总硬上限为 120 秒。首段超时或流启动失败时，
+  直接返回已检索证据，不再追加第二次 120 秒模型调用。
 
 ## 安全重启
 
@@ -211,7 +224,12 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 该命令与 GitHub Actions 使用同一公开门禁：单元/集成测试、348 条匿名契约评测和 28 条
 合成故障注入。它不读取 `data/corpus/corpus.sqlite`、活动快照组、真实 Key 或网络 provider。
 
-2026-08-02 本机完整门禁：公开 inventory 发现 `766` 项测试，分为 L0 单元/契约 `147`、L1 API/UI 集成 `42`、L2 AI/RAG 回归 `429`、L3 韧性/安全/运维 `148`；确定性评测 `344/344` 个启用用例通过，另有 `4` 个可选 RAG 路由用例跳过；`28/28` 个故障注入场景通过。2026-08-04 针对结构化/RAG 分流、完整配置实体、精确八卡、共现和多意图仲裁的聚焦回归套件 `106/106` 通过。检索消融 80 个用例中，MRR@5 从 BM25 的 `0.7556` 提升到 Hybrid + rerank 的 `0.9875`。完整方法见 `docs/QUALITY_EVALUATION_STRATEGY.md`。
+当前基线（2026-08-13）：本机发现 `845` 项单元/集成测试并全部通过。历史质量指标（2026-08-02）：确定性评测 `344/344` 个启用用例通过，另有 `4` 个可选 RAG 路由用例跳过；`28/28` 个故障注入场景通过。2026-08-04 针对结构化/RAG 分流、完整配置实体、精确八卡、共现和多意图仲裁的聚焦回归套件 `106/106` 通过。检索消融 80 个用例中，MRR@5 从 BM25 的 `0.7556` 提升到 Hybrid + rerank 的 `0.9875`。测试数量随功能增长，应以当前 `python -m unittest discover -s tests` 和 `evaluation.test_inventory` 输出为准。完整方法见 `docs/QUALITY_EVALUATION_STRATEGY.md`。
+
+GitHub Actions 使用 Ubuntu。PowerShell 脚本的静态合同测试照常执行；真正调用 Windows
+PowerShell 的三个核心监督器计时测试仅在 Windows 运行，在 Linux 缺少 `SystemRoot` 时按平台
+跳过。Windows 专用测试不得在模块导入阶段强制读取 `SystemRoot`，否则会让 Linux 在测试发现
+阶段直接失败。
 
 只运行单元测试：
 
@@ -224,15 +242,24 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 
 ## 采集入口
 
-正常业务启动不触发采集。采集只允许独立任务运行以下入口：
+正常业务启动不触发采集。当前正式方式是两个互相隔离的 Windows 计划任务：
 
 ```powershell
-.\run_rolling_collection.ps1 -Mode weekly_expanded
+Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+.\scripts\install_parallel_collection_tasks.ps1
+Start-ScheduledTask -TaskName 'ClashRoyale-Daily-Ranked-Every-2h'
+Start-ScheduledTask -TaskName 'ClashRoyale-Expanded-Continuous'
 ```
 
-每日任务默认上海时间 03:00，固定运行 20 万场 `weekly_expanded` 扩散采集；该模式名是
-历史兼容命名，不再表示每周一次，也不再安排 `daily_ranked`。详细口径、监控、验收、发布和
-故障处理见 [`docs/SNAPSHOT_COLLECTION_HANDOFF.md`](docs/SNAPSHOT_COLLECTION_HANDOFF.md)。
+核心通道 `daily_ranked` 使用 token 槽位 0，从每轮实际开始时间锚定两小时节奏；一轮超过
+两小时则结束后立即补跑一次，不并发积压。扩展通道 `weekly_expanded` 使用 token 槽位 1，
+严格只扩散榜单前 1000 种子的一层 POL 对手，单轮有界、近似连续运行，不扩散第二层。两个
+通道共享全局 `battle_id` 去重和原子发布锁，但拥有独立暂存与进程锁，不能启动同模式重叠实例。
+
+采集由后端计划任务运行，不需要保持 Codex 或浏览器开启；电脑必须开机且 Windows 保持唤醒，
+显示器可以关闭。成功默认不推送，失败通过 PushPlus 报告可操作原因和脱敏累计统计。详细口径、
+监控、验收、停止/恢复、通知和故障处理见
+[`docs/SNAPSHOT_COLLECTION_HANDOFF.md`](docs/SNAPSHOT_COLLECTION_HANDOFF.md)。
 
 ## 远程仓库与私有数据
 
