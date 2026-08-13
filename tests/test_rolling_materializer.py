@@ -137,6 +137,12 @@ class RollingMaterializerTests(unittest.TestCase):
             self.assertEqual({doc["metadata"]["dataset_scope"] for doc in documents}, set(DATASET_SCOPES))
             self.assertTrue(all(doc["metadata"]["snapshot_group_id"] == manifest["snapshot_group_id"] for doc in documents))
             self.assertTrue(any(doc["source_type"] == "meta_delta" for doc in documents))
+            expected_scope_counts = {
+                scope: sum(doc["metadata"]["dataset_scope"] == scope for doc in documents)
+                for scope in DATASET_SCOPES
+            }
+            self.assertEqual(manifest["rag_scope_counts"], expected_scope_counts)
+            self.assertEqual(sum(manifest["rag_scope_counts"].values()), manifest["rag_document_count"])
 
             top_repository = StructuredStatsRepository.for_snapshot_group(
                 data_dir,

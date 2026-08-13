@@ -34,6 +34,14 @@ from app_config import (
     SNAPSHOT_FOLLOWER_POLL_SECONDS,
     SNAPSHOT_AUTO_FOLLOW_ENABLED,
     RAG_INDEX_MODE,
+    RETRIEVAL_TOP_K_BM25,
+    RETRIEVAL_TOP_K_DENSE,
+    RETRIEVAL_FINAL_TOP_K,
+    RETRIEVAL_FUSION_MODE,
+    RETRIEVAL_RRF_K,
+    META_RETRIEVAL_LANE_TOP_K,
+    META_RERANK_TOP_N,
+    META_COMPRESS_MAX_ITEMS,
     OPENAI_CLIENT_KWARGS,
     OPENAI_MODEL,
     PARSER_REASONING_EFFORT,
@@ -104,6 +112,13 @@ from runtime_hardening import (
 from supercell_live import SupercellAPIClient
 from structured_query import CARD_RANKING_METRICS, StructuredQueryError, StructuredStatsRepository
 from rolling_corpus import DATASET_SCOPES, DATASET_WINDOW_DEFINITIONS, DEFAULT_DATASET_SCOPE
+from rag_document_policy import (
+    RAG_DOCUMENT_COUNT_SEMANTICS,
+    RAG_SCOPE_COUNT_SEMANTICS,
+    RAG_SOURCE_LIMITS,
+    saturated_source_types,
+    summarize_scope_documents,
+)
 from snapshot_store import (
     DAILY_REFRESH_INTERVAL,
     DAILY_TARGET_BATTLES,
@@ -1049,6 +1064,82 @@ def _active_snapshot_group_manifest(data_dir: Path = DATA_DIR) -> dict | None:
     return manifest
 
 
+def _rag_scope_stats_for_manifest(
+    app: FastAPI,
+    manifest: dict,
+    data_dir: Path,
+) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+    published_counts = manifest.get("rag_scope_counts")
+    published_source_counts = manifest.get("rag_scope_source_counts")
+    if isinstance(published_counts, dict) and isinstance(published_source_counts, dict):
+        counts = {
+            scope: max(0, int(published_counts.get(scope) or 0))
+            for scope in DATASET_SCOPES
+        }
+        source_counts = {
+            scope: {
+                str(source_type): max(0, int(count or 0))
+                for source_type, count in (published_source_counts.get(scope) or {}).items()
+            }
+            for scope in DATASET_SCOPES
+        }
+        return counts, source_counts
+    cache_key = (
+        str(Path(data_dir).resolve()),
+        str(manifest.get("snapshot_group_id") or ""),
+        str(manifest.get("rag_docs_fingerprint") or ""),
+    )
+    cached = getattr(app.state, "rag_scope_stats_cache", None)
+    if isinstance(cached, dict) and cached.get("key") == cache_key:
+        return dict(cached.get("counts") or {}), {
+            scope: dict(counts)
+            for scope, counts in (cached.get("source_counts") or {}).items()
+        }
+    documents: list[dict] = []
+    documents_path = (
+        Path(data_dir)
+        / "snapshot_groups"
+        / str(manifest.get("snapshot_group_id") or "")
+        / "rag_documents.json"
+    )
+    try:
+        documents = json.loads(documents_path.read_text(encoding="utf-8"))
+        if not isinstance(documents, list):
+            raise ValueError("rolling RAG documents must be a list")
+    except (OSError, ValueError, json.JSONDecodeError, AttributeError):
+        logger.warning(
+            "unable to derive legacy RAG scope counts snapshot_group_id=%s",
+            manifest.get("snapshot_group_id"),
+        )
+        documents = []
+    derived_counts, derived_source_counts = summarize_scope_documents(documents, DATASET_SCOPES)
+    counts = (
+        {
+            scope: max(0, int(published_counts.get(scope) or 0))
+            for scope in DATASET_SCOPES
+        }
+        if isinstance(published_counts, dict)
+        else derived_counts
+    )
+    source_counts = (
+        {
+            scope: {
+                str(source_type): max(0, int(count or 0))
+                for source_type, count in (published_source_counts.get(scope) or {}).items()
+            }
+            for scope in DATASET_SCOPES
+        }
+        if isinstance(published_source_counts, dict)
+        else derived_source_counts
+    )
+    app.state.rag_scope_stats_cache = {
+        "key": cache_key,
+        "counts": counts,
+        "source_counts": source_counts,
+    }
+    return dict(counts), {scope: dict(value) for scope, value in source_counts.items()}
+
+
 def get_dataset_catalog(app: FastAPI) -> dict:
     def scope_parts(scope: str) -> tuple[str, str]:
         prefix = next(
@@ -1085,6 +1176,9 @@ def get_dataset_catalog(app: FastAPI) -> dict:
             "complete_loadout_ready": False,
             "entity_stats_ready": False,
             "delta_ready": False,
+            "rag_document_count": None,
+            "rag_source_counts": {},
+            "rag_saturated_source_types": [],
         }
 
     manifest = _active_snapshot_group_manifest(DATA_DIR)
@@ -1094,6 +1188,7 @@ def get_dataset_catalog(app: FastAPI) -> dict:
             "default_dataset_scope": DEFAULT_DATASET_SCOPE,
             "datasets": [unavailable_dataset(scope) for scope in DATASET_SCOPES],
         }
+    rag_scope_counts, rag_scope_source_counts = _rag_scope_stats_for_manifest(app, manifest, DATA_DIR)
     return {
         "snapshot_group_id": manifest["snapshot_group_id"],
         "published_at": manifest.get("published_at"),
@@ -1101,7 +1196,23 @@ def get_dataset_catalog(app: FastAPI) -> dict:
         "rag": {
             "status": "ready",
             "document_count": manifest.get("rag_document_count"),
+            "scope_counts": rag_scope_counts,
+            "scope_source_counts": rag_scope_source_counts,
+            "source_limits": RAG_SOURCE_LIMITS,
+            "document_count_semantics": RAG_DOCUMENT_COUNT_SEMANTICS,
+            "scope_document_count_semantics": RAG_SCOPE_COUNT_SEMANTICS,
+            "global_count_includes_scope_duplicates": True,
             "fully_aligned": manifest.get("fully_aligned") is True,
+            "retrieval": {
+                "fusion_mode": RETRIEVAL_FUSION_MODE,
+                "rrf_k": RETRIEVAL_RRF_K if RETRIEVAL_FUSION_MODE == "rrf" else None,
+                "bm25_top_k": RETRIEVAL_TOP_K_BM25,
+                "dense_top_k": RETRIEVAL_TOP_K_DENSE,
+                "candidate_top_k": RETRIEVAL_FINAL_TOP_K,
+                "typed_lane_top_k": META_RETRIEVAL_LANE_TOP_K,
+                "evidence_top_n": META_RERANK_TOP_N,
+                "context_max_items": META_COMPRESS_MAX_ITEMS,
+            },
         },
         "datasets": [
             (
@@ -1110,6 +1221,11 @@ def get_dataset_catalog(app: FastAPI) -> dict:
                     **manifest["datasets"][scope],
                     "dataset_scope": scope,
                     "name": display_name(scope),
+                    "rag_document_count": rag_scope_counts.get(scope),
+                    "rag_source_counts": rag_scope_source_counts.get(scope, {}),
+                    "rag_saturated_source_types": saturated_source_types(
+                        rag_scope_source_counts.get(scope)
+                    ),
                     "ready": (
                         manifest["datasets"][scope].get("ready") is True
                         if "ready" in manifest["datasets"][scope]
@@ -1877,9 +1993,10 @@ async def build_answer(
             "data_context": data_context,
         },
         event_sink=event_sink,
-        # Buffer model text until grounding validation and presentation
-        # normalization finish. Raw model Markdown must never leak to the UI.
-        stream_content=False,
+        # A single RAG answer can stream sentence-level chunks after grounding
+        # validation. Multi-intent answers stay buffered so concurrent branches
+        # cannot interleave unrelated text in the same response.
+        stream_content=parsed.get("intent") != "multi_intent" and query_needs_rag(parsed),
     )
     assert isinstance(result, AnswerResult)
     result.answer = normalize_answer_text(result.answer)

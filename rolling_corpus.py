@@ -15,7 +15,13 @@ from pathlib import Path
 from typing import Iterator
 from zoneinfo import ZoneInfo
 
-from battle_loadout import LOADOUT_SCHEMA_VERSION, canonical_loadout, loadout_payload, loadout_quality
+from battle_loadout import (
+    LOADOUT_SCHEMA_VERSION,
+    canonical_loadout,
+    loadout_fact_signature,
+    loadout_payload,
+    loadout_quality,
+)
 
 
 DEFAULT_DATASET_SCOPE = "7d_all"
@@ -63,6 +69,7 @@ _SCOPE_PATTERN = re.compile(
 )
 _BATCH_TYPES = {"daily_ranked", "weekly_expanded", "legacy_weekly_full_only"}
 _RANKED_SOURCE = "ranked_direct"
+_EXPANSION_SOURCE = "opponent_expansion"
 _PATH_OF_LEGEND_TYPE = "pathOfLegend"
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -132,6 +139,7 @@ class BatchValidationPolicy:
     required_top_rank: int = 100
     ranked_player_target: int = 1000
     minimum_coverage: float = 0.99
+    minimum_expansion_coverage: float = 0.99
     weekly_target_battles: int = 200_000
 
 
@@ -475,7 +483,7 @@ class RollingCorpusStore:
         if not tag:
             raise CorpusError("observer_tag is required")
         with self.connection:
-            inserted, conflict_detected = self._insert_fact_observation(
+            inserted, conflict_detected, _ = self._insert_fact_observation(
                 batch_id=batch_id,
                 fact=fact,
                 payload=payload,
@@ -504,7 +512,7 @@ class RollingCorpusStore:
         observer_source: str,
         expansion_root_rank: int | None,
         loadout_pair: dict | None = None,
-    ) -> tuple[bool, bool]:
+    ) -> tuple[bool, bool, bool]:
         row = self.connection.execute(
             "SELECT payload_hash FROM battles WHERE battle_id = ?",
             (fact["battle_id"],),
@@ -522,7 +530,7 @@ class RollingCorpusStore:
                 "UPDATE collection_batches SET status='conflicted' WHERE batch_id=?",
                 (batch_id,),
             )
-            return False, True
+            return False, True, False
         inserted = row is None
         if inserted:
             self.connection.execute(
@@ -532,13 +540,16 @@ class RollingCorpusStore:
                 """,
                 (fact["battle_id"], fact["battle_time"], payload, payload_hash, timestamp),
             )
-        if loadout_pair is not None and self._upsert_loadout(
-            batch_id=batch_id,
-            battle_id=fact["battle_id"],
-            loadout_pair=loadout_pair,
-            timestamp=timestamp,
-        ):
-            return False, True
+        loadout_metadata_refreshed = False
+        if loadout_pair is not None:
+            loadout_conflicted, loadout_metadata_refreshed = self._upsert_loadout(
+                batch_id=batch_id,
+                battle_id=fact["battle_id"],
+                loadout_pair=loadout_pair,
+                timestamp=timestamp,
+            )
+            if loadout_conflicted:
+                return False, True, False
         self.connection.execute(
             """
             INSERT INTO battle_observations(
@@ -567,7 +578,7 @@ class RollingCorpusStore:
                 timestamp,
             ),
         )
-        return inserted, False
+        return inserted, False, loadout_metadata_refreshed
 
     def _upsert_loadout(
         self,
@@ -576,7 +587,7 @@ class RollingCorpusStore:
         battle_id: str,
         loadout_pair: dict,
         timestamp: str,
-    ) -> bool:
+    ) -> tuple[bool, bool]:
         team = loadout_pair.get("team_loadout")
         opponent = loadout_pair.get("opponent_loadout")
         pair_payload = _fact_json(loadout_pair)
@@ -603,10 +614,41 @@ class RollingCorpusStore:
                     timestamp,
                 ),
             )
-            return False
+            return False, False
         if existing["loadout_hash"] == incoming_hash:
-            return False
+            return False, False
+        existing_team = json.loads(existing["team_loadout_json"]) if existing["team_loadout_json"] else None
+        existing_opponent = (
+            json.loads(existing["opponent_loadout_json"]) if existing["opponent_loadout_json"] else None
+        )
         if bool(existing["complete"]) and bool(loadout_pair.get("complete")):
+            existing_fact = (
+                loadout_fact_signature(existing_team),
+                loadout_fact_signature(existing_opponent),
+            )
+            incoming_fact = (
+                loadout_fact_signature(team),
+                loadout_fact_signature(opponent),
+            )
+            if existing_fact == incoming_fact and all(existing_fact):
+                self.connection.execute(
+                    """
+                    UPDATE battle_loadouts
+                    SET schema_version=?, team_loadout_json=?, opponent_loadout_json=?,
+                        complete=?, loadout_hash=?, updated_at=?
+                    WHERE battle_id=?
+                    """,
+                    (
+                        LOADOUT_SCHEMA_VERSION,
+                        loadout_payload(team),
+                        loadout_payload(opponent),
+                        1,
+                        incoming_hash,
+                        timestamp,
+                        battle_id,
+                    ),
+                )
+                return False, True
             self.connection.execute(
                 """
                 INSERT INTO corpus_conflicts(
@@ -619,11 +661,7 @@ class RollingCorpusStore:
                 "UPDATE collection_batches SET status='conflicted' WHERE batch_id=?",
                 (batch_id,),
             )
-            return True
-        existing_team = json.loads(existing["team_loadout_json"]) if existing["team_loadout_json"] else None
-        existing_opponent = (
-            json.loads(existing["opponent_loadout_json"]) if existing["opponent_loadout_json"] else None
-        )
+            return True, False
         existing_quality = (loadout_quality(existing_team), loadout_quality(existing_opponent))
         incoming_quality = (loadout_quality(team), loadout_quality(opponent))
         if incoming_quality > existing_quality:
@@ -644,7 +682,7 @@ class RollingCorpusStore:
                     battle_id,
                 ),
             )
-        return False
+        return False, False
 
     def import_workspace_batch(
         self,
@@ -670,6 +708,7 @@ class RollingCorpusStore:
         facts_inserted = 0
         observations_imported = 0
         conflicts = 0
+        loadout_metadata_refreshes = 0
         loadout_battles_observed = 0
         complete_loadout_battles = 0
         evolution_slots = 0
@@ -746,7 +785,7 @@ class RollingCorpusStore:
                         conflicts += 1
                         continue
                     payload = _fact_json(fact)
-                    inserted, conflicted = self._insert_fact_observation(
+                    inserted, conflicted, metadata_refreshed = self._insert_fact_observation(
                         batch_id=batch_id,
                         fact=fact,
                         payload=payload,
@@ -761,6 +800,7 @@ class RollingCorpusStore:
                     facts_inserted += int(inserted)
                     observations_imported += int(not conflicted)
                     conflicts += int(conflicted)
+                    loadout_metadata_refreshes += int(metadata_refreshed)
                 if conflicts:
                     self.connection.execute(
                         "UPDATE collection_batches SET status='conflicted' WHERE batch_id=?",
@@ -773,6 +813,7 @@ class RollingCorpusStore:
             "facts_inserted": facts_inserted,
             "observations_imported": observations_imported,
             "conflicts": conflicts,
+            "loadout_metadata_refreshes": loadout_metadata_refreshes,
             "loadout_coverage": {
                 "observed_battle_rows": loadout_battles_observed,
                 "complete_battle_rows": complete_loadout_battles,
@@ -815,7 +856,7 @@ class RollingCorpusStore:
                         skipped_invalid += 1
                         continue
                     canonical_payload = _fact_json(fact)
-                    _, conflicted = self._insert_fact_observation(
+                    _, conflicted, _ = self._insert_fact_observation(
                         batch_id=batch_id,
                         fact=fact,
                         payload=canonical_payload,
@@ -920,6 +961,21 @@ class RollingCorpusStore:
                 (batch_id, _RANKED_SOURCE, policy.ranked_player_target),
             ).fetchone()[0]
         )
+        expansion_target = int(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM batch_players WHERE batch_id=? AND observer_source=?",
+                (batch_id, _EXPANSION_SOURCE),
+            ).fetchone()[0]
+        )
+        expansion_successes = int(
+            self.connection.execute(
+                """
+                SELECT COUNT(*) FROM batch_players
+                WHERE batch_id=? AND observer_source=? AND request_status='success'
+                """,
+                (batch_id, _EXPANSION_SOURCE),
+            ).fetchone()[0]
+        )
         unique_battles = int(
             self.connection.execute(
                 "SELECT COUNT(DISTINCT battle_id) FROM battle_observations WHERE batch_id=?",
@@ -927,6 +983,7 @@ class RollingCorpusStore:
             ).fetchone()[0]
         )
         coverage = ranked_successes / policy.ranked_player_target if policy.ranked_player_target else 0.0
+        expansion_coverage = expansion_successes / expansion_target if expansion_target else 0.0
         failures = []
         if top_successes != policy.required_top_rank:
             failures.append("incomplete_top_rank_coverage")
@@ -939,10 +996,15 @@ class RollingCorpusStore:
         if batch["status"] == "conflicted" or self.conflict_count(batch_id):
             failures.append("conflicting_battle_facts")
         if batch["batch_type"] == "weekly_expanded":
-            if unique_battles != policy.weekly_target_battles:
-                failures.append("weekly_target_not_met")
             if source_exhausted:
-                failures.append("source_exhausted")
+                if expansion_target == 0:
+                    failures.append("expansion_queue_empty")
+                elif expansion_coverage < policy.minimum_expansion_coverage:
+                    failures.append("expansion_coverage_below_threshold")
+                if unique_battles == 0:
+                    failures.append("no_usable_battles")
+            elif unique_battles != policy.weekly_target_battles:
+                failures.append("weekly_target_not_met")
         passed = not failures
         completed = _as_utc(completed_at)
         report = {
@@ -953,6 +1015,9 @@ class RollingCorpusStore:
             "ranked_successes": ranked_successes,
             "ranked_target": policy.ranked_player_target,
             "coverage": round(coverage, 6),
+            "expansion_successes": expansion_successes,
+            "expansion_target": expansion_target,
+            "expansion_coverage": round(expansion_coverage, 6),
             "unique_battles": unique_battles,
         }
         with self.connection:

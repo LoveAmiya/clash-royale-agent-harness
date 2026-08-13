@@ -55,7 +55,7 @@ class StructuredFrontendContractTests(unittest.TestCase):
         self.assertIn('id="chatBox"', html)
         self.assertIn('id="inputBox"', html)
         self.assertIn('fetch("/chat"', html)
-        self.assertIn('id="executionPanel"', html)
+        self.assertIn('function createExecutionTranscript(', html)
 
     def test_card_picker_uses_catalog_ids_and_exact_eight_card_validation(self):
         html = web_app.HTML_PAGE
@@ -217,19 +217,57 @@ class StructuredFrontendContractTests(unittest.TestCase):
         self.assertIn('id="metaResult"', html)
         self.assertIn('id="metaAnalyze"', html)
         self.assertIn('id="metaAnalysisResult"', html)
+        self.assertIn('createExecutionTranscript(bubble)', html)
         self.assertIn('function submitMetaAnalysis()', html)
         self.assertIn('当前环境以哪些卡组体系为主', html)
         self.assertIn('intent_hint: intentHint', html)
-        self.assertIn('streamAnswer(message, bubble, statusTarget, false, "meta_analysis_query")', html)
+        self.assertIn('streamAnswer(message, answer, statusTarget, "meta_analysis_query")', html)
         self.assertIn('metaAnalyze.addEventListener("click", submitMetaAnalysis)', html)
+
+    def test_dashboard_uses_selected_dataset_rag_count_and_refreshes_after_rag_answer(self):
+        html = web_app.HTML_PAGE
+
+        self.assertIn("dataset.rag_document_count", html)
+        self.assertIn("catalogRag.document_count", html)
+        self.assertIn('"当前范围索引文档"', html)
+        self.assertIn('"跨范围索引合计（含重复）"', html)
+        self.assertIn("dataset.rag_saturated_source_types", html)
+        self.assertIn("有界证据索引", html)
+        self.assertIn("state.operationalStatus", html)
+        self.assertIn("catalogRag.retrieval?.fusion_mode", html)
+        self.assertIn('statusTarget.textContent = ""; await loadSnapshot()', html)
 
     def test_free_answer_stream_has_plain_text_markdown_defense(self):
         html = web_app.HTML_PAGE
 
         self.assertIn("function normalizeVisibleAnswerText(text)", html)
-        self.assertIn("bubble.dataset.rawAnswer", html)
+        self.assertIn('answer.writer.append(event.text || "")', html)
         self.assertIn('"conclusion": "结论"', html)
         self.assertIn('.replaceAll("*", "")', html)
+
+    def test_execution_stream_is_attached_to_each_answer_and_auto_collapses(self):
+        html = web_app.HTML_PAGE
+
+        self.assertIn('make("div", "execution-transcript")', html)
+        self.assertIn('function createExecutionTranscript(', html)
+        self.assertIn('transcript.panel.open = false', html)
+        self.assertIn('查看执行与证据', html)
+        self.assertIn('event.parameters', html)
+        self.assertIn('event.rationale', html)
+        self.assertIn('event.boundaries', html)
+        self.assertNotIn('id="metaExecutionPanel"', html)
+
+    def test_answer_and_execution_use_non_blocking_progressive_text_rendering(self):
+        html = web_app.HTML_PAGE
+
+        self.assertIn("function createTextStreamer(", html)
+        self.assertIn("setTimeout(tick, TEXT_STREAM_INTERVAL_MS)", html)
+        self.assertIn("answer.writer.append(event.text || \"\")", html)
+        self.assertIn('if (role === "user")', html)
+        self.assertIn("content.textContent = text", html)
+        self.assertIn('execution-step${event.status === "running" ? " running" : ""}', html)
+        self.assertIn("@keyframes execution-spin", html)
+        self.assertNotIn('answer.content.textContent = normalizeVisibleAnswerText(answer.content.dataset.rawAnswer)', html)
 
     def test_frontend_uses_clean_chinese_and_responsive_layout(self):
         html = web_app.HTML_PAGE

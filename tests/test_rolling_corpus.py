@@ -231,6 +231,47 @@ class RollingCorpusStoreTests(unittest.TestCase):
         self.assertEqual(tower_ids, {"159000000", "159000001"})
         self.assertEqual(self.store.conflict_count("daily-1"), 1)
 
+    def test_complete_loadout_catalog_metadata_refresh_is_not_a_conflict(self):
+        self._accepted_batch("daily-1", self.now - timedelta(days=2))
+        self._accepted_batch("daily-2", self.now - timedelta(days=1))
+        original = _battle_with_loadouts("battle-loadout-metadata")
+        refreshed = json.loads(json.dumps(original))
+        refreshed["team_loadout"]["cards"][0]["max_level"] = 15
+        refreshed["team_loadout"]["cards"][0]["max_evolution_level"] = 3
+        self.store.ingest_battle(
+            "daily-1",
+            original,
+            observer_tag="#P1",
+            observer_rank=1,
+            observer_source="ranked_direct",
+        )
+
+        self.store.ingest_battle(
+            "daily-2",
+            refreshed,
+            observer_tag="#P2",
+            observer_rank=2,
+            observer_source="ranked_direct",
+        )
+
+        stored = self.store.connection.execute(
+            "SELECT team_loadout_json, opponent_loadout_json FROM battle_loadouts WHERE battle_id=?",
+            ("battle-loadout-metadata",),
+        ).fetchone()
+        stored_cards = [
+            card
+            for side in ("team_loadout_json", "opponent_loadout_json")
+            for card in json.loads(stored[side])["cards"]
+        ]
+        refreshed_card = next(
+            card
+            for card in stored_cards
+            if card["id"] == "26000000" and card["max_evolution_level"] == 3
+        )
+        self.assertEqual(refreshed_card["max_level"], 15)
+        self.assertEqual(refreshed_card["max_evolution_level"], 3)
+        self.assertEqual(self.store.conflict_count("daily-2"), 0)
+
     def test_scope_membership_is_nested_and_expired_rank_does_not_stick(self):
         self._accepted_batch("old", self.now - timedelta(days=8))
         self._accepted_batch("new", self.now - timedelta(days=1))
@@ -367,6 +408,100 @@ class RollingCorpusStoreTests(unittest.TestCase):
         self.assertEqual(report["top_rank_successes"], 100)
         self.assertEqual(report["ranked_successes"], 990)
 
+    def test_one_hop_expansion_accepts_complete_source_exhaustion_below_legacy_target(self):
+        self.store.create_batch(
+            "expanded-complete-one-hop",
+            batch_type="weekly_expanded",
+            started_at=self.now - timedelta(hours=1),
+            leaderboard_frozen_at=self.now - timedelta(hours=1),
+        )
+        for rank in range(1, 1001):
+            self.store.record_player(
+                "expanded-complete-one-hop",
+                player_tag=f"#R{rank}",
+                observer_rank=rank,
+                observer_source="ranked_direct",
+                request_status="success",
+                attempts=1,
+            )
+        for index in range(1, 101):
+            self.store.record_player(
+                "expanded-complete-one-hop",
+                player_tag=f"#E{index}",
+                observer_rank=None,
+                observer_source="opponent_expansion",
+                request_status="success",
+                attempts=1,
+            )
+        self.store.ingest_battle(
+            "expanded-complete-one-hop",
+            _battle("expanded-complete-one-hop-battle"),
+            observer_tag="#R1",
+            observer_rank=1,
+            observer_source="ranked_direct",
+        )
+
+        report = self.store.finalize_batch(
+            "expanded-complete-one-hop",
+            completed_at=self.now,
+            policy=BatchValidationPolicy(),
+            request_count=1100,
+            rate_limited=0,
+            refresh_budget_exhausted=False,
+            source_exhausted=True,
+        )
+
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["expansion_successes"], 100)
+        self.assertEqual(report["expansion_target"], 100)
+        self.assertEqual(report["expansion_coverage"], 1.0)
+
+    def test_one_hop_expansion_rejects_low_expansion_request_coverage(self):
+        self.store.create_batch(
+            "expanded-incomplete-one-hop",
+            batch_type="weekly_expanded",
+            started_at=self.now - timedelta(hours=1),
+            leaderboard_frozen_at=self.now - timedelta(hours=1),
+        )
+        for rank in range(1, 1001):
+            self.store.record_player(
+                "expanded-incomplete-one-hop",
+                player_tag=f"#R{rank}",
+                observer_rank=rank,
+                observer_source="ranked_direct",
+                request_status="success",
+                attempts=1,
+            )
+        for index in range(1, 101):
+            self.store.record_player(
+                "expanded-incomplete-one-hop",
+                player_tag=f"#E{index}",
+                observer_rank=None,
+                observer_source="opponent_expansion",
+                request_status="success" if index <= 98 else "failed",
+                attempts=1,
+            )
+        self.store.ingest_battle(
+            "expanded-incomplete-one-hop",
+            _battle("expanded-incomplete-one-hop-battle"),
+            observer_tag="#R1",
+            observer_rank=1,
+            observer_source="ranked_direct",
+        )
+
+        report = self.store.finalize_batch(
+            "expanded-incomplete-one-hop",
+            completed_at=self.now,
+            policy=BatchValidationPolicy(),
+            request_count=1100,
+            rate_limited=0,
+            refresh_budget_exhausted=False,
+            source_exhausted=True,
+        )
+
+        self.assertFalse(report["passed"])
+        self.assertIn("expansion_coverage_below_threshold", report["failures"])
+
     def test_rejected_batch_keeps_diagnostics_but_removes_formal_observations(self):
         self.store.create_batch(
             "daily-rejected",
@@ -468,6 +603,7 @@ class RollingCorpusStoreTests(unittest.TestCase):
         )
 
         self.assertEqual(imported["observations_imported"], 2)
+        self.assertEqual(imported["loadout_metadata_refreshes"], 0)
         self.assertEqual(imported["loadout_coverage"]["observed_battle_rows"], 1)
         self.assertEqual(imported["loadout_coverage"]["complete_battle_rows"], 1)
         self.assertEqual(imported["loadout_coverage"]["evolution_slots"], 1)

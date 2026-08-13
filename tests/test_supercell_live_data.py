@@ -473,7 +473,7 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         electro_giant = next(card for card in snapshot["cards_meta"] if card["card_name"] == "Electro Giant")
         self.assertEqual(electro_giant["appearance_count"], 2)
 
-    def test_snapshot_expands_collection_queue_from_observed_opponent_tags(self):
+    def test_snapshot_expands_exactly_one_layer_from_ranked_players(self):
         client = SupercellAPIClient("test-token", session=Mock())
         first_battle = {
             "type": "pathOfLegend",
@@ -492,7 +492,7 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
             client, "fetch_battle_log", side_effect=lambda tag: {"#A": [first_battle], "#B": [second_battle]}[tag]
         ) as fetch_battle_log:
             snapshot = client.fetch_snapshot(
-                target_battles=2,
+                target_battles=3,
                 player_limit=3,
                 battles_per_player=1,
                 concurrency=1,
@@ -501,9 +501,20 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[0] for call in fetch_battle_log.call_args_list], ["#A", "#B"])
         self.assertEqual(snapshot["sample_battles"], 2)
         self.assertEqual(snapshot["collection_metrics"]["seed_players"], 1)
-        self.assertEqual(snapshot["collection_metrics"]["expanded_players"], 2)
-        self.assertEqual(snapshot["collection_metrics"]["queued_players"], 3)
-        self.assertFalse(snapshot["collection_metrics"]["source_exhausted"])
+        self.assertEqual(snapshot["collection_metrics"]["expanded_players"], 1)
+        self.assertEqual(snapshot["collection_metrics"]["queued_players"], 2)
+        self.assertTrue(snapshot["collection_metrics"]["source_exhausted"])
+
+    def test_disk_workspace_rejects_growth_past_its_byte_budget(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "workspace byte limit"):
+                DiskBackedSnapshotWorkspace(
+                    Path(temp_dir),
+                    target_battles=1,
+                    player_limit=1,
+                    battles_per_player=1,
+                    max_workspace_bytes=1,
+                )
 
     def test_daily_ranked_snapshot_never_expands_to_opponents(self):
         client = SupercellAPIClient("test-token", session=Mock())

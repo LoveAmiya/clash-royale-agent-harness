@@ -222,6 +222,21 @@ class RetrievalFallbackTests(unittest.TestCase):
 
         self.assertEqual([item["doc"]["doc_id"] for item in results], ["group:35d:card"])
 
+    def test_dense_filter_pushes_scope_and_source_type_into_qdrant(self):
+        query_filter = HybridRetriever._build_dense_filter(
+            dataset_scope="7d_all",
+            source_type="archetype",
+        )
+
+        conditions = {condition.key: condition.match.value for condition in query_filter.must}
+        self.assertEqual(
+            conditions,
+            {
+                "metadata.dataset_scope": "7d_all",
+                "source_type": "archetype",
+            },
+        )
+
     def test_hybrid_retriever_filters_deck_evidence_by_mode_but_keeps_shared_evidence(self):
         docs = [
             {
@@ -251,6 +266,55 @@ class RetrievalFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual({item["doc"]["doc_id"] for item in results}, {"full", "shared"})
+
+    def test_rrf_fusion_prefers_documents_recalled_by_both_lanes(self):
+        docs = [
+            {
+                "doc_id": "bm25-only",
+                "source_type": "card",
+                "text": "fireball fireball fireball spell pressure",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "7d_all"},
+            },
+            {
+                "doc_id": "balanced",
+                "source_type": "card",
+                "text": "fireball spell answer",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "7d_all"},
+            },
+            {
+                "doc_id": "dense-only",
+                "source_type": "deck_profile",
+                "text": "miner poison control",
+                "metadata": {"snapshot_id": "group", "dataset_scope": "7d_all"},
+            },
+        ]
+
+        with patch.object(HybridRetriever, "_build_dense_index", side_effect=RuntimeError("offline")):
+            retriever = HybridRetriever(docs, in_memory=True)
+        retriever.dense_available = True
+        retriever.dense_search = Mock(
+            return_value=[
+                {"internal_id": 2, "score": 0.99, "doc": docs[2]},
+                {"internal_id": 1, "score": 0.80, "doc": docs[1]},
+            ]
+        )
+
+        results = retriever.hybrid_search(
+            "fireball spell",
+            top_k_bm25=2,
+            top_k_dense=2,
+            final_top_k=3,
+            fusion_mode="rrf",
+            query_vector=[0.0] * 1024,
+        )
+
+        self.assertEqual(results[0]["doc"]["doc_id"], "balanced")
+        self.assertEqual(results[0]["fusion_mode"], "rrf")
+        self.assertEqual(results[0]["bm25_rank"], 2)
+        self.assertEqual(results[0]["dense_rank"], 2)
+        self.assertEqual(results[0]["candidate_pool"]["bm25"], 2)
+        self.assertEqual(results[0]["candidate_pool"]["dense"], 2)
+        self.assertEqual(len(retriever.dense_search.call_args.kwargs["query_vector"]), 1024)
 
     def test_lazy_bm25_keeps_only_two_scope_indexes(self):
         documents = [
@@ -485,5 +549,6 @@ class ProcessSSETests(unittest.IsolatedAsyncioTestCase):
 
         parser.assert_not_awaited()
         self.assertEqual(answer_query.await_args.kwargs["parsed"]["intent"], "meta_analysis_query")
+        self.assertTrue(answer_query.await_args.kwargs["stream_content"])
         self.assertEqual(answer.metadata["parser_api"]["status"], "interface_contract")
         self.assertEqual(answer.answer, "环境 RAG 回答")

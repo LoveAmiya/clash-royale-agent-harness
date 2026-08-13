@@ -32,6 +32,27 @@ class RuntimeEventEmitter:
         "model",
         "prompt_hash",
     }
+    _PARAMETER_KEYS = {
+        "scope",
+        "dataset_scope",
+        "deck_mode",
+        "entity_mode",
+        "bm25_top_k",
+        "dense_top_k",
+        "final_top_k",
+        "rerank_top_n",
+        "evidence_count",
+        "candidate_count",
+        "fusion",
+        "lanes",
+        "mode",
+        "effort",
+        "stream",
+        "timeout_seconds",
+        "first_token_timeout_seconds",
+        "elapsed_seconds",
+        "model",
+    }
 
     def __init__(
         self,
@@ -44,6 +65,7 @@ class RuntimeEventEmitter:
         self.content_count = 0
         self.request_id = request_id
         self.trace_id = request_id
+        self._event_sequence = 0
         self.telemetry = {
             key: value
             for key, value in (attributes or {}).items()
@@ -85,9 +107,17 @@ class RuntimeEventEmitter:
         detail: str,
         subquery_id: str | None = None,
         elapsed_ms: int | None = None,
+        operation: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        rationale: str | None = None,
+        evidence: list[str] | tuple[str, ...] | None = None,
+        boundaries: list[str] | tuple[str, ...] | None = None,
     ) -> None:
+        self._event_sequence += 1
         payload: dict[str, Any] = {
             "object": "execution",
+            "schema_version": 2,
+            "event_id": f"{self.trace_id or 'execution'}:{self._event_sequence}",
             "step_id": step_id,
             "phase": phase,
             "status": status,
@@ -105,6 +135,20 @@ class RuntimeEventEmitter:
             payload["subquery_id"] = subquery_id
         if elapsed_ms is not None:
             payload["elapsed_ms"] = elapsed_ms
+        if operation:
+            payload["operation"] = str(operation)[:120]
+        if parameters:
+            payload["parameters"] = {
+                key: value
+                for key, value in parameters.items()
+                if key in self._PARAMETER_KEYS and value is not None
+            }
+        if rationale:
+            payload["rationale"] = str(rationale)[:1000]
+        if evidence:
+            payload["evidence"] = [str(item)[:500] for item in evidence[:10]]
+        if boundaries:
+            payload["boundaries"] = [str(item)[:500] for item in boundaries[:10]]
         await self._queue.put(self._decorate(payload))
 
     async def content(self, text: str, *, delta: bool = True) -> None:

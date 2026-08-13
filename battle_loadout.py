@@ -183,6 +183,24 @@ def full_loadout_signature(loadout: object) -> str | None:
     return "loadout-v1:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def loadout_fact_signature(loadout: object) -> str | None:
+    """Hash only immutable battle-time loadout state, excluding catalog metadata."""
+    normalized = canonical_loadout(loadout)
+    if not normalized or not normalized["complete"]:
+        return None
+
+    def card_state(card: dict) -> list[object]:
+        return [card["id"], card["level"], card["evolution_level"], card["elite"]]
+
+    signature_source: dict[str, Any] = {
+        "schema_version": LOADOUT_SCHEMA_VERSION,
+        "tower": card_state(normalized["tower"]),
+        "cards": [card_state(card) for card in normalized["cards"]],
+    }
+    payload = json.dumps(signature_source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "loadout-fact-v1:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def loadout_quality(loadout: object) -> tuple[int, int, int, int]:
     normalized = canonical_loadout(loadout)
     if not normalized:

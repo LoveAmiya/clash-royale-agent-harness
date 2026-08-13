@@ -116,17 +116,29 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         class FakeRetriever:
             dense_available = True
 
+            def __init__(self):
+                self.bm25_calls = []
+                self.hybrid_calls = []
+                self.embed_batches = []
+
+            def embed_texts(self, texts):
+                self.embed_batches.append(list(texts))
+                return [[0.0] * 1024 for _ in texts]
+
             def bm25_search(self, *_args, **_kwargs):
+                self.bm25_calls.append(_kwargs)
                 return [{"doc": distractor, "score": 1.0}, {"doc": relevant, "score": 0.5}]
 
             def hybrid_search(self, *_args, **_kwargs):
+                self.hybrid_calls.append(_kwargs)
                 return [
                     {"doc": distractor, "final_score": 0.7},
                     {"doc": relevant, "final_score": 0.6},
                 ]
 
+        retriever = FakeRetriever()
         report = evaluate_cases(
-            FakeRetriever(),
+            retriever,
             [
                 {
                     "case_id": "one",
@@ -134,6 +146,7 @@ class RetrievalBenchmarkTests(unittest.TestCase):
                     "parsed": {"card_name": "Electro Giant"},
                     "relevant_doc_id": "card-1",
                     "source_type": "card_profile",
+                    "dataset_scope": "35d_all",
                 }
             ],
             k=1,
@@ -148,6 +161,15 @@ class RetrievalBenchmarkTests(unittest.TestCase):
             {"hybrid_vs_bm25", "hybrid_rerank_vs_hybrid", "hybrid_rerank_vs_bm25"},
         )
         self.assertEqual(report["methods"]["hybrid_rerank"]["metrics"]["recall_at_k"], 1.0)
+        self.assertEqual(retriever.bm25_calls[0]["dataset_scope"], "35d_all")
+        self.assertEqual(retriever.hybrid_calls[0]["dataset_scope"], "35d_all")
+        self.assertEqual(retriever.hybrid_calls[0]["fusion_mode"], "rrf")
+        self.assertEqual(len(retriever.embed_batches), 1)
+        self.assertEqual(len(retriever.hybrid_calls[0]["query_vector"]), 1024)
+        self.assertGreater(retriever.hybrid_calls[0]["top_k_bm25"], 10)
+        self.assertIn("latency_ms", report["methods"]["hybrid"])
+        self.assertIn("p95", report["methods"]["hybrid"]["latency_ms"])
+        self.assertIn("query_embedding_ms", report["runtime"])
 
     def test_ignores_results_beyond_cutoff(self):
         metrics = score_ranking(
@@ -163,37 +185,37 @@ class RetrievalBenchmarkTests(unittest.TestCase):
             {
                 "doc_id": "snapshot-1",
                 "source_type": "snapshot",
-                "metadata": {"snapshot_id": "snapshot-1", "sample_battles": 20000},
+                "metadata": {"snapshot_id": "snapshot-1", "sample_battles": 20000, "dataset_scope": "35d_all"},
             },
             {
                 "doc_id": "card-1",
                 "source_type": "card_profile",
-                "metadata": {"card_name": "Electro Giant"},
+                "metadata": {"card_name": "Electro Giant", "dataset_scope": "35d_all"},
             },
             {
                 "doc_id": "deck-1",
                 "source_type": "deck_profile",
-                "metadata": {"deck_name": "Electro Giant / Tornado"},
+                "metadata": {"deck_name": "Electro Giant / Tornado", "dataset_scope": "35d_all"},
             },
             {
                 "doc_id": "pair-1",
                 "source_type": "card_pair",
-                "metadata": {"cards": ["Electro Giant", "Tornado"]},
+                "metadata": {"cards": ["Electro Giant", "Tornado"], "dataset_scope": "35d_all"},
             },
             {
                 "doc_id": "counter-1",
                 "source_type": "counter",
-                "metadata": {"card_name": "Electro Giant", "opponent_card_name": "P.E.K.K.A"},
+                "metadata": {"card_name": "Electro Giant", "opponent_card_name": "P.E.K.K.A", "dataset_scope": "35d_all"},
             },
             {
                 "doc_id": "matchup-1",
                 "source_type": "matchup",
-                "metadata": {"deck_name": "Deck A", "opponent_deck_name": "Deck B"},
+                "metadata": {"deck_name": "Deck A", "opponent_deck_name": "Deck B", "dataset_scope": "35d_all"},
             },
             {
                 "doc_id": "archetype-1",
                 "source_type": "archetype",
-                "metadata": {"archetype": "Hog cycle"},
+                "metadata": {"archetype": "Hog cycle", "dataset_scope": "35d_all"},
             },
         ]
 
@@ -202,6 +224,7 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertEqual({case["relevant_doc_id"] for case in cases}, {doc["doc_id"] for doc in docs})
         self.assertEqual({case["source_type"] for case in cases}, {doc["source_type"] for doc in docs})
         self.assertTrue(all(case["query"] for case in cases))
+        self.assertTrue(all(case["dataset_scope"] == "35d_all" for case in cases))
 
 
 if __name__ == "__main__":

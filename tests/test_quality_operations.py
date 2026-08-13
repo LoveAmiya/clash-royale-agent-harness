@@ -43,11 +43,16 @@ class QualityOperationsContractTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 404)
 
     def test_logging_filter_redacts_provider_credentials(self):
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "sensitive-key"}):
+        with patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "sensitive-key", "SUPERCELL_API_TOKENS": "core-secret;expanded-secret"},
+        ):
             redactor = SecretRedactionFilter()
-        record = logging.LogRecord("test", logging.INFO, __file__, 1, "failed sensitive-key", (), None)
+        record = logging.LogRecord(
+            "test", logging.INFO, __file__, 1, "failed sensitive-key core-secret;expanded-secret", (), None
+        )
         self.assertTrue(redactor.filter(record))
-        self.assertEqual(record.getMessage(), "failed [REDACTED]")
+        self.assertEqual(record.getMessage(), "failed [REDACTED] [REDACTED]")
 
     def test_model_status_and_metrics_do_not_expose_provider_url(self):
         status = self.client.get("/model/status")

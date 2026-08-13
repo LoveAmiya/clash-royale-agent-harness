@@ -87,8 +87,12 @@ class DiskBackedSnapshotWorkspace:
         battles_per_player: int,
         seed_player_limit: int | None = None,
         collection_mode: str = "weekly_expanded",
+        max_workspace_bytes: int | None = None,
     ):
         self.root = Path(root)
+        self.max_workspace_bytes = (
+            max(1, int(max_workspace_bytes)) if max_workspace_bytes is not None else None
+        )
         resolved_seed_limit = min(player_limit, seed_player_limit or 1000)
         identity = (
             f"{PATH_OF_LEGEND_SCOPE_CONTRACT}:{target_battles}:{player_limit}:"
@@ -191,6 +195,7 @@ class DiskBackedSnapshotWorkspace:
                 battles_per_player=battles_per_player,
                 seed_player_limit=resolved_seed_limit,
                 collection_mode=collection_mode,
+                max_workspace_bytes=self.max_workspace_bytes,
             )
             return
         self.connection.executemany(
@@ -203,6 +208,22 @@ class DiskBackedSnapshotWorkspace:
         )
         self.connection.commit()
         self.max_in_memory_battle_records = 0
+        self.assert_storage_budget()
+
+    @property
+    def storage_bytes(self) -> int:
+        return sum(
+            path.stat().st_size
+            for path in self.path.iterdir()
+            if path.is_file()
+        )
+
+    def assert_storage_budget(self) -> int:
+        size = self.storage_bytes
+        if self.max_workspace_bytes is not None and size > self.max_workspace_bytes:
+            self.close()
+            raise ValueError("snapshot workspace byte limit exceeded")
+        return size
 
     def close(self) -> None:
         if self.connection is not None:
@@ -452,6 +473,7 @@ class DiskBackedSnapshotWorkspace:
             (str(max(self.metadata_int("max_in_memory_battle_records"), self.max_in_memory_battle_records)),),
         )
         self.connection.commit()
+        self.assert_storage_budget()
         return accepted
 
     def export_raw_records(self) -> JsonlRecordSequence:
@@ -461,7 +483,14 @@ class DiskBackedSnapshotWorkspace:
                 handle.write("\n")
         return JsonlRecordSequence(self.raw_path, self.battle_count)
 
-    def build_snapshot(self, *, fetched_at: str, target_battles: int, collection_metadata: dict) -> dict:
+    def build_snapshot(
+        self,
+        *,
+        fetched_at: str,
+        target_battles: int,
+        collection_metadata: dict,
+        export_raw_battles: bool = True,
+    ) -> dict:
         total_battles = self.battle_count
         if not total_battles:
             raise ValueError("official API returned no usable battle-log decks")
@@ -609,13 +638,14 @@ class DiskBackedSnapshotWorkspace:
             json.loads(payload)
             for (payload,) in self.connection.execute("SELECT payload FROM probe_battles ORDER BY sequence")
         ]
-        raw_records = self.export_raw_records()
+        raw_records = self.export_raw_records() if export_raw_battles else ()
         metrics = dict(collection_metadata)
         metrics.update(
             {
                 "streamed_to_disk": True,
                 "resumable_workspace": True,
                 "max_in_memory_battle_records": self.metadata_int("max_in_memory_battle_records"),
+                "workspace_bytes": self.assert_storage_budget(),
                 "exact_matchups_stored": matchup_total,
                 "observation_count": self.observation_count,
                 "published_matchups": len(deck_matchups),
@@ -853,6 +883,8 @@ class SupercellAPIClient:
         expand_opponents: bool = True,
         strict_battle_contract: bool = False,
         ranked_tail_retry_rounds: int = 0,
+        max_workspace_bytes: int | None = None,
+        export_raw_battles: bool = True,
     ) -> dict:
         if target_battles < 1:
             raise ValueError("target_battles must be at least 1")
@@ -879,6 +911,7 @@ class SupercellAPIClient:
                 battles_per_player=battles_per_player,
                 seed_player_limit=seed_player_limit,
                 collection_mode=collection_mode,
+                max_workspace_bytes=max_workspace_bytes,
             )
             if spool_dir is not None
             else None
@@ -893,6 +926,7 @@ class SupercellAPIClient:
                 battles_per_player=battles_per_player,
                 seed_player_limit=seed_player_limit,
                 collection_mode=collection_mode,
+                max_workspace_bytes=max_workspace_bytes,
             )
         if players is None:
             players = self.fetch_global_rankings(min(player_limit, seed_player_limit), include_locations=False)
@@ -1055,7 +1089,12 @@ class SupercellAPIClient:
                     sampled_players += 1
                     usable_battles += len(selected)
                     battle_logs[player["tag"]] = selected
-                if expand_opponents and selected and len(players) < player_limit:
+                if (
+                    expand_opponents
+                    and selected
+                    and player.get("seed_source") != "opponent_battlelog"
+                    and len(players) < player_limit
+                ):
                     added = 0
                     if player.get("seed_source") == "opponent_battlelog":
                         expansion_root_rank = player.get("expansion_root_rank")
@@ -1190,6 +1229,7 @@ class SupercellAPIClient:
                     fetched_at=datetime.now(timezone.utc).isoformat(),
                     target_battles=target_battles,
                     collection_metadata=collection_metadata,
+                    export_raw_battles=export_raw_battles,
                 )
             finally:
                 workspace.close()

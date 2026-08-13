@@ -17,11 +17,20 @@ from rank_bm25 import BM25Okapi
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, VectorParams, PointStruct
 
-from app_config import EMBED_BATCH_SIZE, EMBED_MODEL, OLLAMA_EMBED_TIMEOUT_SECONDS, OLLAMA_EMBED_URL, RAG_DOCS_FILE
+import app_config as _app_config
+from app_config import (
+    EMBED_BATCH_SIZE,
+    EMBED_MODEL,
+    OLLAMA_EMBED_TIMEOUT_SECONDS,
+    OLLAMA_EMBED_URL,
+    RAG_DOCS_FILE,
+)
 
 
 DATA_DIR = Path("data")
 DOCS_FILE = RAG_DOCS_FILE
+RETRIEVAL_FUSION_MODE = getattr(_app_config, "RETRIEVAL_FUSION_MODE", "rrf")
+RETRIEVAL_RRF_K = getattr(_app_config, "RETRIEVAL_RRF_K", 60)
 
 COLLECTION_NAME = "cr_hybrid_rag"
 VECTOR_SIZE = 1024
@@ -64,9 +73,12 @@ class HybridRetriever:
         ).hexdigest()
         self.qdrant = None
         self.dense_available = False
+        self.reused_persisted_index = False
         try:
             self.qdrant = QdrantClient(path=str(self.index_path)) if self.index_path else QdrantClient(":memory:")
-            if not self._can_reuse_persisted_index():
+            if self._can_reuse_persisted_index():
+                self.reused_persisted_index = True
+            else:
                 self._build_dense_index()
                 self._write_index_manifest()
             self.dense_available = True
@@ -302,29 +314,23 @@ class HybridRetriever:
         dataset_scope: Optional[str] = None,
         deck_mode: Optional[str] = None,
         entity_mode: Optional[str] = None,
+        query_vector: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """返回向量索引中按余弦相似度排序的语义候选文档。"""
         if not self.dense_available:
             return []
 
-        query_vector = self.embed_text(query)
+        if query_vector is None:
+            query_vector = self.embed_text(query)
 
         response = self.qdrant.query_points(
             collection_name=self.collection_name,
             query=query_vector,
             limit=max(top_k * 3, 20),
             with_payload=True,
-            query_filter=(
-                Filter(
-                    must=[
-                        FieldCondition(
-                            key="metadata.dataset_scope",
-                            match=MatchValue(value=dataset_scope),
-                        )
-                    ]
-                )
-                if dataset_scope is not None
-                else None
+            query_filter=self._build_dense_filter(
+                dataset_scope=dataset_scope,
+                source_type=source_type,
             ),
         )
 
@@ -355,6 +361,29 @@ class HybridRetriever:
                 break
 
         return results
+
+    @staticmethod
+    def _build_dense_filter(
+        *,
+        dataset_scope: Optional[str],
+        source_type: Optional[str],
+    ) -> Filter | None:
+        conditions = []
+        if dataset_scope is not None:
+            conditions.append(
+                FieldCondition(
+                    key="metadata.dataset_scope",
+                    match=MatchValue(value=dataset_scope),
+                )
+            )
+        if source_type is not None:
+            conditions.append(
+                FieldCondition(
+                    key="source_type",
+                    match=MatchValue(value=source_type),
+                )
+            )
+        return Filter(must=conditions) if conditions else None
 
     @staticmethod
     def _matches_deck_mode(doc: Dict[str, Any], deck_mode: Optional[str]) -> bool:
@@ -399,6 +428,9 @@ class HybridRetriever:
         dataset_scope: Optional[str] = None,
         deck_mode: Optional[str] = None,
         entity_mode: Optional[str] = None,
+        fusion_mode: Optional[str] = None,
+        rrf_k: Optional[int] = None,
+        query_vector: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """以可审计的加权分数融合词法与稠密候选集。
 
@@ -420,10 +452,20 @@ class HybridRetriever:
             dataset_scope=dataset_scope,
             deck_mode=deck_mode,
             entity_mode=entity_mode,
+            query_vector=query_vector,
         )
+
+        selected_fusion_mode = (fusion_mode or RETRIEVAL_FUSION_MODE).strip().lower()
+        if selected_fusion_mode not in {"rrf", "weighted"}:
+            selected_fusion_mode = "rrf"
+        selected_rrf_k = max(1, min(int(rrf_k or RETRIEVAL_RRF_K), 1_000))
 
         bm25_norm = self.normalize_scores(bm25_results)
         dense_norm = self.normalize_scores(dense_results)
+        bm25_ranks = {item["internal_id"]: rank for rank, item in enumerate(bm25_results, start=1)}
+        dense_ranks = {item["internal_id"]: rank for rank, item in enumerate(dense_results, start=1)}
+        bm25_raw = {item["internal_id"]: float(item["score"]) for item in bm25_results}
+        dense_raw = {item["internal_id"]: float(item["score"]) for item in dense_results}
 
         merged = {}
 
@@ -438,15 +480,50 @@ class HybridRetriever:
             merged[idx]["dense_score"] = dense_norm.get(idx, 0.0)
 
         final_results = []
-        retrieval_mode = "hybrid" if self.dense_available else "bm25_only"
+        retrieval_mode = (
+            "hybrid"
+            if bm25_results and dense_results
+            else "dense_only"
+            if dense_results
+            else "bm25_only"
+        )
+        if bm25_results and dense_results:
+            bm25_weight = alpha
+            dense_weight = 1 - alpha
+        elif bm25_results:
+            bm25_weight = 1.0
+            dense_weight = 0.0
+        else:
+            bm25_weight = 0.0
+            dense_weight = 1.0
+        candidate_pool = {
+            "bm25": len(bm25_results),
+            "dense": len(dense_results),
+            "union": len(merged),
+        }
         for idx, item in merged.items():
-            final_score = alpha * item["bm25_score"] + (1 - alpha) * item["dense_score"]
+            if selected_fusion_mode == "rrf":
+                rrf_score = 0.0
+                if idx in bm25_ranks:
+                    rrf_score += bm25_weight / (selected_rrf_k + bm25_ranks[idx])
+                if idx in dense_ranks:
+                    rrf_score += dense_weight / (selected_rrf_k + dense_ranks[idx])
+                final_score = (selected_rrf_k + 1) * rrf_score
+            else:
+                final_score = bm25_weight * item["bm25_score"] + dense_weight * item["dense_score"]
             final_results.append(
                 {
                     "internal_id": idx,
                     "final_score": final_score,
                     "bm25_score": item["bm25_score"],
                     "dense_score": item["dense_score"],
+                    "bm25_raw_score": bm25_raw.get(idx),
+                    "dense_raw_score": dense_raw.get(idx),
+                    "bm25_rank": bm25_ranks.get(idx),
+                    "dense_rank": dense_ranks.get(idx),
+                    "fusion_mode": selected_fusion_mode,
+                    "rrf_k": selected_rrf_k if selected_fusion_mode == "rrf" else None,
+                    "candidate_pool": candidate_pool,
                     "retrieval_mode": retrieval_mode,
                     "doc": item["doc"],
                 }

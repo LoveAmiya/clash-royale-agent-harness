@@ -8,6 +8,36 @@ from runtime_events import RuntimeEventEmitter
 
 
 class RuntimeEventEmitterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execution_event_exposes_allowlisted_audit_summary(self):
+        emitter = RuntimeEventEmitter(request_id="req-1")
+
+        await emitter.execution(
+            step_id="q.retrieve",
+            phase="retrieve",
+            status="completed",
+            title="已检索环境证据",
+            detail="找到 24 条候选证据。",
+            operation="retrieval.hybrid_search",
+            parameters={
+                "scope": "35d_all",
+                "bm25_top_k": 32,
+                "dense_top_k": 32,
+                "fusion": "rrf",
+                "api_key": "must-not-leak",
+            },
+            rationale="用户询问环境趋势，需要检索当前范围证据。",
+            evidence=["24 条候选进入确定性重排"],
+            boundaries=["使用率表示样本出现频率，不单独证明强度或因果"],
+        )
+        event = await emitter.next_event()
+
+        self.assertEqual(event["schema_version"], 2)
+        self.assertEqual(event["event_id"], "req-1:1")
+        self.assertEqual(event["operation"], "retrieval.hybrid_search")
+        self.assertEqual(event["parameters"]["scope"], "35d_all")
+        self.assertNotIn("api_key", event["parameters"])
+        self.assertIn("不单独证明强度", event["boundaries"][0])
+
     async def test_execution_events_use_stable_step_ids_and_preserve_content_contract(self):
         emitter = RuntimeEventEmitter()
 

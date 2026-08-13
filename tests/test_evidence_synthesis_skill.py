@@ -54,10 +54,12 @@ class MetaEvidenceTests(unittest.TestCase):
         class FakeRetriever:
             def __init__(self):
                 self.source_types = []
+                self.calls = []
 
             def hybrid_search(self, **kwargs):
                 source_type = kwargs.get("source_type")
                 self.source_types.append(source_type)
+                self.calls.append(kwargs)
                 name = source_type or "global"
                 return [{
                     "doc": {
@@ -86,6 +88,15 @@ class MetaEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(len(results), 4)
         self.assertEqual(lanes, ["global", "archetype", "deck_profile", "card_pair"])
+        self.assertEqual(retriever.calls[0]["final_top_k"], query_answering.RETRIEVAL_FINAL_TOP_K)
+        self.assertTrue(all(
+            call["final_top_k"] == query_answering.META_RETRIEVAL_LANE_TOP_K
+            for call in retriever.calls[1:]
+        ))
+        self.assertEqual(
+            [item["retrieval_lanes"] for item in results],
+            [["global"], ["archetype"], ["deck_profile"], ["card_pair"]],
+        )
     def test_evidence_pack_labels_supercell_records_as_live_sources(self):
         evidence, sources = build_meta_evidence_pack(
             [],
@@ -423,6 +434,38 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["model_stream"], "streaming")
         self.assertTrue({"retrieval", "rerank", "review", "synthesis", "validation"}.issubset(span_names))
 
+    async def test_first_token_watchdog_emits_waiting_progress_then_times_out(self):
+        async def delayed_stream():
+            await asyncio.sleep(1)
+            yield "too late"
+
+        emitter = RuntimeEventEmitter()
+        with patch.object(query_answering, "MODEL_FIRST_TOKEN_TIMEOUT_SECONDS", 0.03), patch.object(
+            query_answering, "MODEL_PROGRESS_INTERVAL_SECONDS", 0.01
+        ):
+            with self.assertRaises(query_answering.ModelFirstTokenTimeout):
+                _ = [
+                    delta
+                    async for delta in query_answering.stream_with_first_token_watchdog(
+                        delayed_stream(),
+                        event_sink=emitter,
+                        step_id="q.generate",
+                        subquery_id="q",
+                    )
+                ]
+
+        events = []
+        while not emitter.empty():
+            events.append(await emitter.next_event())
+        wait_events = [
+            event for event in events
+            if event.get("object") == "execution"
+            and event.get("operation") == "synthesize.await_first_text"
+        ]
+        self.assertEqual(len(wait_events), 1)
+        self.assertNotIn("已等待", wait_events[0].get("title", ""))
+        self.assertTrue(any(event.get("object") == "progress" for event in events))
+
     async def test_streaming_evidence_synthesis_drops_unsupported_numeric_sentence(self):
         class StaticRetriever:
             def hybrid_search(self, **_kwargs):
@@ -533,7 +576,7 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
         metadata = {}
         with patch.object(query_answering, "uses_responses_api", return_value=True), patch.object(
             query_answering, "generate_model_text_stream", unavailable_stream
-        ), patch.object(query_answering, "generate_model_text", AsyncMock(return_value="完成后返回的结论。")):
+        ), patch.object(query_answering, "generate_model_text", AsyncMock(return_value="完成后返回的结论。")) as fallback_generate:
             answer = await query_answering.build_evidence_synthesis_answer(
                 user_text="分析当前环境。",
                 parsed={"intent": "meta_analysis_query"},
@@ -555,8 +598,10 @@ class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(metadata["model_stream"], "fallback_chunked")
         self.assertEqual(streamed_text, answer)
-        self.assertIn("完成后返回的结论。", answer)
-        self.assertTrue(any("分段" in detail for detail in execution_details))
+        self.assertNotIn("完成后返回的结论。", answer)
+        self.assertIn("Official snapshot evidence.", answer)
+        self.assertTrue(any("第二次" in detail for detail in execution_details))
+        fallback_generate.assert_not_awaited()
 
     async def test_meta_analysis_excludes_local_schedule_from_model_evidence(self):
         class StaticRetriever:

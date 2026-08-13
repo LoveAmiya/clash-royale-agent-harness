@@ -84,23 +84,38 @@ EMBED_BATCH_SIZE = max(1, min(int(os.getenv("EMBED_BATCH_SIZE", "32")), 128))
 PARSER_CALL_TIMEOUT_SECONDS = float(os.getenv("PARSER_CALL_TIMEOUT_SECONDS", "45"))
 # A bounded timeout keeps slow relay calls from leaving an SSE request pending forever.
 MODEL_CALL_TIMEOUT_SECONDS = float(os.getenv("MODEL_CALL_TIMEOUT_SECONDS", "120"))
+# Reasoning models can spend most of a request budget before publishing text.
+# Keep the total safety bound above, but stop an entirely silent generation
+# earlier so the runtime can return its already validated evidence instead.
+MODEL_FIRST_TOKEN_TIMEOUT_SECONDS = max(
+    5.0,
+    min(float(os.getenv("MODEL_FIRST_TOKEN_TIMEOUT_SECONDS", "75")), MODEL_CALL_TIMEOUT_SECONDS),
+)
+MODEL_PROGRESS_INTERVAL_SECONDS = max(
+    0.5,
+    min(float(os.getenv("MODEL_PROGRESS_INTERVAL_SECONDS", "2")), 10.0),
+)
 MODEL_CIRCUIT_FAILURE_THRESHOLD = _bounded_int("MODEL_CIRCUIT_FAILURE_THRESHOLD", 3, 1, 20)
 MODEL_CIRCUIT_RECOVERY_SECONDS = max(
     1.0,
     min(float(os.getenv("MODEL_CIRCUIT_RECOVERY_SECONDS", "60")), 3600.0),
 )
 
-RETRIEVAL_TOP_K_BM25 = int(os.getenv("RETRIEVAL_TOP_K_BM25", "10"))
-RETRIEVAL_TOP_K_DENSE = int(os.getenv("RETRIEVAL_TOP_K_DENSE", "10"))
-RETRIEVAL_FINAL_TOP_K = int(os.getenv("RETRIEVAL_FINAL_TOP_K", "8"))
-RETRIEVAL_ALPHA = float(os.getenv("RETRIEVAL_ALPHA", "0.5"))
-RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "4"))
-COMPRESS_MAX_ITEMS = int(os.getenv("COMPRESS_MAX_ITEMS", "4"))
-COMPRESS_CHAR_BUDGET = int(os.getenv("COMPRESS_CHAR_BUDGET", "1200"))
-META_RETRIEVAL_LANE_TOP_K = int(os.getenv("META_RETRIEVAL_LANE_TOP_K", "4"))
-META_RERANK_TOP_N = int(os.getenv("META_RERANK_TOP_N", "8"))
-META_COMPRESS_MAX_ITEMS = int(os.getenv("META_COMPRESS_MAX_ITEMS", "8"))
-META_COMPRESS_CHAR_BUDGET = int(os.getenv("META_COMPRESS_CHAR_BUDGET", "2800"))
+RETRIEVAL_TOP_K_BM25 = _bounded_int("RETRIEVAL_TOP_K_BM25", 32, 1, 200)
+RETRIEVAL_TOP_K_DENSE = _bounded_int("RETRIEVAL_TOP_K_DENSE", 32, 1, 200)
+RETRIEVAL_FINAL_TOP_K = _bounded_int("RETRIEVAL_FINAL_TOP_K", 24, 1, 100)
+RETRIEVAL_ALPHA = max(0.0, min(float(os.getenv("RETRIEVAL_ALPHA", "0.5")), 1.0))
+RETRIEVAL_FUSION_MODE = os.getenv("RETRIEVAL_FUSION_MODE", "rrf").strip().lower()
+if RETRIEVAL_FUSION_MODE not in {"rrf", "weighted"}:
+    RETRIEVAL_FUSION_MODE = "rrf"
+RETRIEVAL_RRF_K = _bounded_int("RETRIEVAL_RRF_K", 60, 1, 1_000)
+RERANK_TOP_N = _bounded_int("RERANK_TOP_N", 8, 1, 50)
+COMPRESS_MAX_ITEMS = _bounded_int("COMPRESS_MAX_ITEMS", 6, 1, 20)
+COMPRESS_CHAR_BUDGET = _bounded_int("COMPRESS_CHAR_BUDGET", 2000, 256, 20_000)
+META_RETRIEVAL_LANE_TOP_K = _bounded_int("META_RETRIEVAL_LANE_TOP_K", 8, 1, 50)
+META_RERANK_TOP_N = _bounded_int("META_RERANK_TOP_N", 12, 1, 50)
+META_COMPRESS_MAX_ITEMS = _bounded_int("META_COMPRESS_MAX_ITEMS", 10, 1, 20)
+META_COMPRESS_CHAR_BUDGET = _bounded_int("META_COMPRESS_CHAR_BUDGET", 4200, 512, 30_000)
 RAG_QUALITY_GATE_ENABLED = os.getenv("RAG_QUALITY_GATE_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
 RAG_MIN_DOCUMENTS = _bounded_int("RAG_MIN_DOCUMENTS", 100, 1, 100_000)
 RAG_MIN_SOURCE_TYPES = _bounded_int("RAG_MIN_SOURCE_TYPES", 6, 1, 100)

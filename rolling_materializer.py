@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from rolling_corpus import DATASET_SCOPES, RollingCorpusStore
+from rag_document_policy import RAG_SOURCE_LIMITS, summarize_scope_documents
 from structured_query import CARD_ALIAS_OVERRIDES, TOWER_DISPLAY_NAMES_ZH
 from structured_stats import build_structured_stats
 
@@ -493,7 +494,7 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                 }
             )
         deck_rows = connection.execute(
-            "SELECT * FROM deck_stats WHERE dataset_scope=? ORDER BY games DESC, deck_signature LIMIT 150",
+            f"SELECT * FROM deck_stats WHERE dataset_scope=? ORDER BY games DESC, deck_signature LIMIT {RAG_SOURCE_LIMITS['deck']}",
             (scope,),
         ).fetchall()
         for rank, row in enumerate(deck_rows, start=1):
@@ -549,7 +550,8 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
             )
         delta_rows = connection.execute(
             "SELECT * FROM meta_delta WHERE current_scope=? "
-            "ORDER BY significant DESC, ABS(usage_delta) DESC, ABS(win_delta) DESC LIMIT 300",
+            "ORDER BY significant DESC, ABS(usage_delta) DESC, ABS(win_delta) DESC "
+            f"LIMIT {RAG_SOURCE_LIMITS['meta_delta'] - 1}",
             (scope,),
         ).fetchall()
         if delta_rows:
@@ -599,7 +601,8 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                 )
         for rank, row in enumerate(
             connection.execute(
-                "SELECT * FROM full_loadout_stats WHERE dataset_scope=? ORDER BY games DESC, loadout_signature LIMIT 150",
+                "SELECT * FROM full_loadout_stats WHERE dataset_scope=? ORDER BY games DESC, loadout_signature "
+                f"LIMIT {RAG_SOURCE_LIMITS['full_loadout']}",
                 (scope,),
             ),
             start=1,
@@ -631,9 +634,10 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                 }
             )
         for row in connection.execute(
-            """
+            f"""
             SELECT * FROM full_loadout_matchup_stats WHERE dataset_scope=?
-            ORDER BY games DESC, loadout_a_signature, loadout_b_signature LIMIT 500
+            ORDER BY games DESC, loadout_a_signature, loadout_b_signature
+            LIMIT {RAG_SOURCE_LIMITS['full_loadout_matchup']}
             """,
             (scope,),
         ):
@@ -657,9 +661,10 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                 }
             )
         for row in connection.execute(
-            """
+            f"""
             SELECT * FROM matchup_stats WHERE dataset_scope=?
-            ORDER BY games DESC, deck_a_signature, deck_b_signature LIMIT 500
+            ORDER BY games DESC, deck_a_signature, deck_b_signature
+            LIMIT {RAG_SOURCE_LIMITS['matchup']}
             """,
             (scope,),
         ):
@@ -682,10 +687,11 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                 }
             )
         for row in connection.execute(
-            """
+            f"""
             SELECT card_name, teammate_name, games, wins, losses FROM card_teammates
             WHERE dataset_scope=? AND card_name<teammate_name
-            ORDER BY games DESC, card_name, teammate_name LIMIT 365
+            ORDER BY games DESC, card_name, teammate_name
+            LIMIT {RAG_SOURCE_LIMITS['card_pair']}
             """,
             (scope,),
         ):
@@ -704,9 +710,10 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                 }
             )
         for row in connection.execute(
-            """
+            f"""
             SELECT card_name, opponent_name, games, wins, losses FROM card_opponents
-            WHERE dataset_scope=? ORDER BY games DESC, card_name, opponent_name LIMIT 300
+            WHERE dataset_scope=? ORDER BY games DESC, card_name, opponent_name
+            LIMIT {RAG_SOURCE_LIMITS['counter']}
             """,
             (scope,),
         ):
@@ -726,7 +733,8 @@ def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict
                 }
             )
         for row in connection.execute(
-            "SELECT * FROM card_stats WHERE dataset_scope=? ORDER BY appearances DESC, card_name LIMIT 180",
+            "SELECT * FROM card_stats WHERE dataset_scope=? ORDER BY appearances DESC, card_name "
+            f"LIMIT {RAG_SOURCE_LIMITS['card_profile']}",
             (scope,),
         ):
             documents.append(
@@ -864,6 +872,7 @@ def build_snapshot_group(
         validation = _validate_documents(documents, group_id)
         if not validation["passed"]:
             raise ValueError("rolling RAG document validation failed")
+        rag_scope_counts, rag_scope_source_counts = summarize_scope_documents(documents, DATASET_SCOPES)
         _atomic_json(candidate / "rag_documents.json", documents)
         group_stats.close()
         group_stats = None
@@ -911,6 +920,8 @@ def build_snapshot_group(
             "rag_docs_fingerprint": validation["docs_fingerprint"],
             "rag_document_count": validation["document_count"],
             "rag_source_counts": validation["source_counts"],
+            "rag_scope_counts": rag_scope_counts,
+            "rag_scope_source_counts": rag_scope_source_counts,
             "index_docs_fingerprint": validation["docs_fingerprint"],
             "fully_aligned": True,
             "cost_boundaries": {

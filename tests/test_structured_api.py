@@ -218,12 +218,16 @@ class StructuredAPIContractTests(unittest.TestCase):
                         "rag_docs_fingerprint": "same",
                         "index_docs_fingerprint": "same",
                         "rag_document_count": 100,
+                        "rag_scope_counts": {scope: index + 1 for index, scope in enumerate(DATASET_SCOPES)},
+                        "rag_scope_source_counts": {
+                            scope: {"deck": 150, "matchup": 500, "card_profile": 12}
+                            for scope in DATASET_SCOPES
+                        },
                         "fully_aligned": True,
                     }
                 ),
                 encoding="utf-8",
             )
-
             with patch.object(runtime_multi, "DATA_DIR", data_dir):
                 payload = runtime_multi.get_dataset_catalog(runtime_multi.app)
 
@@ -232,6 +236,16 @@ class StructuredAPIContractTests(unittest.TestCase):
         self.assertEqual(len(payload["datasets"]), 30)
         self.assertTrue(all("entity_stats_ready" in item for item in payload["datasets"]))
         self.assertTrue(payload["rag"]["fully_aligned"])
+        self.assertEqual(payload["rag"]["document_count_semantics"], "scope_sum_including_duplicates")
+        self.assertEqual(payload["rag"]["scope_document_count_semantics"], "bounded_evidence_documents")
+        self.assertTrue(payload["rag"]["global_count_includes_scope_duplicates"])
+        self.assertEqual(payload["rag"]["retrieval"]["fusion_mode"], "rrf")
+        self.assertGreater(payload["rag"]["retrieval"]["candidate_top_k"], payload["rag"]["retrieval"]["evidence_top_n"])
+        by_scope = {item["dataset_scope"]: item for item in payload["datasets"]}
+        self.assertEqual(by_scope["7d_all"]["rag_document_count"], DATASET_SCOPES.index("7d_all") + 1)
+        self.assertEqual(by_scope["7d_all"]["rag_source_counts"]["deck"], 150)
+        self.assertIn("deck", by_scope["7d_all"]["rag_saturated_source_types"])
+        self.assertNotIn("card_profile", by_scope["7d_all"]["rag_saturated_source_types"])
 
     def test_legacy_ten_scope_group_remains_available_without_faking_new_scopes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -239,6 +253,16 @@ class StructuredAPIContractTests(unittest.TestCase):
             group_id = "legacy-group"
             group_dir = data_dir / "snapshot_groups" / group_id
             group_dir.mkdir(parents=True)
+            (group_dir / "rag_documents.json").write_text(
+                json.dumps(
+                    [
+                        {"source_type": "deck", "metadata": {"dataset_scope": "7d_all"}},
+                        {"source_type": "matchup", "metadata": {"dataset_scope": "7d_all"}},
+                        {"source_type": "deck", "metadata": {"dataset_scope": "35d_all"}},
+                    ]
+                ),
+                encoding="utf-8",
+            )
             legacy_scopes = [
                 scope
                 for scope in DATASET_SCOPES
@@ -283,6 +307,9 @@ class StructuredAPIContractTests(unittest.TestCase):
         self.assertTrue(all(not item["ready"] for scope, item in by_scope.items() if scope not in legacy_scopes))
         self.assertTrue(by_scope["7d_all"]["complete_loadout_ready"])
         self.assertFalse(by_scope["7d_all"]["entity_stats_ready"])
+        self.assertEqual(by_scope["7d_all"]["rag_document_count"], 2)
+        self.assertEqual(by_scope["35d_all"]["rag_document_count"], 1)
+        self.assertEqual(by_scope["7d_all"]["rag_source_counts"], {"deck": 1, "matchup": 1})
 
     def test_structured_errors_have_one_predictable_shape(self):
         cards = [f"Card {index}" for index in range(8)]

@@ -13,10 +13,10 @@ The system uses LLM-first query parsing with deterministic validation and fallba
 ### Current Production Data Path
 
 The active data path is a rolling, deduplicated Path of Legend fact store in
-`data/corpus/corpus.sqlite`. Every production collection freezes the global top
-1,000 and expands only through accepted Path of Legend battles until 200,000
-unique battles are collected. The legacy mode name is `weekly_expanded`, but it
-now runs every day. The API publishes thirty fixed scopes: `7d`, `7-14d`,
+`data/corpus/corpus.sqlite`. The core lane freezes the global top 1,000 every
+two hours. A separate `weekly_expanded` lane walks exactly one opponent hop from
+those ranked seeds and finishes when its bounded queue is exhausted or its
+battle target is reached. The API publishes thirty fixed scopes: `7d`, `7-14d`,
 `14-21d`, `21-28d`, `28-35d`, and `35d`, each crossed with top
 100/200/500/1000/all. The browser selects the scope explicitly, so the model
 never routes the data source.
@@ -465,6 +465,16 @@ fingerprint alignment, and retrieval probes. Empty historical slices remain
 explicitly not ready and do not contaminate current ranges. A failed candidate
 keeps the previous group active.
 
+Retrieval uses bounded multi-stage recall. BM25 and local BGE-M3/Qdrant dense
+search each recall up to 32 candidates, reciprocal-rank fusion keeps at most 24
+global candidates, typed environment lanes add bounded coverage, and the
+deterministic reranker plus diversity selector keep at most 12 candidates.
+Compression sends no more than 10 evidence items or 4,200 characters to the
+synthesis model. The selected scope is always a hard filter. The browser trace
+reports the fusion mode and candidate/evidence counts without exposing prompts
+or hidden model reasoning. See
+[`ADR-014`](docs/decisions/ADR-014-bounded-multistage-rag-retrieval.md).
+
 The browser sends the selected `dataset_scope` plus `entity_mode=base8` or
 `loadout_entity` to every relevant page. Explicit evolved, elite, or tower
 questions force entity evidence inside that same scope; the model never selects
@@ -492,23 +502,49 @@ refusal with verified references instead of a generic generation error.
 
 ### Rolling Path of Legend Collection
 
-Set `SUPERCELL_API_TOKEN` only for the separate collection workflow. Every daily
-production run uses the legacy-named `weekly_expanded` mode. It starts from the
-frozen global Path of Legend top 1,000 and expands only through opponent tags
-from accepted `pathOfLegend` battles until the batch contains exactly 200,000
-unique battles. The production mode uses concurrency `1`, defaults to at most
-one request per second, and rejects any rate-limited, conflicted, or scope-invalid batch.
+Set `SUPERCELL_API_TOKENS` only for the separate collection workflow. Slot `0`
+drives the global Path of Legend top-1,000 `daily_ranked` lane every two hours;
+slot `1` drives the continuous `weekly_expanded` lane. Expansion is restricted
+to one opponent hop from the frozen ranked seeds. Natural queue exhaustion is a
+valid completion only when ranked coverage passes and at least 99% of queued
+opponent requests succeed. Both lanes retain concurrency `1`, default to at
+most one request per second per token, and reject any rate-limited, conflicted,
+or scope-invalid batch. The legacy single
+`SUPERCELL_API_TOKEN` remains a core-lane fallback only.
 
-The collector writes checkpoints under `data/rolling_work/<batch_id>` and imports
-accepted facts into `data/corpus/corpus.sqlite`. Facts are globally deduplicated;
-batch observations retain collection time, source, and ranking provenance.
-Observations expire after a real 35-day window. Accepted expanded batches have
-no count cap inside that window. `daily_ranked` remains a compatibility-only
-implementation and is not selected by the scheduler or normal operations.
+Network collection runs concurrently into bounded disk checkpoints under
+`data/rolling_lanes/<mode>/active`. The core lane is limited to 512 MiB, the
+expanded lane to 4 GiB, and the combined active staging area to 5 GiB. Only the
+import, validation, retention, and publication phase holds the single corpus
+writer lock. Accepted facts enter `data/corpus/corpus.sqlite` and are globally
+deduplicated by battle ID; interrupted lane work resumes on its next trigger.
 
-Run collection only through `run_rolling_collection.ps1`. The script performs
-the Supercell IP/key preflight before making the batch request. Complete commands,
-monitoring rules, quality gates, and recovery boundaries are in
+Install or replace both native Windows tasks with
+`scripts/install_parallel_collection_tasks.ps1`. Both task actions run
+isolated lane entry points. The core task runs
+`scripts/run_daily_ranked_supervisor.ps1`: each run is anchored two hours after
+the previous run's actual start, an overrun starts one immediate catch-up run,
+and multiple missed intervals collapse into that single run. Task Scheduler
+checks the supervisor every 15 minutes only for process recovery and uses
+`IgnoreNew`, so it cannot create overlapping core collectors. The expansion
+task continues to invoke `scripts/run_daily_ranked_schedule.ps1` independently
+with token slot 1. The runner performs the selected token/IP preflight and sends
+PushPlus only for failures (or an explicit notification test). A staged batch
+may wait up to two hours for the corpus writer; a merge deferral remains
+resumable work and is logged without a phone alert. The architecture and
+rollback boundary are recorded in
+[`ADR-013`](docs/decisions/ADR-013-parallel-ranked-and-one-hop-collection.md).
+
+The task runner redirects Python and SQLite temporary files to the project
+drive. If facts were accepted but snapshot publication failed, the next lane
+invocation retries publication before contacting Supercell or collecting again.
+
+Collection is owned by the Windows tasks and backend scripts; Codex does not
+need to remain open. The host must remain powered on and awake, but the display
+may turn off normally. System sleep, hibernation, shutdown, or power loss pauses
+both lanes; `StartWhenAvailable` recovers the task processes after Windows wakes,
+without recreating data that could not be collected while asleep. Operational
+commands, failure notifications, and recovery rules are documented in
 [`docs/SNAPSHOT_COLLECTION_HANDOFF.md`](docs/SNAPSHOT_COLLECTION_HANDOFF.md).
 
 ### Data Freshness and Sources
@@ -560,11 +596,14 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方�
 
 ### 当前生产数据路径
 
-当前业务数据来自 `data/corpus/corpus.sqlite` 中严格限定传奇之路的滚动事实库。每天冻结全球
-前 1000 名，并只沿已验收的传奇之路对局扩散，直到批内得到 20 万场唯一对局。生产模式仍
-沿用历史名称 `weekly_expanded`，但已经改为每天执行，不再安排 `daily_ranked`。后端原子发布
+当前业务数据来自 `data/corpus/corpus.sqlite` 中严格限定传奇之路的滚动事实库。核心通道每
+两小时冻结全球前 1000 名；独立的 `weekly_expanded` 通道只迭代这些种子玩家的一层对手。
+达到目标或完整遍历完一层队列都可以结束，但榜单覆盖必须达标且对手请求成功率至少为 99%。后端原子发布
 当前及历史 7 天分段、累计 35 天与前 100/200/500/1000/全量组合成的三十个固定范围，前端
 显式选择，模型不参与数据源路由。
+
+核心监督器以上一轮实际开始时间为锚点计算两小时周期；如果一轮超过两小时，则结束后只立即
+补跑一轮，不累计过期任务。扩展监督任务保持独立，两个通道不会启动同模式的重叠实例。
 
 同一次 battlelog 同时产生 `base8` 和可用时的 `full_loadout`（塔楼、八卡、觉醒、精英）。
 单场对局不进入向量库；本地只物化结构化统计和高密度 RAG 聚合证据。
@@ -807,4 +846,10 @@ User Question
 [`docs/SNAPSHOT_COLLECTION_PROMPT.md`](docs/SNAPSHOT_COLLECTION_PROMPT.md) 创建新的采集任务。
 架构细节见
 [`docs/plans/rolling-path-of-legend-corpus.md`](docs/plans/rolling-path-of-legend-corpus.md)。
+
+采集由 Windows 计划任务和后端脚本独立执行，不需要保持 Codex 开启。电脑必须开机且系统
+保持唤醒，但显示器可以按 5 到 10 分钟的系统设置正常关闭；系统睡眠、休眠、关机或断电会
+暂停两个通道。唤醒后计划任务会恢复进程，但睡眠期间无法采集的数据不会被补造。核心通道
+按实际开始时间维持两小时节奏，超时后只立即补跑一轮；扩展通道独立近似连续运行，互不
+启动同模式重叠实例。具体查看、停止、恢复、PushPlus 告警和故障处理命令见上述采集手册。
 

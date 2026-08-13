@@ -13,7 +13,12 @@ class SecretRedactionFilter(logging.Filter):
         super().__init__()
         self._secrets = tuple(
             value
-            for name in ("OPENAI_API_KEY", "SUPERCELL_API_TOKEN", "ADMIN_API_KEY")
+            for name in (
+                "OPENAI_API_KEY",
+                "SUPERCELL_API_TOKEN",
+                "SUPERCELL_API_TOKENS",
+                "ADMIN_API_KEY",
+            )
             if (value := os.getenv(name, ""))
         )
 

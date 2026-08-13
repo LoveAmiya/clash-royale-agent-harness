@@ -8,9 +8,19 @@ import json
 import math
 import random
 import statistics
+import time
 from pathlib import Path
 from typing import Any
 
+from app_config import (
+    EMBED_BATCH_SIZE,
+    RETRIEVAL_ALPHA,
+    RETRIEVAL_FINAL_TOP_K,
+    RETRIEVAL_FUSION_MODE,
+    RETRIEVAL_RRF_K,
+    RETRIEVAL_TOP_K_BM25,
+    RETRIEVAL_TOP_K_DENSE,
+)
 from hybrid_retriever import HybridRetriever, load_docs
 from evaluation.scorecard import attach_scorecard
 from retrieval_postprocess import rerank_results
@@ -42,6 +52,17 @@ def _percentile(sorted_values: list[float], probability: float) -> float:
         return sorted_values[lower]
     fraction = position - lower
     return sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * fraction
+
+
+def summarize_latency(values: list[float]) -> dict[str, float | int]:
+    ordered = sorted(float(value) for value in values)
+    return {
+        "count": len(ordered),
+        "mean": statistics.fmean(ordered) if ordered else 0.0,
+        "p50": _percentile(ordered, 0.50),
+        "p95": _percentile(ordered, 0.95),
+        "max": ordered[-1] if ordered else 0.0,
+    }
 
 
 def bootstrap_mean_ci(
@@ -249,6 +270,7 @@ def build_cases(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "parsed": parsed,
                 "relevant_doc_id": doc["doc_id"],
                 "source_type": source_type,
+                "dataset_scope": str(meta.get("dataset_scope") or "") or None,
             }
         )
     if not cases:
@@ -279,15 +301,48 @@ def evaluate_cases(
 ) -> dict[str, Any]:
     if not retriever.dense_available:
         raise RuntimeError("Dense retrieval is unavailable; refusing to label BM25 fallback as Hybrid.")
+    embedding_started = time.perf_counter()
+    query_vectors: list[list[float] | None] = []
+    embed_texts = getattr(retriever, "embed_texts", None)
+    if callable(embed_texts):
+        for start in range(0, len(cases), EMBED_BATCH_SIZE):
+            batch = cases[start : start + EMBED_BATCH_SIZE]
+            query_vectors.extend(embed_texts([case["query"] for case in batch]))
+    else:
+        query_vectors = [None] * len(cases)
+    query_embedding_ms = (time.perf_counter() - embedding_started) * 1000
     bm25_rows = []
     hybrid_rows = []
     rerank_rows = []
-    for case in cases:
-        bm25 = retriever.bm25_search(case["query"], top_k=10, source_type=case["source_type"])
-        hybrid = retriever.hybrid_search(
-            case["query"], top_k_bm25=10, top_k_dense=10, final_top_k=8, alpha=0.5, source_type=case["source_type"]
+    method_latencies = {"bm25": [], "hybrid": [], "hybrid_rerank": []}
+    for case, query_vector in zip(cases, query_vectors, strict=True):
+        bm25_started = time.perf_counter()
+        bm25 = retriever.bm25_search(
+            case["query"],
+            top_k=RETRIEVAL_TOP_K_BM25,
+            source_type=case["source_type"],
+            dataset_scope=case.get("dataset_scope"),
         )
+        method_latencies["bm25"].append((time.perf_counter() - bm25_started) * 1000)
+        hybrid_started = time.perf_counter()
+        hybrid = retriever.hybrid_search(
+            case["query"],
+            top_k_bm25=RETRIEVAL_TOP_K_BM25,
+            top_k_dense=RETRIEVAL_TOP_K_DENSE,
+            final_top_k=RETRIEVAL_FINAL_TOP_K,
+            alpha=RETRIEVAL_ALPHA,
+            fusion_mode=RETRIEVAL_FUSION_MODE,
+            rrf_k=RETRIEVAL_RRF_K,
+            source_type=case["source_type"],
+            dataset_scope=case.get("dataset_scope"),
+            query_vector=query_vector,
+        )
+        hybrid_latency = (time.perf_counter() - hybrid_started) * 1000
+        method_latencies["hybrid"].append(hybrid_latency)
+        rerank_started = time.perf_counter()
         reranked = rerank_results(case["query"], case["parsed"], hybrid, top_n=8)
+        rerank_latency = (time.perf_counter() - rerank_started) * 1000
+        method_latencies["hybrid_rerank"].append(hybrid_latency + rerank_latency)
         base = {"case_id": case["case_id"], "relevant_doc_id": case["relevant_doc_id"]}
         bm25_rows.append({**base, "retrieved_doc_ids": [item["doc"]["doc_id"] for item in bm25[:k]]})
         hybrid_rows.append({**base, "retrieved_doc_ids": [item["doc"]["doc_id"] for item in hybrid[:k]]})
@@ -300,6 +355,7 @@ def evaluate_cases(
     method_reports = {
         name: {
             "variant": name,
+            "latency_ms": summarize_latency(method_latencies[name]),
             "metrics": score_ranking(
                 rows,
                 k,
@@ -325,14 +381,25 @@ def evaluate_cases(
         comparisons[name]["baseline"] = baseline_name
         comparisons[name]["treatment"] = treatment_name
     return {
-        "benchmark": "Official snapshot RAG retrieval benchmark",
+        "benchmark": "Snapshot-scoped RAG retrieval benchmark",
         "case_count": len(cases),
         "dense_available": retriever.dense_available,
+        "runtime": {
+            "query_embedding_ms": query_embedding_ms,
+            "query_embedding_batches": math.ceil(len(cases) / EMBED_BATCH_SIZE),
+        },
         "ablation": {
             "variants": ["bm25", "hybrid", "hybrid_rerank"],
             "hybrid_rerank_includes_metadata_bonus": True,
             "bootstrap_iterations": bootstrap_iterations,
             "bootstrap_seed": bootstrap_seed,
+            "retrieval_config": {
+                "fusion_mode": RETRIEVAL_FUSION_MODE,
+                "rrf_k": RETRIEVAL_RRF_K if RETRIEVAL_FUSION_MODE == "rrf" else None,
+                "bm25_top_k": RETRIEVAL_TOP_K_BM25,
+                "dense_top_k": RETRIEVAL_TOP_K_DENSE,
+                "candidate_top_k": RETRIEVAL_FINAL_TOP_K,
+            },
         },
         "methods": method_reports,
         "paired_comparisons": comparisons,
@@ -349,6 +416,7 @@ def attach_corpus_identity(report: dict[str, Any], retriever: HybridRetriever) -
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", default="evaluation/retrieval_benchmark_report.json")
+    parser.add_argument("--docs-path")
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--index-path")
     parser.add_argument("--bootstrap-iterations", type=int, default=DEFAULT_BOOTSTRAP_ITERATIONS)
@@ -358,10 +426,20 @@ def main() -> None:
         raise SystemExit("--k must be positive")
     if args.bootstrap_iterations <= 0:
         raise SystemExit("--bootstrap-iterations must be positive")
-    docs = load_docs()
+    load_started = time.perf_counter()
+    docs = (
+        json.loads(Path(args.docs_path).read_text(encoding="utf-8"))
+        if args.docs_path
+        else load_docs()
+    )
+    docs_load_ms = (time.perf_counter() - load_started) * 1000
+    if not isinstance(docs, list):
+        raise SystemExit("RAG documents must be a JSON list")
     cases = build_cases(docs)
     index_path = Path(args.index_path) if args.index_path else default_benchmark_index_path(docs)
+    retriever_started = time.perf_counter()
     retriever = HybridRetriever(docs, index_path=index_path)
+    retriever_init_ms = (time.perf_counter() - retriever_started) * 1000
     try:
         report = evaluate_cases(
             retriever,
@@ -373,11 +451,33 @@ def main() -> None:
     finally:
         retriever.close()
     attach_corpus_identity(report, retriever)
-    report["case_source"] = "active official snapshot evidence with template-generated silver labels"
+    report["case_source"] = "selected evidence corpus with scope-aware template-generated silver labels"
     report["index_path"] = str(index_path)
+    report["docs_path"] = str(args.docs_path) if args.docs_path else str(Path("data") / "rag_documents.json")
+    report["runtime"] = {
+        **report.get("runtime", {}),
+        "docs_load_ms": docs_load_ms,
+        "retriever_init_ms": retriever_init_ms,
+        "reused_persisted_index": bool(getattr(retriever, "reused_persisted_index", False)),
+    }
     attach_scorecard(report, source="retrieval")
     Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({name: item["metrics"] for name, item in report["methods"].items()}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "runtime": report["runtime"],
+                "methods": {
+                    name: {
+                        "recall_at_k": item["metrics"]["recall_at_k"],
+                        "mrr_at_k": item["metrics"]["mrr_at_k"],
+                        "latency_ms": item["latency_ms"],
+                    }
+                    for name, item in report["methods"].items()
+                },
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

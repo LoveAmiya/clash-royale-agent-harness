@@ -277,13 +277,25 @@ HTML_PAGE = r"""
     textarea { min-height: 96px; resize: vertical; padding: 11px; line-height: 1.5; }
     .composer-actions { display: grid; align-content: start; gap: 8px; }
     .qa-status { min-height: 20px; margin-top: 8px; color: var(--muted); font-size: 12px; }
-    .trace-panel { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
-    .trace-heading { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; font-size: 13px; font-weight: 700; }
-    .trace-summary { color: var(--accent); font-weight: 400; }
-    .trace-list { display: grid; gap: 6px; margin-top: 10px; color: #4d596c; font: 12px/1.5 Consolas, monospace; }
-    .trace-line { padding-left: 8px; border-left: 3px solid #7da9d8; overflow-wrap: anywhere; }
-    .debug-trace { color: var(--muted); font-size: 12px; }
-    .debug-trace pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .execution-transcript { width: 100%; margin-bottom: 10px; border-bottom: 1px solid var(--line); padding-bottom: 9px; }
+    .execution-heading { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; color: #344054; font-size: 12px; font-weight: 700; }
+    .execution-heading::-webkit-details-marker { display: none; }
+    .execution-summary { color: var(--accent); font-weight: 400; }
+    .execution-list { display: grid; gap: 0; margin-top: 9px; color: #4d596c; font-size: 12px; }
+    .execution-step { padding: 8px 0 8px 12px; border-left: 2px solid #7da9d8; border-bottom: 1px solid #edf0f4; overflow-wrap: anywhere; }
+    .execution-step:last-child { border-bottom: 0; }
+    .execution-step.failed { border-left-color: var(--bad); }
+    .execution-step.running { border-left-color: var(--accent); }
+    .execution-step.running .execution-title::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 7px; border: 2px solid #b9c9dc; border-top-color: var(--accent); border-radius: 50%; vertical-align: -1px; animation: execution-spin .8s linear infinite; }
+    @keyframes execution-spin { to { transform: rotate(360deg); } }
+    .execution-title { color: #25344a; font-weight: 700; }
+    .execution-detail { margin-top: 2px; line-height: 1.5; }
+    .execution-operation { margin-top: 6px; padding: 6px 8px; border-radius: 4px; color: #344054; background: #f3f5f8; font: 11px/1.5 Consolas, monospace; white-space: pre-wrap; }
+    .execution-note { margin-top: 5px; line-height: 1.5; }
+    .execution-note strong { color: #475467; }
+    .execution-debug { margin-top: 8px; color: var(--muted); font-size: 11px; }
+    .execution-debug pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .answer-content:empty { display: none; }
     .feedback-actions { display: flex; gap: 6px; margin-top: 5px; }
     .feedback-button { min-height: 30px; padding: 5px 9px; font-size: 11px; }
     .meta-analysis { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
@@ -399,13 +411,6 @@ HTML_PAGE = r"""
           <div class="composer-actions"><button id="sendBtn" class="primary">发送</button><button id="clearBtn" class="secondary" type="button">清空</button></div>
         </div>
         <div id="status" class="qa-status"></div>
-        <section class="trace-panel" aria-live="polite">
-          <details id="executionPanel" open>
-            <summary class="trace-heading"><span>执行记录</span><span id="traceSummary" class="trace-summary">等待请求</span></summary>
-            <div id="traceList" class="trace-list"></div>
-          </details>
-          <details class="debug-trace"><summary>调试详情</summary><pre id="debugTrace"></pre></details>
-        </section>
       </section>
 
       <section id="view-card" class="view" data-page="card" hidden>
@@ -470,6 +475,7 @@ HTML_PAGE = r"""
       snapshot: null,
       datasets: new Map(),
       datasetCatalog: null,
+      operationalStatus: {},
       windowDays: "7",
       dataLevel: "all",
       datasetScope: "7d_all",
@@ -683,6 +689,7 @@ HTML_PAGE = r"""
         : "滚动快照尚未发布，当前仅保留旧版 7 天全量兼容数据";
       applyDataMode();
       renderDatasetOverview();
+      renderVisualizationDashboard(state.snapshot, state.operationalStatus);
     }
 
     async function selectDatasetScope(windowDays, dataLevel) {
@@ -711,6 +718,7 @@ HTML_PAGE = r"""
       ].forEach(([pickerName, elementId]) => renderLoadoutDetails(pickerName, elementId));
       applyDataMode();
       renderDatasetOverview();
+      renderVisualizationDashboard(state.snapshot, state.operationalStatus);
       await Promise.all(refreshes);
     }
 
@@ -1076,11 +1084,25 @@ HTML_PAGE = r"""
       } catch (error) { renderFailure(target, error); }
     }
 
-    function renderVisualizationDashboard(snapshot, extra = {}) {
-      const artifacts = snapshot.artifacts || {}; const rag = snapshot.rag || {}; const runtime = snapshot.runtime || {};
+    function renderVisualizationDashboard(snapshot, extra = state.operationalStatus) {
+      if (!snapshot) return;
+      const dataset = state.datasets.get(state.datasetScope);
+      if (!dataset) return;
+      const catalogRag = state.datasetCatalog?.rag || {};
+      const aligned = catalogRag.fully_aligned === true && dataset.ready === true;
+      const saturatedSources = dataset.rag_saturated_source_types || [];
+      const evidencePolicy = saturatedSources.length ? `有界证据索引 · ${saturatedSources.length} 类已达上限` : "有界证据索引";
+      snapshot = { ...snapshot, snapshot_id: `${state.datasetCatalog?.snapshot_group_id || "none"} · ${state.datasetScope}` };
+      const structuredStatus = dataset.ready ? "ready" : "unavailable";
+      const rag = {
+        status: `${catalogRag.status || "unknown"} · ${catalogRag.retrieval?.fusion_mode || "unknown"}`,
+        fingerprint_aligned: aligned,
+        document_counts: { selected_scope: dataset.rag_document_count ?? 0 }
+      };
+      const runtime = snapshot.runtime || {};
       const renderCard = (id, status, rows) => { const card = document.getElementById(id); const pill = card.querySelector(".status-pill"); const body = card.querySelector(".viz-body"); pill.textContent = status; clear(body); rows.forEach(([label, value]) => body.appendChild(make("div", "", `${label}：${value}`))); };
-      renderCard("dataLineageViz", artifacts.structured_stats?.status === "ready" ? "已对齐" : "未就绪", [["官方快照", snapshot.snapshot_id || "无"], ["审计导出", artifacts.audit_export?.status || "unavailable"], ["结构化索引", artifacts.structured_stats?.status || "unavailable"]]);
-      renderCard("qualityGateViz", rag.fingerprint_aligned ? "通过" : "待对齐", [["RAG 状态", rag.status || "unknown"], ["证据文档", Object.values(rag.document_counts || {}).reduce((sum, value) => sum + Number(value || 0), 0)], ["指纹", rag.fingerprint_aligned ? "一致" : "不一致"]]);
+      renderCard("dataLineageViz", structuredStatus === "ready" ? "已对齐" : "未就绪", [["滚动快照", snapshot.snapshot_id || "无"], ["当前范围", state.datasetScope], ["结构化索引", structuredStatus]]);
+      renderCard("qualityGateViz", rag.fingerprint_aligned ? "通过" : "待对齐", [["RAG 状态", rag.status || "unknown"], ["当前范围索引文档", dataset.rag_document_count ?? "待发布"], ["跨范围索引合计（含重复）", catalogRag.document_count || 0], ["证据策略", evidencePolicy], ["指纹", rag.fingerprint_aligned ? "一致" : "不一致"]]);
       renderCard("opsViz", extra.ready?.status || "可用", [["模型熔断", extra.model?.circuit_state || "unknown"], ["请求", runtime.process_requests || 0], ["失败", runtime.failures || 0]]);
     }
     function renderDatasetOverview(snapshot = state.snapshot) {
@@ -1088,6 +1110,8 @@ HTML_PAGE = r"""
       if (!dataset) return;
       const counts = dataset.structured_counts || {};
       const rag = state.datasetCatalog?.rag || {};
+      const saturatedSources = dataset.rag_saturated_source_types || [];
+      const ragPolicyDetail = saturatedSources.length ? `${saturatedSources.length} 类证据已达索引上限` : "按类型限制索引规模";
       document.getElementById("headerDot").classList.toggle("ready", dataset.ready === true);
       document.getElementById("headerState").textContent = dataset.ready ? "数据可用" : "范围未就绪";
       document.getElementById("headerSnapshot").textContent = `${dataset.snapshot_id || state.datasetScope} · ${formatNumber(dataset.unique_battles)} 场`;
@@ -1097,7 +1121,7 @@ HTML_PAGE = r"""
         ["唯一对局", formatNumber(dataset.unique_battles), state.datasetScope],
         ["结构化对局", formatNumber(counts.included_battles), "滚动事实库去重样本"],
         ["完整配置侧记录", formatNumber(counts.full_loadout_side_records), dataset.complete_loadout_ready ? "塔楼与卡牌形态可用" : "当前范围尚未就绪"],
-        ["采集批次", formatNumber(Number(dataset.weekly_batch_count || 0) + Number(dataset.daily_batch_count || 0)), `周采 ${formatNumber(dataset.weekly_batch_count)} · 日采 ${formatNumber(dataset.daily_batch_count)} · RAG ${formatNumber(rag.document_count)}`]
+        ["采集批次", formatNumber(Number(dataset.weekly_batch_count || 0) + Number(dataset.daily_batch_count || 0)), `周采 ${formatNumber(dataset.weekly_batch_count)} · 日采 ${formatNumber(dataset.daily_batch_count)} · 当前范围 RAG ${dataset.rag_document_count == null ? "待发布" : formatNumber(dataset.rag_document_count)}（有界证据索引，${ragPolicyDetail}） · 跨范围合计 ${formatNumber(rag.document_count)}（含重复）`]
       ].forEach(([label,value,detail]) => { const card = make("div", "metric"); card.append(make("div", "metric-label", label), make("div", "metric-value", value), make("div", "metric-detail", detail)); grid.appendChild(card); });
     }
     async function loadSnapshot() {
@@ -1106,12 +1130,58 @@ HTML_PAGE = r"""
         renderDatasetOverview(snapshot);
         const [ready, model] = await Promise.all([fetch("/ready").then(r => r.json()), fetch("/model/status").then(r => r.json())]);
         fetch("/metrics").catch(() => null); fetch("/feedback/stats").catch(() => null);
-        renderVisualizationDashboard(snapshot, { ready, model });
+        state.operationalStatus = { ready, model };
+        renderVisualizationDashboard(snapshot, state.operationalStatus);
       } catch (_) { document.getElementById("headerState").textContent = "后端不可用"; }
     }
 
-    const chatBox = document.getElementById("chatBox"); const inputBox = document.getElementById("inputBox"); const sendBtn = document.getElementById("sendBtn"); const statusEl = document.getElementById("status"); const traceList = document.getElementById("traceList"); const traceSummary = document.getElementById("traceSummary"); const debugTrace = document.getElementById("debugTrace"); const executionPanel = document.getElementById("executionPanel");
-    function appendMessage(role, text) { const wrapper = make("div", `msg ${role}`); wrapper.append(make("div", "meta", role === "user" ? "你" : "分析助手")); const bubble = make("div", "bubble", text); wrapper.appendChild(bubble); chatBox.appendChild(wrapper); chatBox.scrollTop = chatBox.scrollHeight; return bubble; }
+    const chatBox = document.getElementById("chatBox"); const inputBox = document.getElementById("inputBox"); const sendBtn = document.getElementById("sendBtn"); const statusEl = document.getElementById("status");
+    const TEXT_STREAM_INTERVAL_MS = 12;
+    function createTextStreamer(element, transform = value => value) {
+      let target = ""; let visibleLength = 0; let timer = null; const drainWaiters = [];
+      function resolveDrain() { if (visibleLength < target.length || timer) return; while (drainWaiters.length) drainWaiters.shift()(); }
+      function tick() {
+        timer = null;
+        const pending = target.length - visibleLength;
+        if (pending <= 0) { resolveDrain(); return; }
+        const step = pending > 320 ? 16 : pending > 120 ? 6 : pending > 40 ? 3 : 1;
+        visibleLength = Math.min(target.length, visibleLength + step);
+        element.textContent = transform(target.slice(0, visibleLength));
+        if (visibleLength < target.length) timer = setTimeout(tick, TEXT_STREAM_INTERVAL_MS); else resolveDrain();
+      }
+      function schedule() { if (!timer && visibleLength < target.length) timer = setTimeout(tick, TEXT_STREAM_INTERVAL_MS); }
+      return {
+        append(text) { target += String(text || ""); schedule(); },
+        replace(text) { target = String(text || ""); visibleLength = 0; element.textContent = ""; schedule(); },
+        drain() { if (visibleLength >= target.length && !timer) return Promise.resolve(); return new Promise(resolve => drainWaiters.push(resolve)); },
+        hasText() { return target.length > 0; }
+      };
+    }
+    function appendProgressiveText(parent, className, text) { const element = make("div", className, ""); parent.appendChild(element); createTextStreamer(element).replace(text); return element; }
+    function createExecutionTranscript(container) {
+      const root = make("div", "execution-transcript");
+      root.setAttribute("aria-live", "polite");
+      const panel = document.createElement("details"); panel.open = true;
+      const heading = make("summary", "execution-heading");
+      heading.append(make("span", "", "查看执行与证据"));
+      const summary = make("span", "execution-summary", "正在分析"); heading.appendChild(summary);
+      const list = make("div", "execution-list");
+      const debug = document.createElement("details"); debug.className = "execution-debug";
+      debug.append(make("summary", "", "调试详情")); const pre = document.createElement("pre"); debug.appendChild(pre);
+      panel.append(heading, list, debug); root.appendChild(panel); container.appendChild(root);
+      return { root, panel, summary, list, debug: pre, steps: new Map(), seenEvents: new Set(), collapsed: false };
+    }
+    function appendMessage(role, text) {
+      const wrapper = make("div", `msg ${role}`); wrapper.append(make("div", "meta", role === "user" ? "你" : "分析助手"));
+      const bubble = make("div", "bubble"); const transcript = role === "agent" ? createExecutionTranscript(bubble) : null;
+      const content = make("div", "answer-content", ""); bubble.appendChild(content); wrapper.appendChild(bubble); chatBox.appendChild(wrapper); chatBox.scrollTop = chatBox.scrollHeight;
+      if (role === "user") content.textContent = text;
+      const writer = role === "agent"
+        ? createTextStreamer(content, normalizeVisibleAnswerText)
+        : { append(value) { content.textContent += String(value || ""); }, replace(value) { content.textContent = String(value || ""); }, drain() { return Promise.resolve(); }, hasText() { return content.textContent.length > 0; } };
+      if (role === "agent") writer.append(text);
+      return { wrapper, bubble, content, transcript, writer };
+    }
     function normalizeVisibleAnswerText(text) {
       const sectionNames = { "conclusion": "结论", "data evidence": "数据依据", "data boundaries": "数据边界", "data boundary": "数据边界" };
       const lines = String(text || "").split("\n").map(line => {
@@ -1121,29 +1191,55 @@ HTML_PAGE = r"""
       });
       return lines.join("\n").replace(/^\s*\*\s+/gm, "- ").replaceAll("*", "").replaceAll("__", "");
     }
-    function resetExecution() { clear(traceList); debugTrace.textContent = ""; executionPanel.open = true; }
-    function renderExecution(event) { const line = make("div", "trace-line", `${event.title || event.phase || "处理中"}：${event.detail || ""}${Number.isFinite(event.elapsed_ms) ? ` · ${event.elapsed_ms}ms` : ""}`); line.dataset.stepId = event.step_id || ""; const old = [...traceList.children].find(item => item.dataset.stepId && item.dataset.stepId === line.dataset.stepId); if (old) old.replaceWith(line); else traceList.appendChild(line); }
-    function handleSseEvent(event, bubble, statusTarget = statusEl, recordTrace = true) { if (event.request_id) bubble.dataset.requestId = event.request_id; if (event.object === "progress") statusTarget.textContent = event.label || "正在处理"; if (event.object === "execution" && recordTrace) renderExecution(event); if (event.object === "execution" && !recordTrace) statusTarget.textContent = event.title || "正在分析"; if (event.object === "content" && event.type === "text") { bubble.dataset.rawAnswer = (bubble.dataset.rawAnswer || "") + (event.text || ""); bubble.textContent = normalizeVisibleAnswerText(bubble.dataset.rawAnswer); } if (event.object === "trace" && recordTrace) { traceSummary.textContent = (event.trace_id || "已完成").slice(0, 18); debugTrace.textContent = JSON.stringify(event, null, 2); } if (event.object === "error") throw new Error(event.message || "后端处理失败"); }
+    function formatOperation(event) {
+      if (!event.operation) return "";
+      const pairs = Object.entries(event.parameters || {}).map(([key, value]) => `${key}=${JSON.stringify(value)}`);
+      return `${event.operation}(${pairs.join(", ")})`;
+    }
+    function renderExecution(event, transcript) {
+      if (!transcript || (event.event_id && transcript.seenEvents.has(event.event_id))) return;
+      if (event.event_id) transcript.seenEvents.add(event.event_id);
+      const step = make("div", `execution-step${event.status === "running" ? " running" : ""}${event.status === "failed" ? " failed" : ""}`); step.dataset.stepId = event.step_id || event.event_id || "";
+      appendProgressiveText(step, "execution-title", event.title || event.phase || "处理中");
+      if (event.detail) appendProgressiveText(step, "execution-detail", `${event.detail}${Number.isFinite(event.elapsed_ms) ? ` · ${event.elapsed_ms}ms` : ""}`);
+      const operation = formatOperation(event); if (operation) appendProgressiveText(step, "execution-operation", operation);
+      if (event.rationale) appendProgressiveText(step, "execution-note", `执行依据：${event.rationale}`);
+      (event.evidence || []).forEach(text => appendProgressiveText(step, "execution-note", `证据：${text}`));
+      (event.boundaries || []).forEach(text => appendProgressiveText(step, "execution-note", `边界：${text}`));
+      const previous = transcript.steps.get(step.dataset.stepId); if (previous) previous.replaceWith(step); else transcript.list.appendChild(step); transcript.steps.set(step.dataset.stepId, step);
+      transcript.summary.textContent = event.status === "failed" ? "执行失败" : event.title || "正在分析";
+    }
+    function handleSseEvent(event, answer, statusTarget = statusEl) {
+      if (event.request_id) answer.bubble.dataset.requestId = event.request_id;
+      if (event.object === "progress") statusTarget.textContent = event.label || "正在处理";
+      if (event.object === "execution") renderExecution(event, answer.transcript);
+      if (event.object === "content" && event.type === "text") {
+        answer.writer.append(event.text || "");
+        if (answer.transcript && !answer.transcript.collapsed) { answer.transcript.panel.open = false; answer.transcript.collapsed = true; answer.transcript.summary.textContent = "已生成答案"; }
+      }
+      if (event.object === "trace" && answer.transcript) { answer.transcript.summary.textContent = "执行完成"; answer.transcript.debug.textContent = JSON.stringify(event, null, 2); }
+      if (event.object === "error") { if (answer.transcript) { answer.transcript.panel.open = true; answer.transcript.summary.textContent = "执行失败"; } throw new Error(event.message || "后端处理失败"); }
+    }
     async function sendFeedback(requestId, rating) { await requestJSON("/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: requestId, rating }) }); }
     function addFeedbackControls(bubble) { if (!bubble.dataset.requestId) return; const controls = make("div", "feedback-actions"); [["有帮助", "positive"], ["需改进", "negative"]].forEach(([label,rating]) => { const button = make("button", "feedback-button", label); button.addEventListener("click", async () => { await sendFeedback(bubble.dataset.requestId, rating); controls.querySelectorAll("button").forEach(item => item.disabled = true); }); controls.appendChild(button); }); bubble.parentElement.appendChild(controls); }
-    async function streamAnswer(message, bubble, statusTarget, recordTrace = true, intentHint = null) {
+    async function streamAnswer(message, answer, statusTarget, intentHint = null) {
       const response = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, session_id: state.sessionId, user_id: "web-user-1", intent_hint: intentHint, dataset_scope: state.datasetScope, deck_mode: state.deckMode, entity_mode: state.entityMode }) });
       if (!response.ok || !response.body) throw new Error(await response.text() || "请求失败"); const reader = response.body.getReader(); const decoder = new TextDecoder("utf-8"); let buffer = ""; let complete = false;
-      while (!complete) { const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); let boundary; while ((boundary = buffer.indexOf("\n\n")) >= 0) { const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2); const line = frame.split("\n").find(item => item.startsWith("data: ")); if (!line) continue; const event = JSON.parse(line.slice(6)); handleSseEvent(event, bubble, statusTarget, recordTrace); complete = event.object === "response" && ["completed", "failed"].includes(event.status); } }
-      if (!bubble.textContent) bubble.textContent = "没有返回可显示的回答"; addFeedbackControls(bubble); statusTarget.textContent = "";
+      while (!complete) { const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); let boundary; while ((boundary = buffer.indexOf("\n\n")) >= 0) { const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2); const line = frame.split("\n").find(item => item.startsWith("data: ")); if (!line) continue; const event = JSON.parse(line.slice(6)); handleSseEvent(event, answer, statusTarget); complete = event.object === "response" && ["completed", "failed"].includes(event.status); } }
+      if (!answer.writer.hasText()) answer.writer.append("没有返回可显示的回答"); await answer.writer.drain(); addFeedbackControls(answer.bubble); statusTarget.textContent = ""; await loadSnapshot();
     }
     async function sendMessage() {
-      const message = inputBox.value.trim(); if (!message) return; appendMessage("user", message); inputBox.value = ""; sendBtn.disabled = true; statusEl.textContent = "正在分析"; resetExecution(); const bubble = appendMessage("agent", "");
-      try { await streamAnswer(message, bubble, statusEl, true); }
-      catch (error) { bubble.textContent = `请求失败：${error.message}`; statusEl.textContent = "请求失败"; }
+      const message = inputBox.value.trim(); if (!message) return; appendMessage("user", message); inputBox.value = ""; sendBtn.disabled = true; statusEl.textContent = "正在分析"; const answer = appendMessage("agent", "");
+      try { await streamAnswer(message, answer, statusEl); }
+      catch (error) { answer.content.textContent = `请求失败：${error.message}`; statusEl.textContent = "请求失败"; }
       finally { sendBtn.disabled = false; }
     }
     async function submitMetaAnalysis() {
       const metaAnalyze = document.getElementById("metaAnalyze"); const statusTarget = document.getElementById("metaAnalysisStatus"); const target = document.getElementById("metaAnalysisResult");
       const message = "当前环境以哪些卡组体系为主？请基于当前官方快照的结构化体系统计和 RAG 证据，分析使用率、胜率、样本量与数据边界，不要提供具体打法。";
-      clear(target); const bubble = make("div", "analysis-output", ""); target.appendChild(bubble); metaAnalyze.disabled = true; statusTarget.textContent = "正在检索证据";
-      try { await streamAnswer(message, bubble, statusTarget, false, "meta_analysis_query"); }
-      catch (error) { bubble.textContent = `分析失败：${error.message}`; statusTarget.textContent = "分析失败"; }
+      clear(target); const bubble = make("div", "analysis-output", ""); target.appendChild(bubble); const transcript = createExecutionTranscript(bubble); const content = make("div", "answer-content", ""); bubble.appendChild(content); const writer = createTextStreamer(content, normalizeVisibleAnswerText); const answer = { bubble, content, transcript, writer }; metaAnalyze.disabled = true; statusTarget.textContent = "正在检索证据";
+      try { await streamAnswer(message, answer, statusTarget, "meta_analysis_query"); }
+      catch (error) { content.textContent = `分析失败：${error.message}`; statusTarget.textContent = "分析失败"; }
       finally { metaAnalyze.disabled = false; }
     }
 
@@ -1157,7 +1253,7 @@ HTML_PAGE = r"""
     document.querySelectorAll("[data-window]").forEach(button => button.addEventListener("click", () => selectDatasetScope(button.dataset.window, state.dataLevel)));
     document.querySelectorAll("[data-level]").forEach(button => button.addEventListener("click", () => selectDatasetScope(state.windowDays, button.dataset.level)));
     document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => selectEntityMode(button.dataset.mode)));
-    document.getElementById("clearBtn").addEventListener("click", () => { clear(chatBox); state.sessionId = crypto.randomUUID(); localStorage.setItem("cr_agent_session_id", state.sessionId); resetExecution(); statusEl.textContent = "会话已清空"; });
+    document.getElementById("clearBtn").addEventListener("click", () => { clear(chatBox); state.sessionId = crypto.randomUUID(); localStorage.setItem("cr_agent_session_id", state.sessionId); statusEl.textContent = "会话已清空"; });
     inputBox.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } });
 
     async function initialize() {
