@@ -4,7 +4,7 @@
 这个任务只做一次性状态检查、故障归因、修复和验收，不建立 Codex 定时监听。
 
 ```text
-项目目录是 F:\All projects\agentscope-doc-qa-rescue-codex-crash。
+项目目录是 <repo-root>，即本机克隆后的仓库根目录。
 
 先完整阅读 docs/SNAPSHOT_COLLECTION_HANDOFF.md、
 docs/FULL_LOADOUT_DATA_CONTRACT.md 和

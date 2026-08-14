@@ -3,7 +3,7 @@
 本文是独立采集任务的操作手册。采集由 Windows 计划任务和项目后端脚本运行，不依赖
 Codex 保持开启，也不应使用 Codex 定时轮询。
 
-项目根目录：`F:\All projects\agentscope-doc-qa-rescue-codex-crash`
+项目根目录：`<repo-root>`，即本机克隆后的仓库根目录。
 
 相关契约：
 
@@ -120,7 +120,7 @@ Windows 计划任务每 15 分钟触发一次只是检查监督器是否仍存�
 分别执行只读预检，不启动采集：
 
 ```powershell
-Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+Set-Location '<repo-root>'
 .\scripts\run_daily_ranked_schedule.ps1 -Mode daily_ranked -TokenIndex 0 -DryRun
 .\scripts\run_daily_ranked_schedule.ps1 -Mode weekly_expanded -TokenIndex 1 -DryRun
 ```
@@ -139,7 +139,7 @@ Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
 在管理员 PowerShell 中安装或替换两个计划任务：
 
 ```powershell
-Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+Set-Location '<repo-root>'
 .\scripts\install_parallel_collection_tasks.ps1
 Start-ScheduledTask -TaskName 'ClashRoyale-Daily-Ranked-Every-2h'
 Start-ScheduledTask -TaskName 'ClashRoyale-Expanded-Continuous'
@@ -151,7 +151,7 @@ Start-ScheduledTask -TaskName 'ClashRoyale-Expanded-Continuous'
 出门关机前停止两个计划任务，并停止属于本项目的监督器与采集进程：
 
 ```powershell
-$project = 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
+$project = '<repo-root>'
 Stop-ScheduledTask -TaskName 'ClashRoyale-Daily-Ranked-Every-2h'
 Stop-ScheduledTask -TaskName 'ClashRoyale-Expanded-Continuous'
 $targets = Get-CimInstance Win32_Process | Where-Object {

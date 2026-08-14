@@ -13,6 +13,10 @@ This project treats quality as layered evidence, not one flat test count.
 
 Run: `python -m evaluation.test_inventory --report evaluation/reports/test-inventory-latest.json`
 
+For the current public baseline, platform skip rules, and generated-report policy,
+see [`docs/TESTING.md`](TESTING.md). This file preserves the evaluation strategy
+and the historical layer report context.
+
 Current inventory after adding the layer report:
 
 | Layer | Purpose | Tests |
@@ -23,7 +27,7 @@ Current inventory after adding the layer report:
 | L3 resilience/security/ops | Fault injection, model/provider failures, Supercell boundaries, Redis quota, deployment and snapshot publication | 148 |
 | L4 live external smoke | Credentialed live model/Supercell smoke checks, excluded from public CI | 0 in public unittest inventory |
 
-The public inventory discovers `766` tests. The live smoke remains a separate command because it intentionally touches configured external systems.
+The 2026-08-02 public inventory discovered `766` tests. The live smoke remains a separate command because it intentionally touches configured external systems. Later unit/integration discovery counts are tracked in [`docs/TESTING.md`](TESTING.md).
 
 ## Quantitative Gates
 
@@ -35,4 +39,4 @@ The public inventory discovers `766` tests. The live smoke remains a separate co
 
 ## Resume-Safe Wording
 
-Built a layered AI evaluation gate: 766 discovered tests across unit/contract, API/SSE, AI/RAG regression, and resilience/security layers; 344/344 enabled golden cases and 28/28 fault-injection scenarios passed. Retrieval ablation on 80 RAG cases improved MRR@5 from 0.756 with BM25 to 0.988 with Hybrid + rerank.
+Built a layered AI evaluation gate: the 2026-08-02 inventory discovered 766 tests across unit/contract, API/SSE, AI/RAG regression, and resilience/security layers; 344/344 enabled golden cases and 28/28 fault-injection scenarios passed. Retrieval ablation on 80 RAG cases improved MRR@5 from 0.756 with BM25 to 0.988 with Hybrid + rerank. Current discovery counts are maintained in `docs/TESTING.md`.

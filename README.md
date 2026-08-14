@@ -66,14 +66,12 @@ single-snapshot compatibility path.
 - Split collector/API deployment with Caddy, Prometheus, Grafana, Loki, and Promtail
 - Browser operations dashboard for snapshot lineage, RAG quality gates, model circuit state, quota, feedback, and Prometheus metrics
 
-Current and historical verification results:
+Current verification summary:
 
-- `845` unit/integration tests were discovered in the 2026-08-13 local regression run.
-- `344/344` active deterministic evaluation cases passed; `4` optional RAG-route cases were skipped by design.
-- `25/25` snapshot citation/grounding probes passed, with an invalid-citation rate of `0`.
-- `28/28` deterministic fault-injection scenarios passed.
-- `80` retrieval-ablation cases measured BM25 vs Hybrid vs Hybrid + rerank; MRR@5 improved from `0.7556` to `0.9875`.
-- A local live-model RAG smoke test passed through `llm_parser` -> `EvidenceSynthesisSkill` -> `rag_synthesis`; provider generation and numeric/citation grounding both passed.
+- Public deterministic gates run without private data, real model calls, or Supercell calls.
+- The latest recorded unit/integration discovery found `845` tests on 2026-08-13.
+- Deterministic evaluation, grounding probes, fault injection, retrieval ablation, and live-smoke boundaries are documented in [`docs/TESTING.md`](docs/TESTING.md).
+- Repository health and the planned package/module cleanup are tracked in [`docs/REPO_HEALTH_PLAN.md`](docs/REPO_HEALTH_PLAN.md).
 
 ### Repository Layout
 
@@ -252,6 +250,9 @@ Windows PowerShell are skipped when `SystemRoot`/Windows PowerShell is absent;
 they run normally on Windows. A platform-specific test must never read
 `SystemRoot` at module import time, because that prevents test discovery on
 Linux before `skipUnless` can apply.
+
+Detailed test layers, current counts, historical counts, generated-report rules,
+and live-smoke boundaries are maintained in [`docs/TESTING.md`](docs/TESTING.md).
 
 ### Private runtime data
 
@@ -659,7 +660,7 @@ Clash Royale Agent Harness 是一个基于 FastAPI 的《皇室战争》官方�
 - 浏览器系统面板，展示快照血缘、RAG 质量门槛、模型熔断、配额、反馈和 Prometheus 指标
 - 基于句子证据校验的 SSE 回答：每条回答自带执行记录，模型等待状态稳定显示，已校验答案渐进输出
 
-2026-08-13 本机回归发现 `845` 项单元/集成测试并全部通过。以下质量指标保留自 2026-08-02 基线：确定性评测 `344/344` 个启用用例通过，另有 `4` 项可选 RAG 用例按设计跳过；`25/25` 快照引用/grounding 探针与 `28/28` 故障注入场景通过。80 个检索消融用例中，MRR@5 从 BM25 的 `0.7556` 提升到 Hybrid + rerank 的 `0.9875`；本地真实模型 RAG 冒烟通过 LLM 解析、RAG 综合和数值/引用 grounding 校验。
+当前公开测试门禁不读取私有数据、真实模型或 Supercell。2026-08-13 本机回归发现 `845` 项单元/集成测试；确定性评测、grounding 探针、故障注入、检索消融和 live smoke 边界统一记录在 [`docs/TESTING.md`](docs/TESTING.md)。仓库整理与后续模块拆分计划记录在 [`docs/REPO_HEALTH_PLAN.md`](docs/REPO_HEALTH_PLAN.md)。
 
 ### 项目结构
 
@@ -844,7 +845,7 @@ MODEL_FIRST_TOKEN_TIMEOUT_SECONDS=75
 MODEL_PROGRESS_INTERVAL_SECONDS=2
 ```
 
-本地运行前，请在 Windows 用户级或当前 PowerShell 环境设置 `OPENAI_API_KEY`。项目固定使用 `https://crs.ruinique.com`、Responses API、`gpt-5.5` 和 `medium`；不要把真实 Key 或个人目录写进源码、文档或 Git。GitHub Actions 的公开 CI 运行于 Ubuntu：只读取 PowerShell 脚本文本的测试仍会执行，真正调用 Windows PowerShell 的三个监督器计时测试在缺少 `SystemRoot` 时按平台跳过，并在 Windows 本机完整执行。Windows 专用测试不得在模块导入阶段强制读取 `SystemRoot`，否则 Linux 会在应用跳过条件前终止测试发现。
+本地运行前，请在 Windows 用户级或当前 PowerShell 环境设置 `OPENAI_API_KEY`。默认 provider 配置由 `.env.example` 和 `run_backend.ps1` 说明；不要把真实 Key 或个人目录写进源码、文档或 Git。GitHub Actions 的公开 CI 运行于 Ubuntu：只读取 PowerShell 脚本文本的测试仍会执行，真正调用 Windows PowerShell 的三个监督器计时测试在缺少 `SystemRoot` 时按平台跳过，并在 Windows 本机完整执行。Windows 专用测试不得在模块导入阶段强制读取 `SystemRoot`，否则 Linux 会在应用跳过条件前终止测试发现。详细口径见 [`docs/TESTING.md`](docs/TESTING.md)。
 
 直接结构化查询只依赖当前官方快照的本地 SQLite 索引。自由问答中的结构化问题通常调用一次模型解析，随后由本地查询生成答案；多意图问题按子问题分别路由，排行、精确八卡、对阵、共现和常见搭配仍走结构化直答，只有开放式环境、体系或趋势分析再调用 RAG 检索和模型证据综合。综合后的数字和引用由本地质量门逐句校验，模型必须原样引用证据精度。未受支持的数值句会被省略，其余已验证内容继续返回并标注边界，不会为修复再次调用模型；最终校验失败时返回带验证来源的安全拒答，而不是通用“生成回答失败”。战队赛赛程与战队备战请求会返回已移除边界，不进入模型。Ollama embedding 不可用时，检索会在短超时后自动降级为 BM25。浏览器会直接消费后端 SSE，显示处理中状态和最终执行 Trace。
 

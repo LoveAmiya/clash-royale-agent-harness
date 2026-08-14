@@ -46,6 +46,9 @@ evaluation/live_*.json
 evaluation/live_*.txt
 evaluation/manual_*.txt
 evaluation/retrieval_benchmark_report.json
+evaluation/*report*.json
+evaluation/*.stdout.*
+evaluation/*.stderr.*
 SHARE_PATH_OF_LEGEND_RAW_*/
 SHARE_PATH_OF_LEGEND_RAW_*.zip
 

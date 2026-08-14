@@ -14,10 +14,12 @@
 3. **独立采集**：调用 Supercell API 生成或更新私有事实库，只允许采集任务读取
    `SUPERCELL_API_TOKENS`（推荐双 Key）或兼容变量 `SUPERCELL_API_TOKEN`。API 角色和前端都不负责采集。
 
+下面所有命令默认在仓库根目录执行。若当前 shell 不在仓库根，先运行
+`Set-Location '<repo-root>'`，其中 `<repo-root>` 是你的本机仓库路径。
+
 首次安装：
 
 ```powershell
-Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -76,7 +78,6 @@ MODEL_PROGRESS_INTERVAL_SECONDS=2
 推荐使用 API 角色，它只读取已经发布的快照，不联系 Supercell：
 
 ```powershell
-Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
 powershell -ExecutionPolicy Bypass -File .\run_api.ps1
 ```
 
@@ -105,7 +106,6 @@ Invoke-RestMethod http://127.0.0.1:8091/api/datasets
 另开一个 PowerShell：
 
 ```powershell
-Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
 powershell -ExecutionPolicy Bypass -File .\run_web.ps1
 ```
 
@@ -224,7 +224,7 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 该命令与 GitHub Actions 使用同一公开门禁：单元/集成测试、348 条匿名契约评测和 28 条
 合成故障注入。它不读取 `data/corpus/corpus.sqlite`、活动快照组、真实 Key 或网络 provider。
 
-当前基线（2026-08-13）：本机发现 `845` 项单元/集成测试并全部通过。历史质量指标（2026-08-02）：确定性评测 `344/344` 个启用用例通过，另有 `4` 个可选 RAG 路由用例跳过；`28/28` 个故障注入场景通过。2026-08-04 针对结构化/RAG 分流、完整配置实体、精确八卡、共现和多意图仲裁的聚焦回归套件 `106/106` 通过。检索消融 80 个用例中，MRR@5 从 BM25 的 `0.7556` 提升到 Hybrid + rerank 的 `0.9875`。测试数量随功能增长，应以当前 `python -m unittest discover -s tests` 和 `evaluation.test_inventory` 输出为准。完整方法见 `docs/QUALITY_EVALUATION_STRATEGY.md`。
+当前基线（2026-08-13）：本机发现 `845` 项单元/集成测试。确定性评测、历史 `766` inventory、故障注入、检索消融和 live smoke 边界统一记录在 `docs/TESTING.md`。完整质量方法见 `docs/QUALITY_EVALUATION_STRATEGY.md`。
 
 GitHub Actions 使用 Ubuntu。PowerShell 脚本的静态合同测试照常执行；真正调用 Windows
 PowerShell 的三个核心监督器计时测试仅在 Windows 运行，在 Linux 缺少 `SystemRoot` 时按平台
@@ -245,7 +245,6 @@ PowerShell 的三个核心监督器计时测试仅在 Windows 运行，在 Linux
 正常业务启动不触发采集。当前正式方式是两个互相隔离的 Windows 计划任务：
 
 ```powershell
-Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
 .\scripts\install_parallel_collection_tasks.ps1
 Start-ScheduledTask -TaskName 'ClashRoyale-Daily-Ranked-Every-2h'
 Start-ScheduledTask -TaskName 'ClashRoyale-Expanded-Continuous'
@@ -275,8 +274,6 @@ Git 和 Docker 镜像只发布源码、测试、文档、配置模板，以及�
 列表，不能为了省事改用 `git add .`：
 
 ```powershell
-Set-Location 'F:\All projects\agentscope-doc-qa-rescue-codex-crash'
-
 $publicFiles = @(
   'structured_query.py'
   'answer_builder.py'
