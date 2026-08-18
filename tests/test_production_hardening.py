@@ -19,6 +19,16 @@ from runtime_hardening import (
     redact_for_client,
     resolve_client_id,
 )
+from clashroyale_agent.ops.runtime_hardening import (
+    ProcessQuota as PackagedProcessQuota,
+    RedisProcessQuota as PackagedRedisProcessQuota,
+    RequestBodyLimitMiddleware as PackagedRequestBodyLimitMiddleware,
+    RuntimeMetrics as PackagedRuntimeMetrics,
+    authorize_admin as packaged_authorize_admin,
+    normalize_request_id as packaged_normalize_request_id,
+    redact_for_client as packaged_redact_for_client,
+    resolve_client_id as packaged_resolve_client_id,
+)
 from query_answering import AnswerResult
 import runtime_multi
 import web_app
@@ -53,6 +63,16 @@ class _FakeRedisScriptClient:
 
 
 class ProductionHardeningUnitTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_hardening_wrapper_reexports_packaged_implementation(self):
+        self.assertIs(ProcessQuota, PackagedProcessQuota)
+        self.assertIs(RequestBodyLimitMiddleware, PackagedRequestBodyLimitMiddleware)
+        self.assertIs(RedisProcessQuota, PackagedRedisProcessQuota)
+        self.assertIs(RuntimeMetrics, PackagedRuntimeMetrics)
+        self.assertIs(authorize_admin, packaged_authorize_admin)
+        self.assertIs(normalize_request_id, packaged_normalize_request_id)
+        self.assertIs(redact_for_client, packaged_redact_for_client)
+        self.assertIs(resolve_client_id, packaged_resolve_client_id)
+
     async def test_request_body_limit_counts_streamed_bytes_without_content_length(self):
         app_called = False
 

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from feedback_store import FeedbackStore, RecentAnswerCache
 from logging_config import SecretRedactionFilter
+from clashroyale_agent.ops.logging_config import SecretRedactionFilter as PackagedSecretRedactionFilter
 import runtime_multi
 
 
@@ -53,6 +54,9 @@ class QualityOperationsContractTests(unittest.TestCase):
         )
         self.assertTrue(redactor.filter(record))
         self.assertEqual(record.getMessage(), "failed [REDACTED] [REDACTED]")
+
+    def test_logging_config_wrapper_reexports_packaged_implementation(self):
+        self.assertIs(SecretRedactionFilter, PackagedSecretRedactionFilter)
 
     def test_model_status_and_metrics_do_not_expose_provider_url(self):
         status = self.client.get("/model/status")

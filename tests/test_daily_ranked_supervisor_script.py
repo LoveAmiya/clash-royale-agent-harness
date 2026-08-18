@@ -74,6 +74,15 @@ class DailyRankedSupervisorScriptTests(unittest.TestCase):
         self.assertNotIn("weekly_expanded", source)
         self.assertNotIn("-TokenIndex 1", source)
 
+    def test_supervisor_starts_child_runner_hidden(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("Start-Process -FilePath $powershell", source)
+        self.assertIn("-WindowStyle Hidden", source)
+        self.assertIn("-NoProfile -NonInteractive -WindowStyle Hidden", source)
+        self.assertIn("-PassThru", source)
+        self.assertNotIn("& $powershell -NoProfile", source)
+
 
 if __name__ == "__main__":
     unittest.main()

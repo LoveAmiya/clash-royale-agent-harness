@@ -27,6 +27,11 @@ _PAST_PERIOD_RE = re.compile(
     r"(?:\u8fc7\u53bb|\u8fd1|\u6700\u8fd1)(?:\u4e00|\u4e8c|\u4e24|\u4e09|\u56db|\u4e94|\u516d|\u4e03|\u516b|\u4e5d|\u5341|\u51e0|\d+)\s*(?:\u5929|\u5468|\u4e2a?\u6708|\u8d5b\u5b63|\u7248\u672c)"
 )
 _TREND_RE = re.compile(r"(?:\u8d8b\u52bf|\u8d70\u52bf|\u53d8\u5316|\u4e0a\u6da8|\u4e0b\u964d|\u73af\u6bd4|\u540c\u6bd4|\u66f2\u7ebf)")
+_GUARANTEED_OUTCOME_RE = re.compile(
+    r"(?:\u5fc5\u80dc|\u7a33\u8d62|\u5305\u8d62|\u767e\u5206\u767e\u80dc|"
+    r"\u4fdd\u8bc1.{0,8}(?:\u80dc\u7387|\u83b7\u80dc|\u8d62)|"
+    r"(?:8\d|9\d|100)%(?:\u80dc\u7387)?(?:\u7684)?(?:\u5361\u7ec4|\u5957\u724c))"
+)
 
 
 def detect_unsupported_analysis_request(user_text: str) -> dict | None:
@@ -34,6 +39,12 @@ def detect_unsupported_analysis_request(user_text: str) -> dict | None:
     text = re.sub(r"\s+", "", str(user_text or "")).lower()
     if not text:
         return None
+
+    if _GUARANTEED_OUTCOME_RE.search(text):
+        return {
+            "code": "guaranteed_outcome",
+            "exact_probability_requested": True,
+        }
 
     exact_probability = bool(_EXACT_PROBABILITY_RE.search(text))
     if _FORECAST_RE.search(text) or (
@@ -57,6 +68,12 @@ def detect_unsupported_analysis_request(user_text: str) -> dict | None:
 
 def build_analysis_boundary_answer(boundary: dict) -> str:
     code = boundary.get("code")
+    if code == "guaranteed_outcome":
+        return (
+            "不能提供或承诺 90% 胜率、必胜或稳赢卡组。当前系统展示的是已发生对局在所选数据范围内的观察胜率，"
+            "它不等于你下一场或未来对局的获胜概率。用一套样本胜率约 51% 的热门卡组来满足 90% 的要求会造成误导。\n\n"
+            "可以改问：当前数据范围内样本胜率最高的卡组是什么？回答会同时给出观察胜率、使用率和样本量，并明确它不保证未来表现。"
+        )
     if code == "future_forecast":
         probability_note = (
             "，也不能给出没有预测模型与校准记录支撑的精确概率"

@@ -5,6 +5,7 @@ from support import install_test_stubs, sample_cards
 
 install_test_stubs()
 
+import query_parser
 from query_parser import (
     LOCAL_PARSE_CONFIDENCE_HIGH,
     LOCAL_PARSE_CONFIDENCE_LOW,
@@ -13,6 +14,14 @@ from query_parser import (
     normalize_parsed_query,
 )
 from runtime_multi import parse_user_query
+from clashroyale_agent.qa.parser_orchestration import (
+    ParserOrchestrationDependencies,
+    parse_user_query_with_model,
+)
+from clashroyale_agent.qa.parser_metadata import (
+    LocalParseMetadataDependencies,
+    infer_local_parse_metadata as infer_packaged_local_parse_metadata,
+)
 
 
 class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
@@ -33,6 +42,31 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["intent"], "reject")
         self.assertEqual(parsed["parse_source"], "local_reject")
         self.assertEqual(parsed["parse_confidence"], LOCAL_PARSE_CONFIDENCE_LOW)
+
+    def test_packaged_local_metadata_inference_matches_root_contract(self):
+        dependencies = LocalParseMetadataDependencies(
+            is_meta_analysis_query=query_parser.is_meta_analysis_query,
+            is_card_cooccurrence_query=query_parser.is_card_cooccurrence_query,
+        )
+        cases = [
+            (
+                {"intent": "schedule_query", "round": 5, "ask_players": True},
+                "我们第五轮打谁",
+            ),
+            (
+                {"intent": "card_query", "card_name": "Fireball", "metric": "win_rate"},
+                "火球的胜率是多少",
+            ),
+            ({"intent": "reject"}, "今天天气怎么样"),
+        ]
+        for parsed, question in cases:
+            with self.subTest(question=question):
+                self.assertEqual(
+                    infer_packaged_local_parse_metadata(
+                        parsed, question, dependencies
+                    ),
+                    query_parser.infer_local_parse_metadata(parsed, question),
+                )
 
     def test_normalize_parsed_query_preserves_parse_metadata(self):
         normalized = normalize_parsed_query(
@@ -80,6 +114,40 @@ class ParserConfidenceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(normalized["card_name"], "Electro Giant")
         self.assertEqual(normalized["top_n"], 5)
+
+    async def test_packaged_model_orchestrator_keeps_high_confidence_timeout_fallback(self):
+        local_parsed = {
+            "intent": "card_query",
+            "parse_source": "local_rule",
+            "parse_confidence": LOCAL_PARSE_CONFIDENCE_HIGH,
+            "parse_reason": "local card match",
+        }
+
+        async def raise_timeout(**_kwargs):
+            raise TimeoutError()
+
+        dependencies = ParserOrchestrationDependencies(
+            fallback_parse_multi_intent=lambda *_args: dict(local_parsed),
+            extract_json_block=lambda _text: None,
+            normalize_multi_intent_query=lambda parsed, *_args: parsed,
+            merge_parse_metadata=lambda parsed, metadata: {**parsed, **metadata},
+            build_parse_metadata=lambda **metadata: metadata,
+            subquery_semantic_key=lambda _parsed: (),
+            generate_model_text=raise_timeout,
+            parser_system_prompt="test prompt",
+            parser_reasoning_effort="low",
+            parser_timeout_seconds=0.1,
+            high_confidence=LOCAL_PARSE_CONFIDENCE_HIGH,
+            medium_confidence=LOCAL_PARSE_CONFIDENCE_MEDIUM,
+            low_confidence=LOCAL_PARSE_CONFIDENCE_LOW,
+        )
+
+        parsed = await parse_user_query_with_model("card usage", self.card_data, "test-key", dependencies)
+
+        self.assertEqual(parsed["intent"], "card_query")
+        self.assertEqual(parsed["parse_source"], "validated_fallback")
+        self.assertEqual(parsed["model_parser_status"], "timeout")
+        self.assertTrue(parsed["model_parser_attempted"])
 
     async def test_high_confidence_local_parse_is_validated_fallback_when_model_call_fails(self):
         with patch("runtime_multi.generate_model_text") as build_parser_agent:

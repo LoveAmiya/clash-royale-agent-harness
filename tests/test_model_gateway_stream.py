@@ -3,6 +3,8 @@ import types
 import unittest
 from unittest.mock import patch
 
+import model_gateway
+from clashroyale_agent.ops import model_gateway as packaged_model_gateway
 from model_gateway import generate_model_text_stream, replace_model_provider_guard_for_tests
 from model_resilience import ModelProviderGuard, ModelStreamingUnavailableError
 
@@ -22,6 +24,14 @@ class _AsyncEvents:
 
 
 class ModelGatewayStreamTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_gateway_wrapper_aliases_packaged_module(self):
+        self.assertIs(model_gateway, packaged_model_gateway)
+        self.assertIs(generate_model_text_stream, packaged_model_gateway.generate_model_text_stream)
+        self.assertIs(
+            replace_model_provider_guard_for_tests,
+            packaged_model_gateway.replace_model_provider_guard_for_tests,
+        )
+
     async def test_responses_stream_yields_only_public_text_deltas(self):
         captured = {}
         client_options = {}

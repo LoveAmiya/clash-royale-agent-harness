@@ -6,12 +6,14 @@ from support import install_test_stubs
 
 install_test_stubs()
 
+import query_parser
 from query_parser import (
     build_card_aliases,
     fallback_parse_query,
     normalize_card_alias,
     resolve_card_name,
 )
+from clashroyale_agent.qa.card_aliases import CardAliasResolver, normalize_card_alias as packaged_normalize_card_alias
 
 
 CATALOG = json.loads(
@@ -24,6 +26,10 @@ CARDS = [
 
 
 class CardAliasCoverageTests(unittest.TestCase):
+    def test_root_normalization_export_uses_packaged_alias_helper(self):
+        self.assertIs(normalize_card_alias, packaged_normalize_card_alias)
+        self.assertIsInstance(query_parser._CARD_ALIAS_RESOLVER, CardAliasResolver)
+
     def test_every_reviewed_card_resolves_from_its_standard_english_name(self):
         for card in CARDS:
             canonical = card["card_name"]

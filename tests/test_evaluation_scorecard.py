@@ -82,6 +82,28 @@ class EvaluationScorecardTests(unittest.TestCase):
         self.assertNotIn("question", str(scorecard).lower())
         self.assertEqual(scorecard["metric_coverage"]["boundary_violation_rate"], 2)
 
+    def test_normalizes_qa_performance_without_retaining_question_text(self):
+        report = {
+            "benchmark": "QA response performance benchmark",
+            "results": [
+                {
+                    "question": "private question",
+                    "first_token_latency_ms": 120,
+                    "total_latency_ms": 260,
+                    "timed_out": False,
+                    "fallback_used": True,
+                }
+            ],
+        }
+
+        scorecard = build_unified_scorecard([report])
+
+        self.assertEqual(scorecard["first_token_latency_ms"], 120.0)
+        self.assertEqual(scorecard["total_latency_ms"], 260.0)
+        self.assertEqual(scorecard["timeout_rate"], 0.0)
+        self.assertEqual(scorecard["fallback_rate"], 1.0)
+        self.assertNotIn("question", str(scorecard).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

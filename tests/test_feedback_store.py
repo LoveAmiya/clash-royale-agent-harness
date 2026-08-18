@@ -3,9 +3,17 @@ import unittest
 from pathlib import Path
 
 from feedback_store import FeedbackStore, RecentAnswerCache
+from clashroyale_agent.ops.feedback_store import (
+    FeedbackStore as PackagedFeedbackStore,
+    RecentAnswerCache as PackagedRecentAnswerCache,
+)
 
 
 class FeedbackStoreTests(unittest.TestCase):
+    def test_feedback_store_wrapper_reexports_packaged_implementation(self):
+        self.assertIs(FeedbackStore, PackagedFeedbackStore)
+        self.assertIs(RecentAnswerCache, PackagedRecentAnswerCache)
+
     def test_feedback_resolves_server_owned_answer_and_persists(self):
         cache = RecentAnswerCache(max_items=2, ttl_seconds=60)
         cache.put(

@@ -299,7 +299,7 @@ class QueryLogicTests(unittest.TestCase):
         self.assertEqual(app_config.SUPERCELL_MAX_TARGET_BATTLES, 200000)
         self.assertEqual(app_config.SUPERCELL_POL_SEED_PLAYERS, 1000)
         self.assertEqual(app_config.SUPERCELL_LEADERBOARD_PLAYERS, 12000)
-        self.assertEqual(app_config.SUPERCELL_FETCH_CONCURRENCY, 1)
+        self.assertEqual(app_config.SUPERCELL_FETCH_CONCURRENCY, 2)
         self.assertEqual(app_config.OPENAI_MODEL, "gpt-5.5")
         self.assertEqual(app_config.OPENAI_REVIEW_MODEL, "gpt-5.5")
         self.assertEqual(app_config.OPENAI_BASE_URL, "https://crs.ruinique.com")

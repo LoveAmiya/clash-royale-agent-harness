@@ -33,6 +33,8 @@ METRIC_FIELDS = {
     "boundary_violation_rate": ("boundary_violations",),
     "first_token_latency_ms": ("first_token_latency_ms",),
     "total_latency_ms": ("total_latency_ms",),
+    "timeout_rate": ("timed_out",),
+    "fallback_rate": ("fallback_used",),
     "token_count": ("token_count",),
     "estimated_cost": ("estimated_cost",),
 }
@@ -119,6 +121,14 @@ def normalize_report(report: dict[str, Any], *, source: str = "report") -> list[
         if not isinstance(item, dict) or item.get("skipped"):
             continue
         row = {"source": source}
+        for field in (
+            "first_token_latency_ms",
+            "total_latency_ms",
+            "timed_out",
+            "fallback_used",
+        ):
+            if field in item and item.get(field) is not None:
+                row[field] = item[field]
         if item.get("expected_intent") == "reject":
             row["refusal_correct"] = bool(item.get("success"))
         errors = item.get("errors") or {}

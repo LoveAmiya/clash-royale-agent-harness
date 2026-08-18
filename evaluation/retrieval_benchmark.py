@@ -65,6 +65,11 @@ def summarize_latency(values: list[float]) -> dict[str, float | int]:
     }
 
 
+def summarize_candidate_counts(values: list[int]) -> dict[str, float | int]:
+    """Summarize candidates returned per query without changing result rows."""
+    return summarize_latency([float(value) for value in values])
+
+
 def bootstrap_mean_ci(
     values: list[float],
     *,
@@ -315,6 +320,7 @@ def evaluate_cases(
     hybrid_rows = []
     rerank_rows = []
     method_latencies = {"bm25": [], "hybrid": [], "hybrid_rerank": []}
+    method_candidate_counts = {"bm25": [], "hybrid": [], "hybrid_rerank": []}
     for case, query_vector in zip(cases, query_vectors, strict=True):
         bm25_started = time.perf_counter()
         bm25 = retriever.bm25_search(
@@ -343,6 +349,9 @@ def evaluate_cases(
         reranked = rerank_results(case["query"], case["parsed"], hybrid, top_n=8)
         rerank_latency = (time.perf_counter() - rerank_started) * 1000
         method_latencies["hybrid_rerank"].append(hybrid_latency + rerank_latency)
+        method_candidate_counts["bm25"].append(len(bm25))
+        method_candidate_counts["hybrid"].append(len(hybrid))
+        method_candidate_counts["hybrid_rerank"].append(len(reranked))
         base = {"case_id": case["case_id"], "relevant_doc_id": case["relevant_doc_id"]}
         bm25_rows.append({**base, "retrieved_doc_ids": [item["doc"]["doc_id"] for item in bm25[:k]]})
         hybrid_rows.append({**base, "retrieved_doc_ids": [item["doc"]["doc_id"] for item in hybrid[:k]]})
@@ -352,20 +361,25 @@ def evaluate_cases(
         "hybrid": hybrid_rows,
         "hybrid_rerank": rerank_rows,
     }
-    method_reports = {
-        name: {
+    method_reports = {}
+    for name, rows in method_rows.items():
+        latency_ms = summarize_latency(method_latencies[name])
+        metrics = score_ranking(
+            rows,
+            k,
+            bootstrap_iterations=bootstrap_iterations,
+            bootstrap_seed=bootstrap_seed,
+        )
+        method_reports[name] = {
             "variant": name,
-            "latency_ms": summarize_latency(method_latencies[name]),
-            "metrics": score_ranking(
-                rows,
-                k,
-                bootstrap_iterations=bootstrap_iterations,
-                bootstrap_seed=bootstrap_seed,
-            ),
+            # Keep legacy fields while exposing common benchmark field names.
+            "latency_ms": latency_ms,
+            "retrieval_latency_ms": latency_ms,
+            "candidate_count": summarize_candidate_counts(method_candidate_counts[name]),
+            "hit_rate_at_k": metrics["recall_at_k"],
+            "metrics": metrics,
             "results": rows,
         }
-        for name, rows in method_rows.items()
-    }
     comparisons = {}
     for name, baseline_name, treatment_name in (
         ("hybrid_vs_bm25", "bm25", "hybrid"),

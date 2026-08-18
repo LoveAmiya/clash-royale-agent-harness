@@ -7,9 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import app_config  # noqa: F401 - initializes the src package path for root runs.
+from clashroyale_agent.collection import rolling_collector
 from rolling_corpus import CorpusError
 from scripts.collect_rolling_corpus import (
     CollectionStatusReporter,
+    _batch_baseline,
+    _bounded_fetch_concurrency,
     _collection_status_payload,
     _parse_api_tokens,
     _publish_snapshot_if_accepted,
@@ -18,6 +22,32 @@ from scripts.collect_rolling_corpus import (
     _validation_policy,
     retry_failed_publication,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class RollingCollectionEntrypointCompatibilityTests(unittest.TestCase):
+    def test_legacy_collector_script_is_only_a_packaged_entrypoint(self):
+        source = (ROOT / "scripts" / "collect_rolling_corpus.py").read_text(encoding="utf-8")
+
+        self.assertIn("clashroyale_agent.collection.rolling_collector", source)
+        self.assertIn("sys.modules[__name__] = _module", source)
+        self.assertIn("sys.exit(_module.main())", source)
+        self.assertNotIn("fetch_snapshot(", source)
+        self.assertNotIn("_MERGE_LOCK_WAIT_SECONDS", source)
+
+    def test_windows_entrypoints_keep_the_legacy_collector_script_contract(self):
+        root_runner = (ROOT / "run_rolling_collection.ps1").read_text(encoding="utf-8")
+        schedule_runner = (ROOT / "scripts" / "run_daily_ranked_schedule.ps1").read_text(encoding="utf-8")
+        supervisor = (ROOT / "scripts" / "run_daily_ranked_supervisor.ps1").read_text(encoding="utf-8")
+        installer = (ROOT / "scripts" / "install_parallel_collection_tasks.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('scripts\\collect_rolling_corpus.py', root_runner)
+        self.assertIn('collect_rolling_corpus.py', schedule_runner)
+        self.assertIn('run_daily_ranked_schedule.ps1', supervisor)
+        self.assertIn('run_daily_ranked_supervisor.ps1', installer)
+        self.assertIn('-Mode weekly_expanded -TokenIndex 1', installer)
 
 
 class RollingCollectionValidationPolicyTests(unittest.TestCase):
@@ -45,6 +75,26 @@ class RollingCollectionValidationPolicyTests(unittest.TestCase):
         self.assertEqual(policy.ranked_player_target, 1000)
         self.assertEqual(policy.required_top_rank, 100)
         self.assertEqual(policy.weekly_target_battles, 200_000)
+
+
+class RollingCollectionBaselineTests(unittest.TestCase):
+    def test_batch_baseline_uses_existing_duration_dedupe_and_staging_metrics(self):
+        baseline = _batch_baseline(
+            snapshot={
+                "usable_battles": 120,
+                "collection_metrics": {"raw_battle_records": 180, "duplicates_skipped": 40},
+            },
+            imported={"facts_inserted": 95, "observations_imported": 120},
+            performance={"total_seconds": 42.5},
+            staging={"workspace_bytes": 2048, "workspace_limit_bytes": 4096},
+        )
+
+        self.assertEqual(baseline["batch_duration_seconds"], 42.5)
+        self.assertEqual(baseline["dedupe"]["pre_dedupe_records"], 180)
+        self.assertEqual(baseline["dedupe"]["post_dedupe_battles"], 120)
+        self.assertEqual(baseline["dedupe"]["duplicates_skipped"], 40)
+        self.assertEqual(baseline["dedupe"]["facts_inserted"], 95)
+        self.assertEqual(baseline["staging_size_bytes"], 2048)
 
 
 class RollingCollectionTokenTests(unittest.TestCase):
@@ -76,6 +126,11 @@ class RollingCollectionTokenTests(unittest.TestCase):
 
 
 class RollingCollectionLaneStageTests(unittest.TestCase):
+    def test_fetch_concurrency_is_bounded_for_memory_and_rps_safety(self):
+        self.assertEqual(_bounded_fetch_concurrency(0), 1)
+        self.assertEqual(_bounded_fetch_concurrency(2), 2)
+        self.assertEqual(_bounded_fetch_concurrency(8), 4)
+
     def test_resumed_status_exposes_trigger_and_effective_batch_ids(self):
         payload = _collection_status_payload(
             mode="daily_ranked",
@@ -114,6 +169,7 @@ class RollingCollectionLaneStageTests(unittest.TestCase):
 
             self.assertEqual(second["stage"], "publishing")
             self.assertEqual(second["status"], "processing")
+            self.assertGreater(second["stage_elapsed_seconds"], 0)
             self.assertGreater(second["heartbeat_sequence"], first["heartbeat_sequence"])
             self.assertNotEqual(second["updated_at"], first["updated_at"])
 
@@ -132,15 +188,11 @@ class RollingCollectionLaneStageTests(unittest.TestCase):
             self.assertEqual(first[1], second[1])
 
     def test_network_fetch_is_ordered_before_the_main_corpus_lock(self):
-        source = Path(__file__).resolve().parents[1].joinpath("scripts", "collect_rolling_corpus.py").read_text(
-            encoding="utf-8"
-        )
+        source = Path(rolling_collector.__file__).read_text(encoding="utf-8")
         self.assertLess(source.index("snapshot = client.fetch_snapshot("), source.index("writer_lock = CorpusWriterLock("))
 
     def test_merge_wait_covers_long_snapshot_publication(self):
-        source = Path(__file__).resolve().parents[1].joinpath("scripts", "collect_rolling_corpus.py").read_text(
-            encoding="utf-8"
-        )
+        source = Path(rolling_collector.__file__).read_text(encoding="utf-8")
 
         self.assertIn("_MERGE_LOCK_WAIT_SECONDS = 2 * 60 * 60", source)
 

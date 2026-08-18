@@ -169,6 +169,14 @@ class RetrievalBenchmarkTests(unittest.TestCase):
         self.assertGreater(retriever.hybrid_calls[0]["top_k_bm25"], 10)
         self.assertIn("latency_ms", report["methods"]["hybrid"])
         self.assertIn("p95", report["methods"]["hybrid"]["latency_ms"])
+        self.assertEqual(
+            report["methods"]["hybrid"]["retrieval_latency_ms"],
+            report["methods"]["hybrid"]["latency_ms"],
+        )
+        self.assertEqual(report["methods"]["hybrid"]["hit_rate_at_k"], 0.0)
+        self.assertEqual(report["methods"]["hybrid_rerank"]["hit_rate_at_k"], 1.0)
+        self.assertEqual(report["methods"]["hybrid"]["candidate_count"]["count"], 1)
+        self.assertGreaterEqual(report["methods"]["hybrid"]["candidate_count"]["mean"], 1.0)
         self.assertIn("query_embedding_ms", report["runtime"])
 
     def test_ignores_results_beyond_cutoff(self):

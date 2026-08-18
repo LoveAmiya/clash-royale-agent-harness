@@ -1,6 +1,15 @@
 import unittest
 
-from model_resilience import ModelCircuitOpenError, ModelProviderGuard
+from model_resilience import (
+    ModelCircuitOpenError,
+    ModelProviderGuard,
+    ModelStreamingUnavailableError,
+)
+from clashroyale_agent.ops.model_resilience import (
+    ModelCircuitOpenError as PackagedModelCircuitOpenError,
+    ModelProviderGuard as PackagedModelProviderGuard,
+    ModelStreamingUnavailableError as PackagedModelStreamingUnavailableError,
+)
 
 
 class _Clock:
@@ -12,6 +21,11 @@ class _Clock:
 
 
 class ModelResilienceTests(unittest.TestCase):
+    def test_model_resilience_wrapper_reexports_packaged_implementation(self):
+        self.assertIs(ModelProviderGuard, PackagedModelProviderGuard)
+        self.assertIs(ModelCircuitOpenError, PackagedModelCircuitOpenError)
+        self.assertIs(ModelStreamingUnavailableError, PackagedModelStreamingUnavailableError)
+
     def test_circuit_opens_then_allows_one_half_open_probe(self):
         clock = _Clock()
         guard = ModelProviderGuard(

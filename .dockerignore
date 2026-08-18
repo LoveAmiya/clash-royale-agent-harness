@@ -3,6 +3,19 @@
 __pycache__
 *.py[cod]
 *.log
+*.jsonl
+!evaluation/cases.jsonl
+!evaluation/fault_scenarios.jsonl
+trace/
+traces/
+benchmark/
+benchmarks/
+benchmark-results/
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
 
 .env
 .env.*

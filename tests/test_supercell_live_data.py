@@ -237,6 +237,16 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.get.call_args.kwargs["headers"]["Authorization"], "Bearer test-token")
         self.assertEqual(session.get.call_args.kwargs["timeout"], 5.0)
 
+    def test_client_defaults_to_pooled_requests_session(self):
+        with patch("supercell_live.requests.Session") as session_factory:
+            session = Mock()
+            session_factory.return_value = session
+
+            client = SupercellAPIClient("test-token")
+
+        session_factory.assert_called_once_with()
+        self.assertIs(client.session, session)
+
     def test_client_honors_retry_after_before_retrying_a_rate_limited_request(self):
         limited_response = Mock(status_code=429, headers={"Retry-After": "3"})
         limited_error = requests.HTTPError("rate limited")

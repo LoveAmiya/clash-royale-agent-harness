@@ -25,13 +25,26 @@ logs/
 *.sqlite
 *.sqlite3
 *.db
+*.jsonl
+!evaluation/cases.jsonl
+!evaluation/fault_scenarios.jsonl
 *_unused.jsonl
 *_trace_unused.jsonl
+trace/
+traces/
 
 tmp/
 temp/
 runs/
 outputs/
+benchmark/
+benchmarks/
+benchmark-results/
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
 # Runtime data is private and must never be published. Keep only the manually
 # reviewed Chinese naming configuration under version control.
 /data/**
@@ -40,7 +53,10 @@ outputs/
 /data-*.zip
 rolling_data_exports/
 evaluation/feedback_candidates.jsonl
-evaluation/reports/
+# Generated reports stay private; the checked-in README documents the local
+# output contract without allowing any generated child file.
+evaluation/reports/*
+!evaluation/reports/README.md
 load/reports/*.json
 evaluation/live_*.json
 evaluation/live_*.txt

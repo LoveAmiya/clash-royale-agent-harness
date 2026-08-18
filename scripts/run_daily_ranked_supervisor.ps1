@@ -98,8 +98,9 @@ try {
         $runnerErrorType = $null
         $runnerErrorMessage = $null
         try {
-            & $powershell -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $runner -Mode "daily_ranked" -TokenIndex 0
-            $exitCode = $LASTEXITCODE
+            $runnerArguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Mode "daily_ranked" -TokenIndex 0' -f $runner
+            $runnerProcess = Start-Process -FilePath $powershell -WorkingDirectory $projectRoot -ArgumentList $runnerArguments -WindowStyle Hidden -Wait -PassThru
+            $exitCode = $runnerProcess.ExitCode
         }
         catch {
             $runnerErrorType = $_.Exception.GetType().Name

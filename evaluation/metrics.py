@@ -119,6 +119,14 @@ def _mean(results: list[dict], field: str) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _flag_rate(results: list[dict], field: str) -> float:
+    """Return a rate only across rows that explicitly report the flag."""
+    comparable = [item for item in results if field in item and item.get(field) is not None]
+    if not comparable:
+        return 0.0
+    return sum(bool(item[field]) for item in comparable) / len(comparable)
+
+
 def build_scorecard(results: list[dict], *, dimensions: dict | None = None) -> dict:
     """Aggregate existing benchmark outputs into one regression-comparable scorecard."""
     comparable = [item for item in results if not item.get("skipped")]
@@ -139,6 +147,8 @@ def build_scorecard(results: list[dict], *, dimensions: dict | None = None) -> d
         ),
         "first_token_latency_ms": _mean(comparable, "first_token_latency_ms"),
         "total_latency_ms": _mean(comparable, "total_latency_ms"),
+        "timeout_rate": _flag_rate(comparable, "timed_out"),
+        "fallback_rate": _flag_rate(comparable, "fallback_used"),
         "token_count": sum(max(0, int(item.get("token_count") or 0)) for item in comparable),
         "estimated_cost": round(
             sum(max(0.0, float(item.get("estimated_cost") or 0.0)) for item in comparable), 8

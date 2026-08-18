@@ -104,6 +104,8 @@ class EvalMetricsTests(unittest.TestCase):
                 "boundary_violations": 0,
                 "first_token_latency_ms": 300,
                 "total_latency_ms": 1200,
+                "timed_out": False,
+                "fallback_used": False,
                 "token_count": 500,
                 "estimated_cost": 0.02,
             },
@@ -118,6 +120,8 @@ class EvalMetricsTests(unittest.TestCase):
                 "boundary_violations": 1,
                 "first_token_latency_ms": 500,
                 "total_latency_ms": 1800,
+                "timed_out": True,
+                "fallback_used": True,
                 "token_count": 700,
                 "estimated_cost": 0.03,
             },
@@ -140,6 +144,8 @@ class EvalMetricsTests(unittest.TestCase):
         self.assertEqual(scorecard["boundary_violation_rate"], 0.5)
         self.assertEqual(scorecard["first_token_latency_ms"], 400.0)
         self.assertEqual(scorecard["total_latency_ms"], 1500.0)
+        self.assertEqual(scorecard["timeout_rate"], 0.5)
+        self.assertEqual(scorecard["fallback_rate"], 0.5)
         self.assertEqual(scorecard["token_count"], 1200)
         self.assertEqual(scorecard["estimated_cost"], 0.05)
         self.assertEqual(scorecard["dimensions"], dimensions)

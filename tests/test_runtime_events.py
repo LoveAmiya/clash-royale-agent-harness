@@ -5,9 +5,13 @@ from support import install_test_stubs
 install_test_stubs()
 
 from runtime_events import RuntimeEventEmitter
+from clashroyale_agent.ops.runtime_events import RuntimeEventEmitter as PackagedRuntimeEventEmitter
 
 
 class RuntimeEventEmitterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_events_wrapper_reexports_packaged_implementation(self):
+        self.assertIs(RuntimeEventEmitter, PackagedRuntimeEventEmitter)
+
     async def test_execution_event_exposes_allowlisted_audit_summary(self):
         emitter = RuntimeEventEmitter(request_id="req-1")
 

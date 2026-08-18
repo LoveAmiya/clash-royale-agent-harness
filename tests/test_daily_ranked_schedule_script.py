@@ -91,6 +91,12 @@ class DailyRankedScheduleScriptTests(unittest.TestCase):
         self.assertIn('$env:TMPDIR = $runtimeTemp', self.script)
         self.assertIn('$env:SQLITE_TMPDIR = $runtimeTemp', self.script)
 
+    def test_schedule_starts_collector_process_hidden(self):
+        self.assertIn("Start-Process $pythonExe", self.script)
+        self.assertIn("-WindowStyle Hidden", self.script)
+        self.assertIn("-RedirectStandardOutput $stdout", self.script)
+        self.assertIn("-RedirectStandardError $stderr", self.script)
+
     def test_schedule_repairs_an_accepted_publication_before_api_preflight(self):
         repair = self.script.index('--retry-publication-only')
         preflight = self.script.index('-m supercell_preflight')

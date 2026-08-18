@@ -634,7 +634,7 @@ try {
     }
 
     $collector = ".\scripts\collect_rolling_corpus.py"
-    $process = Start-Process $pythonExe -WorkingDirectory $projectRoot -ArgumentList @($collector, "--mode", $Mode, "--batch-id", $batchId) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
+    $process = Start-Process $pythonExe -WorkingDirectory $projectRoot -ArgumentList @($collector, "--mode", $Mode, "--batch-id", $batchId) -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
     $durationSeconds = [Math]::Round(((Get-Date) - $runStartedAt).TotalSeconds, 1)
     $isDeferredMerge = $process.ExitCode -eq 4
     $finishStatus = if ($isDeferredMerge) { "deferred_merge" } else { "finished" }

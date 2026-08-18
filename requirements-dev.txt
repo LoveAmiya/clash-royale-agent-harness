@@ -1,0 +1,9 @@
+# Optional local development quality tools.
+#
+# Runtime and public CI dependencies stay in requirements.txt / requirements.lock.txt.
+# These tools are intentionally separate so live provider, Supercell, or Ollama
+# checks do not become default install requirements.
+
+ruff>=0.6
+pytest>=8
+mypy>=1.10

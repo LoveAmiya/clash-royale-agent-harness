@@ -36,19 +36,68 @@ from app_config import (
     EXTERNAL_API_REQUIRED,
     RAG_FACT_VALIDATION_ENABLED,
 )
+from clashroyale_agent.qa.answer_routing import (
+    subquery_needs_rag as packaged_subquery_needs_rag,
+    subquery_title as packaged_subquery_title,
+    subquery_user_text as packaged_subquery_user_text,
+)
+from clashroyale_agent.qa.evidence_synthesis import (
+    EvidenceSynthesisDependencies,
+    build_evidence_synthesis_answer as packaged_build_evidence_synthesis_answer,
+)
+from clashroyale_agent.qa.evidence_grounding import (
+    GroundingValidationError,
+    append_references_if_missing,
+    build_evidence_ledger,
+    build_reference_suffix,
+    create_grounded_stream_buffer,
+    filter_completed_answer,
+    validate_ledger_grounding,
+)
+from clashroyale_agent.qa.presentation import emit_chunked_content
+from clashroyale_agent.qa.rag_answering import (
+    RagAnswerDependencies,
+    build_rag_answer as packaged_build_rag_answer,
+)
+from clashroyale_agent.qa.retrieval_orchestration import (
+    RetrievalConfig,
+    retrieve_meta_candidates as packaged_retrieve_meta_candidates,
+    summarize_retrieval as packaged_summarize_retrieval,
+)
+from clashroyale_agent.qa.reviewer_models import (
+    ReviewerModelConfig,
+    build_reviewer_model as packaged_build_reviewer_model,
+)
+from clashroyale_agent.qa.multi_intent_answering import (
+    MultiIntentDependencies,
+    answer_multi_intent_query as packaged_answer_multi_intent_query,
+    compose_multi_intent_answer as packaged_compose_multi_intent_answer,
+    execute_subquery as packaged_execute_subquery,
+)
+from clashroyale_agent.qa.structured_answering import (
+    StructuredAnswerDependencies,
+    answer_structured_query,
+)
+from clashroyale_agent.qa.streaming import (
+    ModelFirstTokenTimeout,
+    ModelStreamStartupError,
+    stream_with_first_token_watchdog as _stream_with_first_token_watchdog,
+)
+from clashroyale_agent.qa.synthesis_fallbacks import (
+    build_retrieved_evidence_fallback,
+    build_snapshot_fallback_answer,
+)
+from clashroyale_agent.qa.traces import read_trace as packaged_read_trace
 from harness.executor import SkillExecutor
 from hybrid_retriever import HybridRetriever
 from model_gateway import generate_model_text, generate_model_text_stream, uses_responses_api
-from rag_quality import GroundedStreamBuffer, GroundingValidationError, validate_answer_grounding
 from runtime_events import RuntimeEventEmitter
 from planner.planner import RuleBasedPlanner
 from query_parser import extract_text_content, subquery_semantic_key
 from retrieval_postprocess import (
-    build_context_and_refs,
     compress_results,
     rerank_results,
     select_diverse_results,
-    strip_generated_reference_section,
 )
 from skills.base import SkillContext
 from skills.meta_evidence import build_meta_evidence_pack
@@ -56,16 +105,7 @@ from skills.registry import build_default_registry
 
 
 logger = logging.getLogger(__name__)
-FALLBACK_CONTENT_INTERVAL_SECONDS = 0.12
 META_EVIDENCE_LANES = ("archetype", "deck_profile", "card_pair")
-
-
-class ModelFirstTokenTimeout(asyncio.TimeoutError):
-    """The model produced no public answer text within the silent-wait budget."""
-
-
-class ModelStreamStartupError(RuntimeError):
-    """The provider failed before publishing any public answer text."""
 
 
 DATA_ANALYSIS_SYSTEM_PROMPT = (
@@ -89,62 +129,14 @@ async def stream_with_first_token_watchdog(
     subquery_id: str,
 ):
     """Yield model deltas while making silent reasoning time observable."""
-    iterator = stream.__aiter__()
-    first_delta_task = asyncio.create_task(anext(iterator))
-    started_at = time.perf_counter()
-    waiting_execution_emitted = False
-    try:
-        while not first_delta_task.done():
-            elapsed = time.perf_counter() - started_at
-            remaining = MODEL_FIRST_TOKEN_TIMEOUT_SECONDS - elapsed
-            if remaining <= 0:
-                raise ModelFirstTokenTimeout("model first public token timed out")
-            done, _ = await asyncio.wait(
-                {first_delta_task},
-                timeout=min(MODEL_PROGRESS_INTERVAL_SECONDS, remaining),
-            )
-            if done:
-                break
-            elapsed_seconds = max(1, int(time.perf_counter() - started_at))
-            if not waiting_execution_emitted:
-                await event_sink.execution(
-                    step_id=step_id,
-                    phase="generate",
-                    status="running",
-                    subquery_id=subquery_id,
-                    title="模型正在组织回答",
-                    detail="模型连接正常，正在等待首段公开文本；检索证据已经就绪。",
-                    operation="synthesize.await_first_text",
-                    parameters={
-                        "first_token_timeout_seconds": MODEL_FIRST_TOKEN_TIMEOUT_SECONDS,
-                    },
-                    boundaries=["不会向页面发送尚未通过证据校验的模型草稿。"],
-                )
-                waiting_execution_emitted = True
-            else:
-                await event_sink.progress("generate", f"模型仍在组织回答，已等待 {elapsed_seconds} 秒")
-        first_delta = first_delta_task.result()
-    except BaseException:
-        if not first_delta_task.done():
-            first_delta_task.cancel()
-            await asyncio.gather(first_delta_task, return_exceptions=True)
-        close = getattr(iterator, "aclose", None)
-        if close is not None:
-            await close()
-        raise
-
-    await event_sink.execution(
+    async for delta in _stream_with_first_token_watchdog(
+        stream,
+        event_sink=event_sink,
         step_id=step_id,
-        phase="generate",
-        status="running",
         subquery_id=subquery_id,
-        title="已收到模型文本，正在逐句校验证据",
-        detail="首段公开文本已经到达；通过数值与引用边界校验后会立即显示。",
-        operation="synthesize.validate_stream",
-        parameters={"elapsed_seconds": max(0, int(time.perf_counter() - started_at))},
-    )
-    yield first_delta
-    async for delta in iterator:
+        first_token_timeout_seconds=MODEL_FIRST_TOKEN_TIMEOUT_SECONDS,
+        progress_interval_seconds=MODEL_PROGRESS_INTERVAL_SECONDS,
+    ):
         yield delta
 
 
@@ -165,56 +157,16 @@ class AnswerResult:
 
 
 def build_reviewer_model(api_key: str) -> OpenAIChatModel | OpenAIResponseModel:
-    common_kwargs = {
-        "model_name": OPENAI_REVIEW_MODEL,
-        "api_key": api_key,
-        "stream": False,
-        "client_kwargs": OPENAI_CLIENT_KWARGS,
-    }
-    if OPENAI_WIRE_API == "responses":
-        return OpenAIResponseModel(
-            **common_kwargs,
+    return packaged_build_reviewer_model(
+        api_key,
+        config=ReviewerModelConfig(
+            model_name=OPENAI_REVIEW_MODEL,
+            client_kwargs=OPENAI_CLIENT_KWARGS,
             reasoning_effort=OPENAI_REASONING_EFFORT,
-        )
-    if OPENAI_WIRE_API == "chat_completions":
-        return OpenAIChatModel(
-            **common_kwargs,
-            reasoning_effort=OPENAI_REASONING_EFFORT,
-        )
-    raise ValueError(f"Unsupported OPENAI_WIRE_API: {OPENAI_WIRE_API}")
-
-
-def build_snapshot_fallback_answer(
-    top_decks_data: list[dict],
-    cards_meta_data: list[dict],
-) -> str:
-    """模型不可用时，直接整理快照事实，不把本地榜单伪装成实时 Meta 推演。"""
-    top_decks = sorted(top_decks_data, key=lambda item: item.get("rank", 10**9))[:5]
-    top_cards = sorted(
-        cards_meta_data,
-        key=lambda item: float(item.get("usage_rate", 0) or 0),
-        reverse=True,
-    )[:5]
-
-    deck_lines = [
-        f"- 第 {item.get('rank')} 名：{item.get('deck_name', '未命名卡组')}（平均费用 {item.get('avg_elixir', '未知')}）"
-        for item in top_decks
-    ]
-    card_lines = [
-        f"- {item.get('card_name', '未命名卡牌')}：使用率 {item.get('usage_rate', '未知')}%，胜率 {item.get('win_rate', '未知')}%"
-        for item in top_cards
-    ]
-
-    return (
-        "模型服务暂不可用，以下是基于本地数据快照的直接整理，不是 LLM 的策略推演。\n\n"
-        "本地排行榜前五卡组：\n"
-        + ("\n".join(deck_lines) if deck_lines else "- 当前没有可用的卡组快照。")
-        + "\n\n"
-        "快照中使用率靠前的卡牌：\n"
-        + ("\n".join(card_lines) if card_lines else "- 当前没有可用的卡牌快照。")
-        + "\n\n"
-        "数据边界：该项目保存的是排行榜和单卡静态快照，不含全量卡组使用率分布、版本更新时间或实时对局样本；"
-        "因此可以展示榜单前列构筑，但不能严谨断言它们就是整个实时环境中占比最高的流派。"
+            wire_api=OPENAI_WIRE_API,
+        ),
+        chat_model_cls=OpenAIChatModel,
+        response_model_cls=OpenAIResponseModel,
     )
 
 
@@ -227,105 +179,26 @@ def retrieve_meta_candidates(
     entity_mode: str | None,
     source_type: str | None = None,
 ) -> tuple[list[dict], list[str]]:
-    """Recall global and typed evidence lanes, deduplicated by stable document ID."""
-    lane_types: tuple[str | None, ...] = (source_type,) if source_type else (None, *META_EVIDENCE_LANES)
-    embed_query = getattr(retriever, "embed_text", None)
-    query_vector = (
-        embed_query(query)
-        if getattr(retriever, "dense_available", False) and callable(embed_query)
-        else None
-    )
-    merged: dict[str, dict] = {}
-    lanes: list[str] = []
-    for lane_type in lane_types:
-        lane_name = lane_type or "global"
-        lane_results = retriever.hybrid_search(
-            query=query,
+    return packaged_retrieve_meta_candidates(
+        retriever,
+        query,
+        dataset_scope=dataset_scope,
+        deck_mode=deck_mode,
+        entity_mode=entity_mode,
+        source_type=source_type,
+        config=RetrievalConfig(
             top_k_bm25=RETRIEVAL_TOP_K_BM25,
             top_k_dense=RETRIEVAL_TOP_K_DENSE,
-            final_top_k=(
-                RETRIEVAL_FINAL_TOP_K if lane_type is None else META_RETRIEVAL_LANE_TOP_K
-            ),
+            final_top_k=RETRIEVAL_FINAL_TOP_K,
             alpha=RETRIEVAL_ALPHA,
-            source_type=lane_type,
-            dataset_scope=dataset_scope,
-            deck_mode=deck_mode,
-            entity_mode=entity_mode,
-            query_vector=query_vector,
-        )
-        lanes.append(lane_name)
-        for item in lane_results:
-            doc_id = str(item.get("doc", {}).get("doc_id") or "")
-            if not doc_id:
-                continue
-            previous = merged.get(doc_id)
-            lane_pools = {lane_name: dict(item.get("candidate_pool") or {})}
-            if previous is None:
-                candidate = dict(item)
-                candidate["retrieval_lanes"] = [lane_name]
-                candidate["retrieval_lane_candidate_pools"] = lane_pools
-                merged[doc_id] = candidate
-                continue
-            combined_lanes = list(dict.fromkeys([*previous.get("retrieval_lanes", []), lane_name]))
-            combined_pools = {
-                **previous.get("retrieval_lane_candidate_pools", {}),
-                **lane_pools,
-            }
-            if float(item.get("final_score", 0.0)) > float(previous.get("final_score", 0.0)):
-                candidate = dict(item)
-                candidate["retrieval_lanes"] = combined_lanes
-                candidate["retrieval_lane_candidate_pools"] = combined_pools
-                merged[doc_id] = candidate
-            else:
-                previous["retrieval_lanes"] = combined_lanes
-                previous["retrieval_lane_candidate_pools"] = combined_pools
-    return list(merged.values()), lanes
+            meta_lane_top_k=META_RETRIEVAL_LANE_TOP_K,
+            lane_source_types=META_EVIDENCE_LANES,
+        ),
+    )
 
 
 def summarize_retrieval(results: list[dict], *, lanes: list[str] | None = None) -> dict:
-    """Return bounded operational diagnostics without evidence text or model reasoning."""
-    if not results:
-        return {
-            "retrieval_mode": "none",
-            "fusion_mode": "none",
-            "lanes": list(lanes or []),
-            "candidate_count": 0,
-            "lane_candidate_pools": {},
-        }
-    first = results[0]
-    lane_candidate_pools: dict[str, dict] = {}
-    for item in results:
-        for lane, pool in (item.get("retrieval_lane_candidate_pools") or {}).items():
-            lane_candidate_pools.setdefault(str(lane), dict(pool or {}))
-    if not lane_candidate_pools:
-        lane_candidate_pools["single"] = dict(first.get("candidate_pool") or {})
-    return {
-        "retrieval_mode": first.get("retrieval_mode", "unknown"),
-        "fusion_mode": first.get("fusion_mode", "weighted"),
-        "rrf_k": first.get("rrf_k"),
-        "lanes": list(lanes or ["single"]),
-        "candidate_count": len(results),
-        "lane_candidate_pools": lane_candidate_pools,
-    }
-
-
-def build_retrieved_evidence_fallback(compressed_results: list[dict]) -> str:
-    """Expose retrieved current-scope evidence when synthesis times out."""
-    evidence_lines = []
-    for item in compressed_results:
-        doc = item.get("doc") if isinstance(item, dict) else None
-        if not isinstance(doc, dict):
-            continue
-        text = str(item.get("compressed_text") or doc.get("text") or "").strip()
-        if not text:
-            continue
-        title = str(doc.get("metadata", {}).get("title") or doc.get("source_type") or "检索证据")
-        evidence_lines.append(f"- {title}：{text}")
-    return (
-        "模型综合请求超时，已保留本次检索到的当前数据范围证据。"
-        "以下内容是证据原文摘要，未进行额外推演：\n"
-        + ("\n".join(evidence_lines) if evidence_lines else "- 当前没有可显示的检索证据。")
-    )
+    return packaged_summarize_retrieval(results, lanes=lanes)
 
 
 async def build_rag_answer(
@@ -339,320 +212,45 @@ async def build_rag_answer(
     event_sink: RuntimeEventEmitter | None = None,
     stream_content: bool = True,
 ) -> str:
-    retrieval_query = build_retrieval_query(parsed, user_text)
-    subquery_id = str((metadata or {}).get("subquery_id") or "q")
-
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.retrieve",
-            phase="retrieve",
-            status="running",
-            subquery_id=subquery_id,
-            title="正在检索 RAG 证据",
-            detail="从当前快照检索与问题相关的证据文档。",
-        )
-
-    retrieval_started = time.perf_counter()
-    results = retriever.hybrid_search(
-        query=retrieval_query,
-        top_k_bm25=RETRIEVAL_TOP_K_BM25,
-        top_k_dense=RETRIEVAL_TOP_K_DENSE,
-        final_top_k=RETRIEVAL_FINAL_TOP_K,
-        alpha=RETRIEVAL_ALPHA,
-        source_type=source_type,
-        dataset_scope=(metadata or {}).get("dataset_scope"),
-        deck_mode=(metadata or {}).get("deck_mode"),
-        entity_mode=(metadata or {}).get("entity_mode"),
-    )
-    retrieval_latency_ms = int((time.perf_counter() - retrieval_started) * 1000)
-    retrieval_summary = summarize_retrieval(results)
-    retrieval_summary["retrieval_latency_ms"] = retrieval_latency_ms
-    if metadata is not None:
-        metadata["retrieval"] = retrieval_summary
-        metadata["retrieval_mode"] = retrieval_summary["retrieval_mode"]
-        metadata["retrieved_doc_ids"] = [item["doc"].get("doc_id") for item in results]
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.retrieve",
-            phase="retrieve",
-            status="completed",
-            subquery_id=subquery_id,
-            title="已检索 RAG 证据",
-            detail=(
-                f"找到 {len(results)} 条候选证据；"
-                f"融合={retrieval_summary['fusion_mode']}，"
-                f"候选池={retrieval_summary['lane_candidate_pools'].get('single', {})}；"
-                f"耗时={retrieval_latency_ms}ms。"
-            ),
-        )
-
-    if not results:
-        return "我不知道，当前数据里没有检索到足够相关的信息。\n参考来源：无"
-
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.rerank",
-            phase="rerank",
-            status="running",
-            subquery_id=subquery_id,
-            title="正在重排序证据",
-            detail="按问题相关性对候选证据进行确定性重排序。",
-        )
-    rerank_started = time.perf_counter()
-    reranked = rerank_results(
-        question=user_text,
-        parsed=parsed,
-        results=results,
-        top_n=RERANK_TOP_N,
-    )
-    rerank_latency_ms = int((time.perf_counter() - rerank_started) * 1000)
-    if metadata is not None:
-        metadata["retrieval"]["rerank_latency_ms"] = rerank_latency_ms
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.rerank",
-            phase="rerank",
-            status="completed",
-            subquery_id=subquery_id,
-            title="已重排序证据",
-            detail=f"保留 {len(reranked)} 条高相关候选证据；耗时={rerank_latency_ms}ms。",
-        )
-
-    if not reranked:
-        return "我不知道，当前数据里没有足够高相关的候选结果。\n参考来源：无"
-
-    compressed = compress_results(
-        reranked,
-        max_items=COMPRESS_MAX_ITEMS,
-        char_budget=COMPRESS_CHAR_BUDGET,
-    )
-    if metadata is not None:
-        metadata["retrieval"]["reranked_count"] = len(reranked)
-        metadata["retrieval"]["evidence_count"] = len(compressed)
-        metadata["retrieval"]["evidence_char_budget"] = COMPRESS_CHAR_BUDGET
-
-    if not compressed:
-        return "我不知道，当前数据里没有足够可用的压缩上下文。\n参考来源：无"
-
-    retrieved_context, refs_text = build_context_and_refs(compressed)
-    allowed_doc_ids = {str(item["doc"].get("doc_id")) for item in compressed}
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.review",
-            phase="review",
-            status="completed",
-            subquery_id=subquery_id,
-            title="已审查证据边界",
-            detail=f"确认 {len(allowed_doc_ids)} 条可引用证据并锁定引用范围。",
-        )
-
-    reviewer_instructions = """你是一个严格基于检索证据回答问题的助手。
-规则：
-1. 只能根据提供的检索证据回答。
-2. 如果证据不足，必须明确说“我不知道”或“当前数据里没有”。
-3. 回答要简洁清楚，末尾必须保留“参考来源：”部分。
-4. 不要输出推理过程。"""
-    reviewer_agent = ReActAgent(
-        name="Reviewer",
-        sys_prompt=(
-            "你是一个严格基于检索证据回答问题的助手。\n"
-            "规则：\n"
-            "1. 只能根据提供的检索证据回答。\n"
-            "2. 如果证据不足，必须明确说“我不知道”或“当前数据里没有”。\n"
-            "3. 回答要简洁清楚。\n"
-            "4. 回答末尾必须保留“参考来源：”部分。\n"
-            "5. 不要输出推理过程。"
+    return await packaged_build_rag_answer(
+        user_text,
+        parsed,
+        retriever,
+        source_type,
+        reviewer_model,
+        api_key=api_key,
+        metadata=metadata,
+        event_sink=event_sink,
+        stream_content=stream_content,
+        dependencies=RagAnswerDependencies(
+            append_references_if_missing=append_references_if_missing,
+            build_evidence_ledger=build_evidence_ledger,
+            build_reference_suffix=build_reference_suffix,
+            build_retrieval_query=build_retrieval_query,
+            compress_results=compress_results,
+            create_grounded_stream_buffer=create_grounded_stream_buffer,
+            emit_chunked_content=emit_chunked_content,
+            extract_text_content=extract_text_content,
+            generate_model_text=generate_model_text,
+            generate_model_text_stream=generate_model_text_stream,
+            logger=logger,
+            rerank_results=rerank_results,
+            summarize_retrieval=summarize_retrieval,
+            uses_responses_api=uses_responses_api,
+            validate_ledger_grounding=validate_ledger_grounding,
+            compress_char_budget=COMPRESS_CHAR_BUDGET,
+            compress_max_items=COMPRESS_MAX_ITEMS,
+            external_api_required=EXTERNAL_API_REQUIRED,
+            model_call_timeout_seconds=MODEL_CALL_TIMEOUT_SECONDS,
+            rag_fact_validation_enabled=RAG_FACT_VALIDATION_ENABLED,
+            rerank_top_n=RERANK_TOP_N,
+            retrieval_alpha=RETRIEVAL_ALPHA,
+            retrieval_final_top_k=RETRIEVAL_FINAL_TOP_K,
+            retrieval_top_k_bm25=RETRIEVAL_TOP_K_BM25,
+            retrieval_top_k_dense=RETRIEVAL_TOP_K_DENSE,
+            synthesis_reasoning_effort=SYNTHESIS_REASONING_EFFORT,
         ),
-        model=reviewer_model,
-        formatter=OpenAIChatFormatter(),
-        memory=InMemoryMemory(),
     )
-    reviewer_agent.set_console_output_enabled(enabled=False)
-
-    grounded_question = (
-        f"用户问题：{user_text}\n\n"
-        f"结构化参数：{json.dumps(parsed, ensure_ascii=False)}\n\n"
-        "下面是经过召回、重排序和压缩后的候选证据，请严格基于这些证据作答：\n\n"
-        f"{retrieved_context}\n\n"
-        f"请在回答末尾附上：\n参考来源：\n{refs_text}\n\n"
-        "如果这些证据仍不足以回答问题，请明确说“我不知道”或“当前数据里没有”。"
-    )
-
-    grounded_msg = Msg(name="user", role="user", content=grounded_question)
-    try:
-        if uses_responses_api() and stream_content and event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.generate",
-                phase="generate",
-                status="running",
-                subquery_id=subquery_id,
-                title="正在生成检索结论",
-                detail="模型正在基于已检索证据输出公开文本。",
-            )
-            chunks: list[str] = []
-            stream_buffer = GroundedStreamBuffer(retrieved_context, allowed_doc_ids)
-            try:
-                async with asyncio.timeout(MODEL_CALL_TIMEOUT_SECONDS):
-                    async for delta in generate_model_text_stream(
-                        api_key=api_key,
-                        instructions=reviewer_instructions,
-                        input_text=grounded_question,
-                        reasoning_effort=SYNTHESIS_REASONING_EFFORT,
-                    ):
-                        chunks.append(delta)
-                        for validated_chunk in stream_buffer.push(delta):
-                            await event_sink.content(validated_chunk, delta=True)
-                for validated_chunk in stream_buffer.finish():
-                    await event_sink.content(validated_chunk, delta=True)
-                answer = "".join(chunks).strip()
-                if not answer:
-                    raise RuntimeError("model stream returned no public text")
-            except Exception:
-                # A failed stream with no public text can safely use the
-                # non-streaming endpoint. Never append a second answer after
-                # a partially delivered stream.
-                if chunks:
-                    raise
-                if metadata is not None:
-                    metadata["model_stream"] = "fallback_chunked"
-                await event_sink.execution(
-                    step_id=f"{subquery_id}.generate",
-                    phase="generate",
-                    status="running",
-                    subquery_id=subquery_id,
-                    title="模型未提供 token 流",
-                    detail="正在输出同一模型已完成的结果分段。",
-                )
-                answer = await asyncio.wait_for(
-                    generate_model_text(
-                        api_key=api_key,
-                        instructions=reviewer_instructions,
-                        input_text=grounded_question,
-                        reasoning_effort=SYNTHESIS_REASONING_EFFORT,
-                    ),
-                    timeout=MODEL_CALL_TIMEOUT_SECONDS,
-                )
-            else:
-                if allowed_doc_ids and not any(doc_id in answer for doc_id in allowed_doc_ids):
-                    reference_suffix = f"\n\n参考来源：\n{refs_text}"
-                    answer += reference_suffix
-                    await event_sink.content(reference_suffix, delta=True)
-                await event_sink.execution(
-                    step_id=f"{subquery_id}.validate",
-                    phase="validate",
-                    status="running",
-                    subquery_id=subquery_id,
-                    title="正在校验回答",
-                    detail="检查引用标识和数值事实是否受证据支持。",
-                )
-                validation = validate_answer_grounding(
-                    answer,
-                    retrieved_context,
-                    allowed_doc_ids,
-                    raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
-                )
-                if metadata is not None:
-                    metadata["model_stream"] = "streaming"
-                    metadata["grounding_validation"] = validation
-                await event_sink.execution(
-                    step_id=f"{subquery_id}.validate",
-                    phase="validate",
-                    status="completed",
-                    subquery_id=subquery_id,
-                    title="回答校验通过",
-                    detail="引用和数值事实均通过证据边界校验。",
-                )
-                await event_sink.execution(
-                    step_id=f"{subquery_id}.generate",
-                    phase="generate",
-                    status="completed",
-                    subquery_id=subquery_id,
-                    title="已生成检索结论",
-                    detail="结论已限制在检索证据范围内。",
-                )
-                return answer
-        if uses_responses_api():
-            if not api_key:
-                return "当前无法调用模型完成检索综合，请先设置 OPENAI_API_KEY 后重试。\n参考来源：\n" + refs_text
-            answer = await asyncio.wait_for(
-                generate_model_text(
-                    api_key=api_key,
-                    instructions=reviewer_instructions,
-                    input_text=grounded_question,
-                    reasoning_effort=SYNTHESIS_REASONING_EFFORT,
-                ),
-                timeout=MODEL_CALL_TIMEOUT_SECONDS,
-            )
-            if metadata is not None:
-                metadata["model_stream"] = "fallback_chunked"
-        else:
-            result = await asyncio.wait_for(reviewer_agent(grounded_msg), timeout=MODEL_CALL_TIMEOUT_SECONDS)
-            answer = extract_text_content(result)
-            if metadata is not None:
-                metadata["model_stream"] = "fallback_chunked"
-        if allowed_doc_ids and not any(doc_id in answer for doc_id in allowed_doc_ids):
-            answer = f"{answer}\n\n参考来源：\n{refs_text}"
-        if event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.validate",
-                phase="validate",
-                status="running",
-                subquery_id=subquery_id,
-                title="正在校验回答",
-                detail="检查引用标识和数值事实是否受证据支持。",
-            )
-        validation = validate_answer_grounding(
-            answer,
-            retrieved_context,
-            allowed_doc_ids,
-            raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
-        )
-        if metadata is not None:
-            metadata["grounding_validation"] = validation
-        if event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.validate",
-                phase="validate",
-                status="completed",
-                subquery_id=subquery_id,
-                title="回答校验通过",
-                detail="引用和数值事实均通过证据边界校验。",
-            )
-        if event_sink is not None and stream_content:
-            chunks = [answer[start : start + 80] for start in range(0, len(answer), 80)]
-            for index, chunk in enumerate(chunks):
-                await event_sink.content(chunk, delta=True)
-                if index < len(chunks) - 1:
-                    await asyncio.sleep(FALLBACK_CONTENT_INTERVAL_SECONDS)
-            await event_sink.execution(
-                step_id=f"{subquery_id}.generate",
-                phase="generate",
-                status="completed",
-                subquery_id=subquery_id,
-                title="已生成检索结论",
-                detail="结论已限制在检索证据范围内。",
-            )
-        return answer
-    except asyncio.TimeoutError:
-        if metadata is not None:
-            metadata["model_stream"] = "unavailable"
-        return "模型在限定时间内未返回，未生成不可靠结论。请检查 OPENAI_MODEL、网络或稍后重试。\n参考来源：\n" + refs_text
-    except GroundingValidationError as exc:
-        if metadata is not None:
-            metadata["model_stream"] = "unavailable"
-            metadata["grounding_validation_error"] = str(exc)[:1000]
-        logger.warning("rag grounding validation failed detail=%s", str(exc)[:1000])
-        return "检索结论未通过引用或数值事实校验，因此未输出不可靠回答。\n参考来源：\n" + refs_text
-    except Exception:
-        if metadata is not None:
-            metadata["model_stream"] = "unavailable"
-        # 第三方模型 SDK 的超时不一定继承 asyncio.TimeoutError，必须在 Skill 内降级。
-        logger.exception("rag reviewer model call failed")
-        return (
-            "模型调用失败，未生成不可靠结论。请检查 OPENAI_API_KEY、OPENAI_MODEL、网络或服务商状态后重试。"
-            "\n参考来源：\n"
-            + refs_text
-        )
 
 
 async def build_evidence_synthesis_answer(
@@ -667,446 +265,59 @@ async def build_evidence_synthesis_answer(
     event_sink: RuntimeEventEmitter | None = None,
     stream_content: bool = True,
 ) -> str:
-    """通过 RAG 检索和静态快照完成可追溯的开放问题综合。"""
-    # Clan-war data is outside the active product boundary. Meta synthesis is
-    # grounded only in official game-data evidence.
-    evidence_schedule_data = []
-    evidence, sources = build_meta_evidence_pack(
-        evidence_schedule_data,
-        top_decks_data,
-        cards_meta_data,
-        include_schedule=False,
-    )
-    # Strict production retrieval is generated from the active official daily
-    # snapshot. It intentionally has no static strategy or stale snapshot set.
-    retrieval_source_type = "meta_delta" if parsed.get("analysis_type") == "meta_delta" else None
-    subquery_id = str((metadata or {}).get("subquery_id") or "q")
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.retrieve",
-            phase="retrieve",
-            status="running",
-            subquery_id=subquery_id,
-            title="正在检索环境证据",
-            detail="使用当前官方快照 RAG 检索相关证据。",
-            operation="retrieval.hybrid_search",
-            parameters={
-                "scope": (metadata or {}).get("dataset_scope"),
-                "deck_mode": (metadata or {}).get("deck_mode"),
-                "entity_mode": (metadata or {}).get("entity_mode"),
-                "bm25_top_k": RETRIEVAL_TOP_K_BM25,
-                "dense_top_k": RETRIEVAL_TOP_K_DENSE,
-                "fusion": RETRIEVAL_FUSION_MODE,
-                "final_top_k": META_RETRIEVAL_LANE_TOP_K,
-                "lanes": list(META_EVIDENCE_LANES),
-            },
-            rationale="用户询问当前环境，需要从选定数据范围召回覆盖多个证据类型的候选。",
-            boundaries=["检索阶段只寻找候选证据，不在此阶段生成环境结论。"],
-        )
-    retrieval_started = time.perf_counter()
-    results, retrieval_lanes = retrieve_meta_candidates(
-        retriever,
-        user_text,
-        dataset_scope=(metadata or {}).get("dataset_scope"),
-        deck_mode=(metadata or {}).get("deck_mode"),
-        entity_mode=(metadata or {}).get("entity_mode"),
-        source_type=retrieval_source_type,
-    )
-    retrieval_latency_ms = int((time.perf_counter() - retrieval_started) * 1000)
-    if parsed.get("analysis_type") == "meta_delta":
-        selected_scope = str((metadata or {}).get("dataset_scope") or "")
-        results = [
-            item
-            for item in results
-            if str(item.get("doc", {}).get("metadata", {}).get("baseline_scope") or "")
-            and str(item.get("doc", {}).get("metadata", {}).get("baseline_scope")) != selected_scope
-        ]
-    retrieval_summary = summarize_retrieval(results, lanes=retrieval_lanes)
-    retrieval_summary["retrieval_latency_ms"] = retrieval_latency_ms
-    if metadata is not None:
-        metadata["retrieval_mode"] = results[0].get("retrieval_mode", "none") if results else "none"
-        metadata["retrieved_doc_ids"] = [item["doc"].get("doc_id") for item in results]
-        metadata["retrieval_source_type"] = retrieval_source_type
-        metadata["retrieval_lanes"] = retrieval_lanes
-        metadata["retrieval"] = retrieval_summary
-        metadata["retrieval_source_counts"] = {
-            source: sum(
-                str(item.get("doc", {}).get("source_type") or "unknown") == source
-                for item in results
-            )
-            for source in sorted({
-                str(item.get("doc", {}).get("source_type") or "unknown")
-                for item in results
-            })
-        }
-        metadata["synthesis_reasoning_effort"] = SYNTHESIS_REASONING_EFFORT
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.retrieve",
-            phase="retrieve",
-            status="completed",
-            subquery_id=subquery_id,
-            title="已检索环境证据",
-            detail=(
-                f"找到 {len(results)} 条候选证据；"
-                f"融合={retrieval_summary['fusion_mode']}，"
-                f"召回通道={len(retrieval_lanes)}；耗时={retrieval_latency_ms}ms。"
-            ),
-            operation="retrieval.hybrid_search",
-            parameters={
-                "scope": (metadata or {}).get("dataset_scope"),
-                "candidate_count": len(results),
-                "fusion": retrieval_summary["fusion_mode"],
-                "lanes": len(retrieval_lanes),
-            },
-            evidence=[f"当前范围共召回 {len(results)} 条候选证据。"],
-            boundaries=["候选数量不等于最终引用数量，仍需精排和多样性筛选。"],
-        )
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.rerank",
-            phase="rerank",
-            status="running",
-            subquery_id=subquery_id,
-            title="正在重排序环境证据",
-            detail="按问题相关性对环境候选证据进行确定性重排序。",
-            operation="rerank.select_diverse",
-            parameters={"rerank_top_n": META_RERANK_TOP_N},
-            rationale="优先保留与问题直接相关且来源分布不过度集中的证据。",
-        )
-    rerank_started = time.perf_counter()
-    reranked_candidates = rerank_results(
+    return await packaged_build_evidence_synthesis_answer(
         user_text,
         parsed,
-        results,
-        top_n=max(len(results), META_RERANK_TOP_N),
+        schedule_data,
+        top_decks_data,
+        cards_meta_data,
+        retriever,
+        api_key,
+        metadata=metadata,
+        event_sink=event_sink,
+        stream_content=stream_content,
+        dependencies=EvidenceSynthesisDependencies(
+            build_evidence_ledger=build_evidence_ledger,
+            build_meta_evidence_pack=build_meta_evidence_pack,
+            build_retrieved_evidence_fallback=build_retrieved_evidence_fallback,
+            build_reviewer_model=build_reviewer_model,
+            build_snapshot_fallback_answer=build_snapshot_fallback_answer,
+            compress_results=compress_results,
+            create_grounded_stream_buffer=create_grounded_stream_buffer,
+            emit_chunked_content=emit_chunked_content,
+            extract_text_content=extract_text_content,
+            filter_completed_answer=filter_completed_answer,
+            generate_model_text=generate_model_text,
+            generate_model_text_stream=generate_model_text_stream,
+            logger=logger,
+            rerank_results=rerank_results,
+            retrieve_meta_candidates=retrieve_meta_candidates,
+            select_diverse_results=select_diverse_results,
+            stream_with_first_token_watchdog=stream_with_first_token_watchdog,
+            summarize_retrieval=summarize_retrieval,
+            uses_responses_api=uses_responses_api,
+            validate_ledger_grounding=validate_ledger_grounding,
+            re_act_agent_cls=ReActAgent,
+            openai_chat_formatter_cls=OpenAIChatFormatter,
+            in_memory_memory_cls=InMemoryMemory,
+            msg_cls=Msg,
+            required_external_api_error_cls=RequiredExternalAPIError,
+            data_analysis_system_prompt=DATA_ANALYSIS_SYSTEM_PROMPT,
+            external_api_required=EXTERNAL_API_REQUIRED,
+            meta_compress_char_budget=META_COMPRESS_CHAR_BUDGET,
+            meta_compress_max_items=META_COMPRESS_MAX_ITEMS,
+            meta_evidence_lanes=META_EVIDENCE_LANES,
+            meta_rerank_top_n=META_RERANK_TOP_N,
+            meta_retrieval_lane_top_k=META_RETRIEVAL_LANE_TOP_K,
+            model_call_timeout_seconds=MODEL_CALL_TIMEOUT_SECONDS,
+            openai_review_model=OPENAI_REVIEW_MODEL,
+            rag_fact_validation_enabled=RAG_FACT_VALIDATION_ENABLED,
+            retrieval_fusion_mode=RETRIEVAL_FUSION_MODE,
+            retrieval_top_k_bm25=RETRIEVAL_TOP_K_BM25,
+            retrieval_top_k_dense=RETRIEVAL_TOP_K_DENSE,
+            synthesis_reasoning_effort=SYNTHESIS_REASONING_EFFORT,
+        ),
     )
-    reranked = select_diverse_results(
-        reranked_candidates,
-        top_n=META_RERANK_TOP_N,
-        per_source_limit=3,
-    )
-    rerank_latency_ms = int((time.perf_counter() - rerank_started) * 1000)
-    if metadata is not None:
-        metadata["retrieval"]["rerank_latency_ms"] = rerank_latency_ms
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.rerank",
-            phase="rerank",
-            status="completed",
-            subquery_id=subquery_id,
-            title="已重排序环境证据",
-            detail=f"保留 {len(reranked)} 条高相关候选证据；耗时={rerank_latency_ms}ms。",
-            operation="rerank.select_diverse",
-            parameters={"rerank_top_n": META_RERANK_TOP_N, "evidence_count": len(reranked)},
-            evidence=[f"精排后保留 {len(reranked)} 条证据，每类来源最多 3 条。"],
-            boundaries=["重排分数表示与问题的相关性，不表示卡牌或卡组强度。"],
-        )
-    compressed = compress_results(
-        reranked,
-        max_items=META_COMPRESS_MAX_ITEMS,
-        char_budget=META_COMPRESS_CHAR_BUDGET,
-    )
-    if metadata is not None:
-        metadata["retrieval"]["reranked_count"] = len(reranked)
-        metadata["retrieval"]["evidence_count"] = len(compressed)
-        metadata["retrieval"]["evidence_char_budget"] = META_COMPRESS_CHAR_BUDGET
-    if not compressed:
-        return (
-            "当前知识库没有检索到足够相关的证据，因此不生成策略性结论。"
-            "请补充对应的卡组、对手或战术资料后重试。\n\n参考来源：\n"
-            f"{sources}"
-        )
-    structured_source_count = len([line for line in sources.splitlines() if line.strip()])
-    retrieved_context, retrieval_refs = build_context_and_refs(
-        compressed,
-        start_index=structured_source_count + 1,
-    )
-    allowed_doc_ids = {str(item["doc"].get("doc_id")) for item in compressed}
-    grounding_evidence = f"{evidence}\n{retrieved_context}"
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.review",
-            phase="review",
-            status="completed",
-            subquery_id=subquery_id,
-            title="已审查环境证据边界",
-            detail=f"确认 {len(allowed_doc_ids)} 条 RAG 证据和结构化证据可用于综合。",
-            operation="evidence.review_boundaries",
-            parameters={"evidence_count": len(allowed_doc_ids)},
-            rationale="只允许模型使用本次选定范围内、通过压缩与引用登记的证据。",
-            evidence=[f"{len(allowed_doc_ids)} 条 RAG 证据进入生成上下文。"],
-            boundaries=[
-                "使用率表示本样本中的出现频率，不能单独证明强度或因果。",
-                "胜率需要结合样本量、数据范围和对局选择偏差解释。",
-            ],
-        )
-    reviewer_instructions = (
-        DATA_ANALYSIS_SYSTEM_PROMPT
-        + "\n可按‘结论、数据依据、配卡分析、数据边界’组织回答，小标题直接写中文，不添加井号或星号。"
-    )
-    evidence_label = "当前选定的 Supercell API 数据范围" if EXTERNAL_API_REQUIRED else "本地快照证据包"
-    if parsed.get("intent") == "meta_analysis_query":
-        reviewer_instructions = (
-            DATA_ANALYSIS_SYSTEM_PROMPT
-            + "\n只使用提供的证据分析环境。可使用‘结论、数据依据、数据边界’三个中文纯文本小标题，"
-            "但小标题前不要加井号，不要使用星号强调。除非用户明确要求，否则不要加入训练建议、具体打法、"
-            "对手侦察、三局两胜备战、赛程或推荐。不要输出参考来源标题或来源列表，运行时会追加已校验来源。"
-        )
-    strict_live_instruction = (
-        "\n当前证据包来自选定的 Supercell API 对局范围：不得称其为本地静态文件或全局环境统计；"
-        "RAG 文档只提供通用策略，不得把其中的卡组当作当前主流排行。"
-        if EXTERNAL_API_REQUIRED
-        else ""
-    )
-    reviewer_agent = ReActAgent(
-        name="MetaEvidenceReviewer",
-        sys_prompt=DATA_ANALYSIS_SYSTEM_PROMPT + strict_live_instruction,
-        model=build_reviewer_model(api_key),
-        formatter=OpenAIChatFormatter(),
-        memory=InMemoryMemory(),
-    )
-    reviewer_agent.set_console_output_enabled(enabled=False)
-    prompt = (
-        f"用户问题：{user_text}\n"
-        f"已解析意图：{parsed.get('intent')}\n\n"
-        f"{evidence_label}：\n"
-        f"{evidence}\n\n"
-        "RAG 检索证据：\n"
-        f"{retrieved_context}\n\n"
-        "请严格按照系统规则回答。不要输出参考来源标题或来源列表；运行时会附加经过校验的来源。"
-    )
-    answer = ""
-    model_streamed = False
-    dropped_sentence_count = 0
-    try:
-        if uses_responses_api() and stream_content and event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.generate",
-                phase="generate",
-                status="running",
-                subquery_id=subquery_id,
-                title="正在生成环境结论",
-                detail="模型正在基于检索证据输出公开文本。",
-                operation="synthesize.evidence_grounded",
-                parameters={
-                    "mode": "evidence_grounded",
-                    "effort": SYNTHESIS_REASONING_EFFORT,
-                    "stream": True,
-                    "timeout_seconds": MODEL_CALL_TIMEOUT_SECONDS,
-                    "model": OPENAI_REVIEW_MODEL,
-                },
-                rationale="把已校验的结构化指标和 RAG 证据组织成可读结论，同时保留数据边界。",
-                boundaries=["不展示内部提示词或私有思维链，只展示可审计的执行依据。"],
-            )
-            chunks: list[str] = []
-            public_chunks: list[str] = []
-            stream_buffer = GroundedStreamBuffer(
-                grounding_evidence,
-                allowed_doc_ids,
-                stop_markers=("参考来源：", "参考来源:", "References:", "Sources:"),
-                drop_unsupported=True,
-            )
-            try:
-                async with asyncio.timeout(MODEL_CALL_TIMEOUT_SECONDS):
-                    model_stream = generate_model_text_stream(
-                        api_key=api_key,
-                        instructions=reviewer_instructions,
-                        input_text=prompt,
-                        reasoning_effort=SYNTHESIS_REASONING_EFFORT,
-                    )
-                    async for delta in stream_with_first_token_watchdog(
-                        model_stream,
-                        event_sink=event_sink,
-                        step_id=f"{subquery_id}.generate",
-                        subquery_id=subquery_id,
-                    ):
-                        chunks.append(delta)
-                        for validated_chunk in stream_buffer.push(delta):
-                            public_chunks.append(validated_chunk)
-                            await event_sink.content(validated_chunk, delta=True)
-                for validated_chunk in stream_buffer.finish():
-                    public_chunks.append(validated_chunk)
-                    await event_sink.content(validated_chunk, delta=True)
-                answer = "".join(public_chunks).strip()
-                if not answer:
-                    answer = "模型生成的数值结论未通过证据校验，因此没有输出不可靠数据。"
-                dropped_sentence_count = stream_buffer.dropped_count
-                model_streamed = True
-                if metadata is not None:
-                    metadata["model_stream"] = "streaming"
-            except ModelFirstTokenTimeout:
-                raise
-            except Exception as exc:
-                if chunks:
-                    raise
-                # Do not start a second full-length model call here. The old
-                # retry could turn one 120-second bound into roughly 240 seconds.
-                raise ModelStreamStartupError("model stream failed before first public text") from exc
-        elif uses_responses_api():
-            answer = await asyncio.wait_for(
-                generate_model_text(
-                    api_key=api_key,
-                    instructions=reviewer_instructions,
-                    input_text=prompt,
-                    reasoning_effort=SYNTHESIS_REASONING_EFFORT,
-                ),
-                timeout=MODEL_CALL_TIMEOUT_SECONDS,
-            )
-            if metadata is not None:
-                metadata["model_stream"] = "fallback_chunked"
-        else:
-            result = await asyncio.wait_for(
-                reviewer_agent(Msg(name="user", role="user", content=prompt)),
-                timeout=MODEL_CALL_TIMEOUT_SECONDS,
-            )
-            answer = extract_text_content(result).strip()
-            if metadata is not None:
-                metadata["model_stream"] = "fallback_chunked"
-        if metadata is not None:
-            metadata["model_generation"] = "api"
-    except asyncio.TimeoutError as exc:
-        logger.warning("evidence synthesis model call timed out")
-        first_token_timeout = isinstance(exc, ModelFirstTokenTimeout)
-        if metadata is not None:
-            metadata["model_generation"] = "retrieval_fallback_after_model_timeout"
-            metadata["model_failure_type"] = type(exc).__name__
-            metadata["model_stream"] = "fallback_chunked"
-            metadata["degraded"] = True
-            metadata["degraded_reason"] = "model_first_token_timeout" if first_token_timeout else "model_timeout"
-        if event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.degraded",
-                phase="generate",
-                status="completed",
-                subquery_id=subquery_id,
-                title="模型首段文本等待超时，已返回检索证据" if first_token_timeout else "模型综合超时，已返回检索证据",
-                detail="没有发起第二次长模型调用；返回内容只来自本轮已经校验的检索证据。",
-            )
-        answer = build_retrieved_evidence_fallback(compressed)
-    except ModelStreamStartupError as exc:
-        cause = exc.__cause__ or exc
-        logger.warning("evidence synthesis stream startup failed type=%s", type(cause).__name__)
-        if metadata is not None:
-            metadata["model_generation"] = "retrieval_fallback_after_stream_error"
-            metadata["model_failure_type"] = type(cause).__name__
-            metadata["model_stream"] = "fallback_chunked"
-            metadata["degraded"] = True
-            metadata["degraded_reason"] = "model_stream_startup_error"
-        if event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.degraded",
-                phase="generate",
-                status="completed",
-                subquery_id=subquery_id,
-                title="模型流未启动，已返回检索证据",
-                detail="没有发起第二次长模型调用；返回内容只来自本轮已经校验的检索证据。",
-            )
-        answer = build_retrieved_evidence_fallback(compressed)
-    except GroundingValidationError as exc:
-        logger.warning("evidence grounding validation failed detail=%s", str(exc)[:1000])
-        if metadata is not None:
-            metadata["model_generation"] = "unavailable" if EXTERNAL_API_REQUIRED else "fallback_after_grounding_error"
-            metadata["model_failure_type"] = type(exc).__name__
-            metadata["model_stream"] = "unavailable"
-            metadata["grounding_validation_error"] = str(exc)[:1000]
-        if EXTERNAL_API_REQUIRED:
-            raise RequiredExternalAPIError("RAG model API call failed: GroundingValidationError") from exc
-        answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
-    except Exception as exc:
-        logger.exception("evidence synthesis model call failed")
-        if metadata is not None:
-            metadata["model_generation"] = "unavailable" if EXTERNAL_API_REQUIRED else "fallback_after_model_error"
-            metadata["model_failure_type"] = type(exc).__name__
-            metadata["model_stream"] = "unavailable"
-        if EXTERNAL_API_REQUIRED:
-            raise RequiredExternalAPIError(f"RAG model API call failed: {type(exc).__name__}") from exc
-        answer = build_snapshot_fallback_answer(top_decks_data, cards_meta_data)
-    answer = strip_generated_reference_section(answer)
-    if not model_streamed:
-        completed_buffer = GroundedStreamBuffer(
-            grounding_evidence,
-            allowed_doc_ids,
-            drop_unsupported=True,
-        )
-        validated_parts = completed_buffer.push(answer)
-        validated_parts += completed_buffer.finish()
-        answer = "".join(validated_parts).strip()
-        dropped_sentence_count = completed_buffer.dropped_count
-        if not answer:
-            answer = "模型生成的数值结论未通过证据校验，因此没有输出不可靠数据。"
-    if dropped_sentence_count:
-        boundary_notice = "\n\n数据边界：模型生成的部分数值句未通过证据校验，相关内容已省略。"
-        answer += boundary_notice
-        if metadata is not None:
-            metadata["grounding_sentences_dropped"] = dropped_sentence_count
-        if event_sink is not None and model_streamed:
-            await event_sink.content(boundary_notice, delta=True)
-    final_answer = f"{answer}\n\n参考来源：\n{sources}\n{retrieval_refs}"
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.validate",
-            phase="validate",
-            status="running",
-            subquery_id=subquery_id,
-            title="正在校验环境回答",
-            detail="检查引用标识和数值事实是否受当前范围证据支持。",
-            operation="grounding.validate",
-            parameters={"evidence_count": len(allowed_doc_ids)},
-            rationale="最终答案中的数值和引用必须能回指到本轮允许的证据。",
-        )
-    try:
-        grounding_validation = validate_answer_grounding(
-            final_answer,
-            grounding_evidence,
-            allowed_doc_ids,
-            raise_on_failure=RAG_FACT_VALIDATION_ENABLED and EXTERNAL_API_REQUIRED,
-        )
-    except GroundingValidationError as exc:
-        logger.warning("final evidence grounding validation failed detail=%s", str(exc)[:1000])
-        if metadata is not None:
-            metadata["grounding_validation_error"] = str(exc)[:1000]
-            metadata["grounding_fallback"] = "validated_refusal"
-        answer = "模型生成的环境结论未通过最终证据校验，因此没有输出不可靠内容。"
-        final_answer = f"{answer}\n\n参考来源：\n{sources}\n{retrieval_refs}"
-        grounding_validation = validate_answer_grounding(
-            final_answer,
-            grounding_evidence,
-            allowed_doc_ids,
-            raise_on_failure=False,
-        )
-    if metadata is not None:
-        metadata["grounding_validation"] = grounding_validation
-    if event_sink is not None:
-        await event_sink.execution(
-            step_id=f"{subquery_id}.validate",
-            phase="validate",
-            status="completed",
-            subquery_id=subquery_id,
-            title="环境回答校验通过",
-            detail="回答通过当前数据范围的证据边界校验。",
-            operation="grounding.validate",
-            parameters={"evidence_count": len(allowed_doc_ids)},
-            evidence=["数值事实与引用标识已完成证据边界校验。"],
-            boundaries=["结论只适用于界面当前选择的数据范围和快照。"],
-        )
-    if event_sink is not None and stream_content:
-        if not model_streamed:
-            chunks = [answer[start : start + 80] for start in range(0, len(answer), 80)]
-            for index, chunk in enumerate(chunks):
-                await event_sink.content(chunk, delta=True)
-                if index < len(chunks) - 1:
-                    await asyncio.sleep(FALLBACK_CONTENT_INTERVAL_SECONDS)
-        await event_sink.content(f"\n\n参考来源：\n{sources}\n{retrieval_refs}", delta=True)
-        await event_sink.execution(
-            step_id=f"{subquery_id}.generate",
-            phase="generate",
-            status="completed",
-            subquery_id=subquery_id,
-            title="已生成环境结论",
-            detail="回答仅基于当前检索证据和官方快照。",
-        )
-    return final_answer
 
 
 DIRECT_SKILL_REGISTRY = build_default_registry(
@@ -1119,88 +330,36 @@ RULE_BASED_PLANNER = RuleBasedPlanner()
 
 
 def subquery_needs_rag(parsed: dict) -> bool:
-    intent = parsed.get("intent")
-    if intent == "meta_analysis_query":
-        return True
-    if intent == "deck_query":
-        return (
-            not parsed.get("deck_cards")
-            and parsed.get("rank") is None
-            and parsed.get("top_n") is None
-        )
-    if intent == "card_query":
-        return (
-            parsed.get("entity_mode") != "loadout_entity"
-            and
-            parsed.get("card_name") is None
-            and parsed.get("rank") is None
-            and parsed.get("top_n") is None
-        )
-    return False
+    return packaged_subquery_needs_rag(parsed)
 
 
 def subquery_title(parsed: dict) -> str:
-    intent = parsed.get("intent")
-    if intent == "card_query":
-        return f"卡牌数据：{parsed.get('card_name') or '卡牌排行'}"
-    if intent == "card_compare_query":
-        names = [str(name) for name in (parsed.get("card_names") or []) if name]
-        metric_labels = {
-            "usage_rate": "使用率",
-            "win_rate": "胜率",
-            "clean_win_rate": "净胜率",
-        }
-        metric = metric_labels.get(parsed.get("compare_metric"), "表现")
-        return f"{' 与 '.join(names[:2]) or '两张卡牌'} {metric}比较"
-    if intent == "meta_analysis_query":
-        return "环境分析：当前主流卡组"
-    if intent == "match_preparation_query":
-        return "已移除的战队备战功能"
-    if intent == "card_cooccurrence_query":
-        names = [str(name) for name in (parsed.get("card_names") or []) if name]
-        if len(names) >= 2:
-            return f"{' 与 '.join(names[:2])} 共现统计"
-        return f"{parsed.get('card_name') or '卡牌'} 常见搭配"
-    if intent == "deck_query":
-        if parsed.get("deck_cards"):
-            return "精确八卡卡组统计"
-        if parsed.get("card_name"):
-            return f"{parsed['card_name']} 卡组"
-        return "热门卡组"
-    if intent == "schedule_query":
-        return "已移除的战队赛程功能"
-    return "子问题结果"
+    return packaged_subquery_title(parsed)
 
 
 def subquery_user_text(parsed: dict, original_text: str) -> str:
-    intent = parsed.get("intent")
-    if intent == "meta_analysis_query":
-        return original_text
-    if intent == "match_preparation_query":
-        return "已移除的战队备战功能"
-    if (
-        intent == "deck_query"
-        and parsed.get("card_name") is None
-        and parsed.get("rank") is None
-        and parsed.get("top_n") is None
-    ):
-        return "当前热门卡组分析"
-    if intent == "card_query" and parsed.get("entity_mode") == "loadout_entity":
-        state = parsed.get("special_state") or "ordinary"
-        return f"{state} {parsed.get('entity_name') or parsed.get('card_name') or ''} {' '.join(parsed.get('metrics') or [])}"
-    if intent == "card_query" and parsed.get("card_name"):
-        return f"{parsed['card_name']} {' '.join(parsed.get('metrics') or [])}"
-    return original_text
+    return packaged_subquery_user_text(parsed, original_text)
+
+
+def _multi_intent_dependencies(*, execute_subquery_func=None) -> MultiIntentDependencies:
+    return MultiIntentDependencies(
+        answer_result_cls=AnswerResult,
+        execute_subquery=execute_subquery_func,
+        recorder=SKILL_EXECUTOR.recorder,
+        subquery_semantic_key=subquery_semantic_key,
+        skill_context_cls=SkillContext,
+        skill_executor=SKILL_EXECUTOR,
+        planner=RULE_BASED_PLANNER,
+        skill_registry=DIRECT_SKILL_REGISTRY,
+        subquery_needs_rag=subquery_needs_rag,
+        subquery_title=subquery_title,
+        subquery_user_text=subquery_user_text,
+        logger=logger,
+    )
 
 
 def compose_multi_intent_answer(results: list[dict]) -> str:
-    sections = []
-    for result in results:
-        answer = result.get("answer") or "当前子问题没有可用结果。"
-        if result.get("status") == "failed":
-            answer = f"无法完成：{result.get('error') or answer}"
-        sections.append(f"## {result['title']}\n{answer}")
-    return "\n\n".join(sections)
+    return packaged_compose_multi_intent_answer(results)
 
 
 async def execute_subquery(
@@ -1219,110 +378,22 @@ async def execute_subquery(
     event_sink: RuntimeEventEmitter | None = None,
     stream_content: bool = False,
 ) -> dict:
-    subquery_id = str(parsed.get("id") or "q")
-    started_at = time.perf_counter()
-    context = SkillContext(
-        user_text=subquery_user_text(parsed, user_text),
+    return await packaged_execute_subquery(
+        user_text=user_text,
         parsed=parsed,
         schedule_data=schedule_data,
         top_decks_data=top_decks_data,
         cards_meta_data=cards_meta_data,
-        card_deck_stats=card_deck_stats or {},
-        structured_repository=structured_repository,
         retriever=retriever,
         api_key=api_key,
-        metadata={"trace_id": trace_id, "subquery_id": subquery_id, **(runtime_metadata or {})},
+        trace_id=trace_id,
+        dependencies=_multi_intent_dependencies(),
+        runtime_metadata=runtime_metadata,
+        card_deck_stats=card_deck_stats,
+        structured_repository=structured_repository,
         event_sink=event_sink,
         stream_content=stream_content,
     )
-    plan = RULE_BASED_PLANNER.build_plan(context)
-    if plan is not None:
-        context.metadata["plan"] = plan.to_dict()
-
-    if event_sink is not None:
-        candidate = DIRECT_SKILL_REGISTRY.resolve(parsed)
-        await event_sink.execution(
-            step_id=f"{subquery_id}.route",
-            phase="route",
-            status="running",
-            subquery_id=subquery_id,
-            title=f"正在执行{subquery_title(parsed)}",
-            detail=f"路由到 {candidate.name if candidate else '未匹配 Skill'}。",
-            operation="intent.route",
-            parameters={
-                "mode": parsed.get("intent"),
-                "scope": (runtime_metadata or {}).get("dataset_scope"),
-            },
-            rationale=f"将用户问题理解为“{subquery_title(parsed)}”并选择对应执行能力。",
-            boundaries=["这里展示的是已执行的路由摘要，不是模型的私有思维链。"],
-        )
-
-    unavailable = None
-    if subquery_needs_rag(parsed) and not api_key:
-        unavailable = "OPENAI_API_KEY is not configured"
-    elif subquery_needs_rag(parsed) and retriever is None:
-        unavailable = "RAG retriever is unavailable"
-
-    try:
-        answer = await SKILL_EXECUTOR.execute(context)
-        status = "unavailable" if unavailable else "success"
-        if answer is None:
-            status = "failed"
-            answer = "没有匹配到可以安全处理该子问题的能力。"
-        if event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.route",
-                phase="route",
-                status="completed" if status == "success" else status,
-                subquery_id=subquery_id,
-                title=f"已完成{subquery_title(parsed)}",
-                detail=f"使用 {context.metadata.get('selected_skill') or '未匹配 Skill'}。",
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-                operation="intent.route",
-                parameters={
-                    "mode": parsed.get("intent"),
-                    "scope": (runtime_metadata or {}).get("dataset_scope"),
-                },
-                evidence=[f"执行路径：{context.metadata.get('selected_skill') or '未匹配 Skill'}。"],
-            )
-        return {
-            "id": subquery_id,
-            "title": subquery_title(parsed),
-            "parsed": parsed,
-            "plan": context.metadata.get("plan"),
-            "selected_skill": context.metadata.get("selected_skill"),
-            "mode": context.metadata.get("mode"),
-            "status": status,
-            "answer": answer,
-            "metadata": dict(context.metadata),
-            "error": unavailable,
-            "latency_ms": int((time.perf_counter() - started_at) * 1000),
-        }
-    except Exception as exc:
-        logger.exception("subquery failed id=%s intent=%s", subquery_id, parsed.get("intent"))
-        if event_sink is not None:
-            await event_sink.execution(
-                step_id=f"{subquery_id}.route",
-                phase="route",
-                status="failed",
-                subquery_id=subquery_id,
-                title=f"{subquery_title(parsed)}未完成",
-                detail=type(exc).__name__,
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-        return {
-            "id": subquery_id,
-            "title": subquery_title(parsed),
-            "parsed": parsed,
-            "plan": context.metadata.get("plan"),
-            "selected_skill": context.metadata.get("selected_skill"),
-            "mode": context.metadata.get("mode"),
-            "status": "failed",
-            "answer": "",
-            "metadata": dict(context.metadata),
-            "error": str(exc),
-            "latency_ms": int((time.perf_counter() - started_at) * 1000),
-        }
 
 
 async def answer_multi_intent_query(
@@ -1340,72 +411,20 @@ async def answer_multi_intent_query(
     event_sink: RuntimeEventEmitter | None = None,
     stream_content: bool = False,
 ) -> AnswerResult:
-    trace_id = SKILL_EXECUTOR.recorder.new_trace_id()
-    started_at = time.perf_counter()
-    subqueries = []
-    seen_subqueries: set[tuple] = set()
-    for item in parsed.get("subqueries", []):
-        if not isinstance(item, dict):
-            continue
-        key = subquery_semantic_key(item)
-        if key in seen_subqueries:
-            continue
-        seen_subqueries.add(key)
-        subqueries.append(item)
-    results = await asyncio.gather(
-        *[
-            execute_subquery(
-                user_text=user_text,
-                parsed=subquery,
-                schedule_data=schedule_data,
-                top_decks_data=top_decks_data,
-                cards_meta_data=cards_meta_data,
-                retriever=retriever,
-                api_key=api_key,
-                trace_id=trace_id,
-                runtime_metadata=runtime_metadata,
-                card_deck_stats=card_deck_stats,
-                structured_repository=structured_repository,
-                event_sink=event_sink,
-                stream_content=stream_content,
-            )
-            for subquery in subqueries
-        ]
-    )
-    plan = {
-        "plan_type": "multi_intent",
-        "subqueries": [
-            {"id": result["id"], "intent": result["parsed"].get("intent"), "plan": result["plan"]}
-            for result in results
-        ],
-    }
-    metadata = {
-        **(runtime_metadata or {}),
-        "subquery_count": len(results),
-        "sub_results": results,
-        "total_latency_ms": int((time.perf_counter() - started_at) * 1000),
-    }
-    stream_modes = {
-        str(result.get("metadata", {}).get("model_stream"))
-        for result in results
-        if isinstance(result.get("metadata"), dict)
-    }
-    metadata["model_stream"] = (
-        "streaming"
-        if "streaming" in stream_modes
-        else "fallback_chunked"
-        if "fallback_chunked" in stream_modes
-        else "unavailable"
-    )
-    return AnswerResult(
-        answer=compose_multi_intent_answer(results),
-        trace_id=trace_id,
+    return await packaged_answer_multi_intent_query(
+        user_text=user_text,
         parsed=parsed,
-        plan=plan,
-        selected_skill="MultiIntentOrchestrator",
-        mode="mixed",
-        metadata=metadata,
-        sub_results=results,
+        schedule_data=schedule_data,
+        top_decks_data=top_decks_data,
+        cards_meta_data=cards_meta_data,
+        retriever=retriever,
+        api_key=api_key,
+        dependencies=_multi_intent_dependencies(execute_subquery_func=execute_subquery),
+        runtime_metadata=runtime_metadata,
+        card_deck_stats=card_deck_stats,
+        structured_repository=structured_repository,
+        event_sink=event_sink,
+        stream_content=stream_content,
     )
 
 
@@ -1441,37 +460,37 @@ async def answer_query(
             stream_content=stream_content,
         )
         return result if include_metadata else result.answer
-    context = SkillContext(
+    structured_result = await answer_structured_query(
         user_text=user_text,
         parsed=parsed,
         schedule_data=schedule_data,
         top_decks_data=top_decks_data,
         cards_meta_data=cards_meta_data,
-        card_deck_stats=card_deck_stats or {},
-        structured_repository=structured_repository,
         retriever=retriever,
         api_key=api_key,
-        metadata=dict(runtime_metadata or {}),
+        runtime_metadata=runtime_metadata,
+        card_deck_stats=card_deck_stats,
+        structured_repository=structured_repository,
         event_sink=event_sink,
         stream_content=stream_content,
+        dependencies=StructuredAnswerDependencies(
+            skill_executor=SKILL_EXECUTOR,
+            planner=RULE_BASED_PLANNER,
+        ),
     )
-    plan = RULE_BASED_PLANNER.build_plan(context)
-    if plan is not None:
-        context.metadata["plan"] = plan.to_dict()
-    answer = await SKILL_EXECUTOR.execute(context)
-    if answer is not None:
+    if structured_result.answer is not None:
         logger.info("answer route intent=%s mode=skill_executor", intent)
         if include_metadata:
             return AnswerResult(
-                answer=answer,
-                trace_id=context.metadata.get("trace_id"),
+                answer=structured_result.answer,
+                trace_id=structured_result.trace_id,
                 parsed=parsed,
-                plan=context.metadata.get("plan"),
-                selected_skill=context.metadata.get("selected_skill"),
-                mode=context.metadata.get("mode"),
-                metadata=dict(context.metadata),
+                plan=structured_result.plan,
+                selected_skill=structured_result.selected_skill,
+                mode=structured_result.mode,
+                metadata=dict(structured_result.metadata),
             )
-        return answer
+        return structured_result.answer
 
     logger.info("answer route intent=reject mode=fallback")
     fallback_answer = (
@@ -1484,17 +503,15 @@ async def answer_query(
     if include_metadata:
         return AnswerResult(
             answer=fallback_answer,
-            trace_id=context.metadata.get("trace_id"),
+            trace_id=structured_result.trace_id,
             parsed=parsed,
-            plan=context.metadata.get("plan"),
+            plan=structured_result.plan,
             selected_skill=None,
             mode="fallback",
-            metadata=dict(context.metadata),
+            metadata=dict(structured_result.metadata),
         )
     return fallback_answer
 
 
 def read_trace(trace_id: str | None) -> list[dict]:
-    if not trace_id:
-        return []
-    return SKILL_EXECUTOR.recorder.read_trace(trace_id)
+    return packaged_read_trace(trace_id, recorder=SKILL_EXECUTOR.recorder)
