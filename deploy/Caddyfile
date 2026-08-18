@@ -1,6 +1,11 @@
 (routes) {
 	encode zstd gzip
 
+	@public_ops {
+		path /metrics /model/status /feedback/stats /ready /snapshot/status /api/metrics /api/model/status /api/feedback/stats /api/ready /api/snapshot/status
+	}
+	respond @public_ops 404
+
 	handle_path /api/* {
 		reverse_proxy api-1:8091 api-2:8091
 	}

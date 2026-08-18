@@ -59,5 +59,28 @@ class AlertingContractTests(unittest.TestCase):
         self.assertIn("evaluation_interval: 1s", drill_config)
 
 
+class PublicEdgeContractTests(unittest.TestCase):
+    def test_caddy_blocks_public_operations_surfaces_before_proxying(self):
+        caddyfile = (ROOT / "deploy" / "Caddyfile").read_text(encoding="utf-8")
+
+        self.assertIn("@public_ops", caddyfile)
+        self.assertIn("respond @public_ops 404", caddyfile)
+        for path in (
+            "/metrics",
+            "/model/status",
+            "/feedback/stats",
+            "/ready",
+            "/snapshot/status",
+            "/api/metrics",
+            "/api/model/status",
+            "/api/feedback/stats",
+            "/api/ready",
+            "/api/snapshot/status",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(path, caddyfile)
+        self.assertLess(caddyfile.index("respond @public_ops 404"), caddyfile.index("handle_path /api/*"))
+
+
 if __name__ == "__main__":
     unittest.main()
