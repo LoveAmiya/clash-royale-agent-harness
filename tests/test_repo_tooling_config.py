@@ -53,6 +53,24 @@ class RepositoryToolingConfigTests(unittest.TestCase):
         for dependency in forbidden_live_dependencies:
             self.assertNotIn(dependency, normalized)
 
+    def test_ci_runs_package_compile_and_repo_hygiene_gate(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("python -m compileall -q *.py src evaluation harness planner skills tests", workflow)
+        self.assertIn("shell: pwsh", workflow)
+        self.assertIn("./scripts/check_repo.ps1 -SkipTests -SkipRuff", workflow)
+
+    def test_post_review_cleanup_constraints_are_documented(self):
+        health_plan = (ROOT / "docs" / "REPO_HEALTH_PLAN.md").read_text(encoding="utf-8")
+        refactor_queue = (ROOT / "docs" / "REFACTOR_QUEUE.md").read_text(encoding="utf-8")
+
+        self.assertIn("Apache-2.0", health_plan)
+        self.assertIn("owner confirmation is still", health_plan)
+        self.assertIn("Post-Review Queue - 2026-08-18", refactor_queue)
+        self.assertIn("supercell_live.py", refactor_queue)
+        self.assertIn("collector strategy changes", refactor_queue)
+        self.assertIn("snapshot_workspace.py", refactor_queue)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,7 +32,7 @@ python -m evaluation.test_inventory --report evaluation/reports/test-inventory-l
 
 | Evidence | Latest known result | Notes |
 |---|---:|---|
-| Unit/integration discovery | 1011 tests on 2026-08-17 | Local Windows run after API/collection package-boundary and evaluation-entrypoint checks |
+| Unit/integration discovery | 1086 tests on 2026-08-18 | Local Windows run after repository/package migration and QA-boundary checks; skipped=1 |
 | Deterministic contract regression | 344/344 enabled cases pass | 4 optional RAG-route cases are skipped by design |
 | Snapshot citation and numeric grounding probes | 25/25 pass | Invalid-citation rate `0` in the recorded baseline |
 | Synthetic fault injection | 28/28 pass | Covers grounding errors, provider failures, quota/rate limits, stale snapshot/RAG alignment, stream fallback, and Supercell retry cooldown |
@@ -64,6 +64,14 @@ excluded from default pytest runs.
 - Tests that actually invoke Windows PowerShell must skip unless Windows PowerShell is available.
 - Windows-only tests must not read `SystemRoot` at module import time. The skip condition must be applied after safe discovery.
 - Public CI must not read `data/corpus/corpus.sqlite`, active private snapshots, real API keys, Supercell tokens, player identifiers, or raw battle logs.
+- Before running full local unittest discovery against the checked-out repository, stop local API/Web processes on ports `8091` and `8080` when they are using the local Qdrant index. Otherwise the running API process can hold the Qdrant file lock and produce false failures unrelated to the code under test.
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 8080,8091 -ErrorAction SilentlyContinue |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+
+.\.venv\Scripts\python.exe -m unittest discover -s tests -q
+```
 
 ## Generated Reports
 

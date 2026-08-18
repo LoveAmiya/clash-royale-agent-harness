@@ -155,4 +155,31 @@ contracts that need a separate regression test.
 | 38 | Phase 6 | done | Standardize API startup and RAG preheat baseline reporting, then link the metrics from operations docs. | 2026-08-18 heartbeat: added API startup and latest RAG preheat elapsed/outcome baselines to `/health` and documented their safe aggregate contract in `docs/OPERATIONS.md`; startup/preheat/status tests added. `run_tests.ps1` passed with 1083 tests, 1 skipped. |
 
 | 39 | Final review | done | Run full public gate, inspect private-data status, update docs with final remaining risks, and summarize next phase if any. | 2026-08-18 heartbeat: full public gate passed with 1083 tests, 1 skipped; tracked private/generated path scan remains 0 and worktree status contains only source/docs/test/config paths. Health plan now records remaining oversize facades, advisory tooling, blocked candidate cleanup, aggregate-only baselines, and pre-existing CRLF whitespace found by the optional unstaged scan. |
-
+
+
+## Post-Review Queue - 2026-08-18
+
+This compact queue tracks the small follow-up items raised after the repository
+review. It is intentionally separate from the main refactor queue so these
+tooling and documentation fixes do not become another broad migration pass.
+
+| # | Status | Slice | Evidence / notes |
+|---:|---|---|---|
+| A | done | Harden `scripts/check_repo.ps1` for Git safe.directory / dubious ownership failures. | Added explicit `git rev-parse --show-toplevel` root resolution and concise safe.directory failure text; focused script test covers the guard. |
+| B | done | Wire the CI quality gate to compile package code and run repository hygiene without live providers. | `.github/workflows/ci.yml` now compiles `src` explicitly and runs `./scripts/check_repo.ps1 -SkipTests -SkipRuff`; tooling-config test covers both checks. |
+| C | done | Document the local pre-test rule for stopping API/Web when local Qdrant is active. | `docs/TESTING.md` now records the 8080/8091 stop-before-full-unittest rule and PowerShell command to avoid false Qdrant file-lock failures. |
+| D | done | Record Apache-2.0 license choice as pending maintainer confirmation. | `docs/REPO_HEALTH_PLAN.md` records the pending owner confirmation and forbids license changes without explicit direction. |
+| E | done | Refresh this queue with the compact post-review cleanup ledger. | Added this post-review section so future heartbeat runs can continue from a small, reviewable list. |
+| F | done | Prepare the next small Phase 2 slice plan for remaining monoliths, prioritizing `supercell_live.py` API-client/preflight separation if it stays under about five files with tests. | 2026-08-18 post-review heartbeat: inspected current monolith sizes and Supercell collection boundaries. API client/preflight are already packaged, so the next safe candidate is the disk-backed snapshot workspace extraction below. No runtime or collector behavior changed. |
+
+## Next Phase 2 Candidate Plan
+
+The next implementation should remain a narrow behavior-preserving slice. Do
+not combine it with collector strategy changes, scheduled-task edits, dead-code
+cleanup, docs rewrites, or performance benchmark changes.
+
+| # | Phase | Status | Slice | Acceptance / verification |
+|---:|---|---|---|---|
+| 40 | Phase 2 | todo | Extract `JsonlRecordSequence` and `DiskBackedSnapshotWorkspace` from `supercell_live.py` into `src/clashroyale_agent/collection/snapshot_workspace.py`, leaving root imports as compatibility aliases. | Touch about 3 files: new package module, `supercell_live.py`, and focused tests only if needed. Preserve SQLite schema, workspace identity, resume/discard/rate-limit semantics, raw JSONL streaming, and public imports. Verify with `tests.test_supercell_live_data`, `tests.test_collection_package_migration`, `git diff --check`, and `scripts/check_repo.ps1 -SkipTests -SkipRuff`. |
+| 41 | Phase 2 | pending-after-40 | Plan a separate `SupercellAPIClient.fetch_snapshot` orchestration split only after #40 passes. | Keep progress payloads, budget exhaustion, opponent expansion, cache behavior, and source-exhausted semantics covered by existing tests before moving code. |
+| 42 | Phase 2 | pending-after-41 | Plan live snapshot/stat builder extraction only after fetch orchestration has a smaller surface. | Keep `build_live_snapshot`, `probe_official_special_fields`, and `build_card_deck_stats` outputs byte-for-byte compatible where tests assert contracts. |

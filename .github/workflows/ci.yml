@@ -39,7 +39,10 @@ jobs:
           cache-dependency-path: requirements.lock.txt
       - run: python -m pip install --upgrade pip
       - run: python -m pip install --requirement requirements.lock.txt
-      - run: python -m compileall -q *.py evaluation harness planner skills tests
+      - run: python -m compileall -q *.py src evaluation harness planner skills tests
+      - name: Repository hygiene gate
+        shell: pwsh
+        run: ./scripts/check_repo.ps1 -SkipTests -SkipRuff
       - run: python -m unittest discover -s tests
       - run: python -m evaluation.run_eval --report evaluation/reports/ci-contract.json
       - run: >

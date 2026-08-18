@@ -7,7 +7,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+function Resolve-GitRepositoryRoot {
+    param(
+        [string]$CandidatePath
+    )
+
+    Push-Location $CandidatePath
+    try {
+        $gitRootOutput = @(git rev-parse --show-toplevel 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            $gitMessage = ($gitRootOutput | Out-String).Trim()
+            throw (
+                "Unable to resolve Git repository root from '$CandidatePath'. " +
+                "If Git reports dubious ownership, configure safe.directory for this checkout. " +
+                "Git said: $gitMessage"
+            )
+        }
+        return (Resolve-Path ($gitRootOutput[0].ToString())).Path
+    } finally {
+        Pop-Location
+    }
+}
+
+$projectRoot = Resolve-GitRepositoryRoot (Resolve-Path (Join-Path $PSScriptRoot ".."))
 Set-Location $projectRoot
 $script:ChecksRun = @()
 $script:ChecksSkipped = @()
@@ -47,11 +69,13 @@ if ($IncludeUnstaged) {
 $trackedFiles = @(git ls-files)
 $privatePathPattern = '^data/(?!card_aliases\.zh-CN\.json$)|^logs/|^tmp/|^trace/|^traces/|^benchmark/|^benchmarks/|^benchmark-results/|\.env($|\.)|\.sqlite3?$|\.db$|\.jsonl$|(^|/)__pycache__/|\.pyc$|^evaluation/reports/|^evaluation/live_|^evaluation/.*report.*\.json$|^evaluation/.*\.(stdout|stderr)\.|\.zip$|\.key$|\.pem$'
 $allowedJsonlFixtures = @("evaluation/cases.jsonl", "evaluation/fault_scenarios.jsonl")
+$allowedReportDocs = @("evaluation/reports/README.md")
 $trackedPrivatePaths = @(
     $trackedFiles |
         Where-Object {
             $_ -match $privatePathPattern -and
             $_ -notin $allowedJsonlFixtures -and
+            $_ -notin $allowedReportDocs -and
             $_ -ne ".env.example"
         }
 )

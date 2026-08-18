@@ -227,3 +227,6 @@ source of truth for the next slice and for interruption recovery.
 - Performance baselines expose aggregate measurements only. Live provider and
   collector runs remain opt-in; compare their generated local reports outside
   version control.
+- `LICENSE` currently declares Apache-2.0, but owner confirmation is still
+  pending. Do not change the license text or project license metadata without
+  explicit maintainer direction.

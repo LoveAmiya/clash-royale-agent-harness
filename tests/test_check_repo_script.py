@@ -32,6 +32,14 @@ class CheckRepoScriptTests(unittest.TestCase):
         self.assertIn("token|secret|api[_-]?key|password", self.script)
         self.assertIn("evaluation/cases.jsonl", self.script)
         self.assertIn("evaluation/fault_scenarios.jsonl", self.script)
+        self.assertIn("evaluation/reports/README.md", self.script)
+
+    def test_script_resolves_git_root_before_running_git_checks(self):
+        self.assertIn("git rev-parse --show-toplevel", self.script)
+        self.assertIn("Unable to resolve Git repository root", self.script)
+        self.assertIn("safe.directory", self.script)
+        self.assertIn("Push-Location", self.script)
+        self.assertIn("Pop-Location", self.script)
 
     def test_script_avoids_bulk_staging_or_private_env_mutation(self):
         self.assertNotIn("git add .", self.script)
