@@ -18,6 +18,7 @@ from harness.trace import TraceRecorder
 import query_answering
 from query_answering import build_snapshot_fallback_answer, retrieve_meta_candidates
 from runtime_events import RuntimeEventEmitter
+from src.clashroyale_agent.qa.synthesis_contracts import RequiredExternalAPIError as PackagedRequiredExternalAPIError
 
 
 class MetaEvidenceTests(unittest.TestCase):
@@ -163,6 +164,10 @@ class MetaEvidenceTests(unittest.TestCase):
 
 
 class EvidenceSynthesisSkillTests(unittest.IsolatedAsyncioTestCase):
+    def test_synthesis_contracts_have_a_packaged_owner(self):
+        from src.clashroyale_agent.qa.evidence_synthesis import RequiredExternalAPIError
+        self.assertEqual(RequiredExternalAPIError.__name__, PackagedRequiredExternalAPIError.__name__)
+
     def build_context(self, intent: str, api_key: str = "test-key") -> SkillContext:
         return SkillContext(
             user_text="根据当前热门卡组制定战队赛备战策略",

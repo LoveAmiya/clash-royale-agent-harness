@@ -2,26 +2,85 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import math
-import os
-import re
 import shutil
 import sqlite3
 import tempfile
-import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from battle_loadout import canonical_loadout, full_loadout_signature, loadout_payload
+import app_config as _app_config  # noqa: F401 - bootstrap src package imports
+
+from battle_loadout import canonical_loadout, full_loadout_signature
 from deck_archetypes import CLASSIFIER_VERSION, archetype_family, classify_deck
+try:
+    from clashroyale_agent.stats.finalize import (
+        finalize_archetypes as finalize_archetypes_orchestrated,
+        finalize_decks as finalize_decks_orchestrated,
+        finalize_fixed_card_tables as finalize_fixed_card_tables_orchestrated,
+    )
+except ModuleNotFoundError:
+    from src.clashroyale_agent.stats.finalize import (
+        finalize_archetypes as finalize_archetypes_orchestrated,
+        finalize_decks as finalize_decks_orchestrated,
+        finalize_fixed_card_tables as finalize_fixed_card_tables_orchestrated,
+    )
+try:
+    from clashroyale_agent.stats.math_primitives import increment as _increment_orchestrated, result as _result_orchestrated, wilson_lower_bound as _wilson_lower_bound_orchestrated
+except ModuleNotFoundError:
+    from src.clashroyale_agent.stats.math_primitives import increment as _increment_orchestrated, result as _result_orchestrated, wilson_lower_bound as _wilson_lower_bound_orchestrated
+try:
+    from clashroyale_agent.stats.schema import create_schema as _create_schema_orchestrated
+except ModuleNotFoundError:
+    from src.clashroyale_agent.stats.schema import create_schema as _create_schema_orchestrated
+try:
+    from clashroyale_agent.stats.write_primitives import (
+        upsert_deck as _upsert_deck_orchestrated,
+        upsert_full_loadout as _upsert_full_loadout_orchestrated,
+        upsert_full_matchup as _upsert_full_matchup_orchestrated,
+        upsert_matchup as _upsert_matchup_orchestrated,
+    )
+except ModuleNotFoundError:
+    from src.clashroyale_agent.stats.write_primitives import (
+        upsert_deck as _upsert_deck_orchestrated,
+        upsert_full_loadout as _upsert_full_loadout_orchestrated,
+        upsert_full_matchup as _upsert_full_matchup_orchestrated,
+        upsert_matchup as _upsert_matchup_orchestrated,
+    )
+try:
+    from clashroyale_agent.stats.loadout_stats import (
+        finalize_full_loadouts as _finalize_full_loadouts_orchestrated,
+        increment_loadout_features as _increment_loadout_features_orchestrated,
+    )
+except ModuleNotFoundError:
+    from src.clashroyale_agent.stats.loadout_stats import (
+        finalize_full_loadouts as _finalize_full_loadouts_orchestrated,
+        increment_loadout_features as _increment_loadout_features_orchestrated,
+    )
+try:
+    from clashroyale_agent.stats.build_primitives import (
+        SAFE_SNAPSHOT_ID as _safe_snapshot_id,
+        publish_directory as _publish_directory_orchestrated,
+        read_json as _read_json_orchestrated,
+        sha256 as _sha256_orchestrated,
+        snapshot_id as _snapshot_id_orchestrated,
+        write_json as _write_json_orchestrated,
+    )
+except ModuleNotFoundError:
+    from src.clashroyale_agent.stats.build_primitives import (
+        SAFE_SNAPSHOT_ID as _safe_snapshot_id,
+        publish_directory as _publish_directory_orchestrated,
+        read_json as _read_json_orchestrated,
+        sha256 as _sha256_orchestrated,
+        snapshot_id as _snapshot_id_orchestrated,
+        write_json as _write_json_orchestrated,
+    )
 
 
 SCHEMA_VERSION = 5
 RATING_FORMULA_VERSION = "wilson65_usage20_confidence15_v1"
-_SAFE_SNAPSHOT_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+_SAFE_SNAPSHOT_ID = _safe_snapshot_id
 
 
 class StructuredStatsError(ValueError):
@@ -29,57 +88,23 @@ class StructuredStatsError(ValueError):
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return _sha256_orchestrated(path)
 
 
 def _write_json(path: Path, value: object) -> None:
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    _write_json_orchestrated(path, value)
 
 
 def _read_json(path: Path) -> dict:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise StructuredStatsError(f"cannot read JSON file: {path.name}") from exc
-    if not isinstance(value, dict):
-        raise StructuredStatsError(f"JSON file must contain an object: {path.name}")
-    return value
+    return _read_json_orchestrated(path, StructuredStatsError)
 
 
 def _snapshot_id(value: str) -> str:
-    normalized = str(value or "").strip()
-    if not normalized or not _SAFE_SNAPSHOT_ID.fullmatch(normalized):
-        raise StructuredStatsError("invalid snapshot_id")
-    return normalized
+    return _snapshot_id_orchestrated(value, StructuredStatsError)
 
 
 def _publish_directory(source: Path, destination: Path) -> None:
-    if destination.exists():
-        backup = destination.with_name(f".{destination.name}.previous-{time.time_ns()}")
-        os.replace(destination, backup)
-        try:
-            os.replace(source, destination)
-        except Exception:
-            os.replace(backup, destination)
-            raise
-        shutil.rmtree(backup, ignore_errors=True)
-        return
-    for attempt in range(6):
-        try:
-            os.replace(source, destination)
-            return
-        except PermissionError:
-            if attempt == 5 or destination.exists():
-                raise
-            time.sleep(0.05 * (attempt + 1))
+    _publish_directory_orchestrated(source, destination)
 
 
 def _deck(cards: object) -> tuple[str, ...]:
@@ -96,228 +121,19 @@ def _signature(deck: tuple[str, ...]) -> str:
 
 
 def _result(crowns: int, opponent_crowns: int) -> tuple[int, int, int]:
-    if crowns > opponent_crowns:
-        return 1, 0, 0
-    if crowns < opponent_crowns:
-        return 0, 1, 0
-    return 0, 0, 1
+    return _result_orchestrated(crowns, opponent_crowns)
 
 
 def _wilson_lower_bound(wins: int, losses: int, z: float = 1.96) -> float:
-    decisions = wins + losses
-    if decisions <= 0:
-        return 0.0
-    probability = wins / decisions
-    z_squared = z * z
-    denominator = 1 + z_squared / decisions
-    centre = probability + z_squared / (2 * decisions)
-    margin = z * math.sqrt(
-        (probability * (1 - probability) + z_squared / (4 * decisions)) / decisions
-    )
-    return max(0.0, (centre - margin) / denominator)
+    return _wilson_lower_bound_orchestrated(wins, losses, z)
 
 
 def _increment(counter: dict, key: object, result: tuple[int, int, int], games: int = 1) -> None:
-    values = counter[key]
-    values[0] += games
-    values[1] += result[0]
-    values[2] += result[1]
-    values[3] += result[2]
+    _increment_orchestrated(counter, key, result, games)
 
 
 def _schema(connection: sqlite3.Connection) -> None:
-    connection.executescript(
-        """
-        PRAGMA journal_mode=DELETE;
-        PRAGMA synchronous=NORMAL;
-        CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE card_stats(
-            card_name TEXT PRIMARY KEY,
-            appearances INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            usage_rate REAL NOT NULL,
-            clean_win_rate REAL NOT NULL,
-            net_win_rate REAL NOT NULL,
-            wilson_lower_bound REAL NOT NULL,
-            usage_percentile REAL NOT NULL,
-            sample_confidence REAL NOT NULL,
-            rating REAL NOT NULL
-        );
-        CREATE TABLE card_teammates(
-            card_name TEXT NOT NULL,
-            teammate_name TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            PRIMARY KEY(card_name, teammate_name)
-        );
-        CREATE TABLE card_opponents(
-            card_name TEXT NOT NULL,
-            opponent_name TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            PRIMARY KEY(card_name, opponent_name)
-        );
-        CREATE TABLE deck_stats(
-            deck_signature TEXT PRIMARY KEY,
-            deck_json TEXT NOT NULL,
-            archetype TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            crowns INTEGER NOT NULL,
-            usage_rate REAL NOT NULL DEFAULT 0,
-            clean_win_rate REAL NOT NULL DEFAULT 0,
-            net_win_rate REAL NOT NULL DEFAULT 0
-        );
-        CREATE TABLE matchup_stats(
-            deck_a_signature TEXT NOT NULL,
-            deck_b_signature TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins_a INTEGER NOT NULL,
-            wins_b INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            crowns_a INTEGER NOT NULL,
-            crowns_b INTEGER NOT NULL,
-            latest_battle_time TEXT,
-            PRIMARY KEY(deck_a_signature, deck_b_signature)
-        );
-        CREATE TABLE full_loadout_stats(
-            loadout_signature TEXT PRIMARY KEY,
-            loadout_json TEXT NOT NULL,
-            base_deck_signature TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            crowns INTEGER NOT NULL,
-            usage_rate REAL NOT NULL DEFAULT 0,
-            clean_win_rate REAL NOT NULL DEFAULT 0,
-            net_win_rate REAL NOT NULL DEFAULT 0
-        );
-        CREATE TABLE full_loadout_matchup_stats(
-            loadout_a_signature TEXT NOT NULL,
-            loadout_b_signature TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins_a INTEGER NOT NULL,
-            wins_b INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            crowns_a INTEGER NOT NULL,
-            crowns_b INTEGER NOT NULL,
-            latest_battle_time TEXT,
-            PRIMARY KEY(loadout_a_signature, loadout_b_signature)
-        );
-        CREATE TABLE tower_stats(
-            tower_id TEXT PRIMARY KEY,
-            tower_json TEXT NOT NULL,
-            appearances INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            usage_rate REAL NOT NULL DEFAULT 0,
-            clean_win_rate REAL NOT NULL DEFAULT 0
-        );
-        CREATE TABLE evolution_stats(
-            card_id TEXT NOT NULL,
-            card_name TEXT NOT NULL,
-            evolution_level INTEGER NOT NULL,
-            appearances INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            usage_rate REAL NOT NULL DEFAULT 0,
-            clean_win_rate REAL NOT NULL DEFAULT 0,
-            PRIMARY KEY(card_id, evolution_level)
-        );
-        CREATE TABLE elite_stats(
-            card_id TEXT PRIMARY KEY,
-            card_name TEXT NOT NULL,
-            appearances INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            usage_rate REAL NOT NULL DEFAULT 0,
-            clean_win_rate REAL NOT NULL DEFAULT 0
-        );
-        CREATE TABLE loadout_card_catalog(
-            card_id TEXT PRIMARY KEY,
-            card_name TEXT NOT NULL,
-            appearances INTEGER NOT NULL,
-            evolution_appearances INTEGER NOT NULL,
-            elite_appearances INTEGER NOT NULL
-        );
-        CREATE TABLE loadout_entity_stats(
-            entity_id TEXT PRIMARY KEY,
-            entity_type TEXT NOT NULL,
-            card_id TEXT,
-            card_name TEXT,
-            tower_id TEXT,
-            entity_json TEXT NOT NULL,
-            special_state TEXT NOT NULL,
-            appearances INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            usage_rate REAL NOT NULL,
-            clean_win_rate REAL NOT NULL,
-            net_win_rate REAL NOT NULL,
-            wilson_lower_bound REAL NOT NULL,
-            usage_percentile REAL NOT NULL,
-            sample_confidence REAL NOT NULL,
-            rating REAL NOT NULL
-        );
-        CREATE TABLE archetype_stats(
-            archetype TEXT PRIMARY KEY,
-            games INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            usage_rate REAL NOT NULL,
-            clean_win_rate REAL NOT NULL,
-            net_win_rate REAL NOT NULL,
-            classification TEXT NOT NULL,
-            confidence_note TEXT NOT NULL
-        );
-        CREATE TABLE archetype_matchups(
-            archetype TEXT NOT NULL,
-            opponent_archetype TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            PRIMARY KEY(archetype, opponent_archetype)
-        );
-        CREATE TABLE archetype_decks(
-            archetype TEXT NOT NULL,
-            deck_signature TEXT NOT NULL,
-            games INTEGER NOT NULL,
-            wins INTEGER NOT NULL,
-            losses INTEGER NOT NULL,
-            draws INTEGER NOT NULL,
-            PRIMARY KEY(archetype, deck_signature)
-        );
-        CREATE INDEX idx_card_teammates_games ON card_teammates(card_name, games DESC);
-        CREATE INDEX idx_card_opponents_games ON card_opponents(card_name, games DESC);
-        CREATE INDEX idx_deck_stats_games ON deck_stats(games DESC);
-        CREATE INDEX idx_matchup_deck_b ON matchup_stats(deck_b_signature, games DESC);
-        CREATE INDEX idx_full_loadout_games ON full_loadout_stats(games DESC);
-        CREATE INDEX idx_full_matchup_b ON full_loadout_matchup_stats(loadout_b_signature, games DESC);
-        CREATE INDEX idx_tower_appearances ON tower_stats(appearances DESC);
-        CREATE INDEX idx_evolution_appearances ON evolution_stats(appearances DESC);
-        CREATE INDEX idx_elite_appearances ON elite_stats(appearances DESC);
-        CREATE INDEX idx_loadout_card_name ON loadout_card_catalog(card_name);
-        CREATE INDEX idx_loadout_entity_usage ON loadout_entity_stats(usage_rate DESC);
-        CREATE INDEX idx_loadout_entity_rating ON loadout_entity_stats(rating DESC);
-        CREATE INDEX idx_archetype_stats_games ON archetype_stats(games DESC);
-        CREATE INDEX idx_archetype_decks_games ON archetype_decks(archetype, games DESC);
-        """
-    )
+    _create_schema_orchestrated(connection)
 
 
 def _upsert_deck(
@@ -328,27 +144,7 @@ def _upsert_deck(
     result: tuple[int, int, int],
     crowns: int,
 ) -> None:
-    connection.execute(
-        """
-        INSERT INTO deck_stats(
-            deck_signature, deck_json, archetype, games, wins, losses, draws, crowns
-        ) VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-        ON CONFLICT(deck_signature) DO UPDATE SET
-            games=games+1, wins=wins+excluded.wins, losses=losses+excluded.losses,
-            draws=draws+excluded.draws, crowns=crowns+excluded.crowns
-        """,
-        (signature, json.dumps(deck, ensure_ascii=False), archetype, *result, crowns),
-    )
-    connection.execute(
-        """
-        INSERT INTO archetype_decks(archetype, deck_signature, games, wins, losses, draws)
-        VALUES (?, ?, 1, ?, ?, ?)
-        ON CONFLICT(archetype, deck_signature) DO UPDATE SET
-            games=games+1, wins=wins+excluded.wins, losses=losses+excluded.losses,
-            draws=draws+excluded.draws
-        """,
-        (archetype, signature, *result),
-    )
+    _upsert_deck_orchestrated(connection, signature, deck, archetype, result, crowns)
 
 
 def _upsert_matchup(
@@ -360,31 +156,14 @@ def _upsert_matchup(
     opponent_crowns: int,
     battle_time: object,
 ) -> None:
-    if team_signature <= opponent_signature:
-        deck_a, deck_b = team_signature, opponent_signature
-        wins_a, wins_b = team_result[0], team_result[1]
-        crowns_a, crowns_b = team_crowns, opponent_crowns
-    else:
-        deck_a, deck_b = opponent_signature, team_signature
-        wins_a, wins_b = team_result[1], team_result[0]
-        crowns_a, crowns_b = opponent_crowns, team_crowns
-    latest = str(battle_time).strip() if battle_time else None
-    connection.execute(
-        """
-        INSERT INTO matchup_stats(
-            deck_a_signature, deck_b_signature, games, wins_a, wins_b, draws,
-            crowns_a, crowns_b, latest_battle_time
-        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(deck_a_signature, deck_b_signature) DO UPDATE SET
-            games=games+1, wins_a=wins_a+excluded.wins_a, wins_b=wins_b+excluded.wins_b,
-            draws=draws+excluded.draws, crowns_a=crowns_a+excluded.crowns_a,
-            crowns_b=crowns_b+excluded.crowns_b,
-            latest_battle_time=CASE
-                WHEN excluded.latest_battle_time IS NULL THEN latest_battle_time
-                WHEN latest_battle_time IS NULL OR excluded.latest_battle_time > latest_battle_time
-                THEN excluded.latest_battle_time ELSE latest_battle_time END
-        """,
-        (deck_a, deck_b, wins_a, wins_b, team_result[2], crowns_a, crowns_b, latest),
+    _upsert_matchup_orchestrated(
+        connection,
+        team_signature,
+        opponent_signature,
+        team_result,
+        team_crowns,
+        opponent_crowns,
+        battle_time,
     )
 
 
@@ -396,17 +175,8 @@ def _upsert_full_loadout(
     result: tuple[int, int, int],
     crowns: int,
 ) -> None:
-    connection.execute(
-        """
-        INSERT INTO full_loadout_stats(
-            loadout_signature, loadout_json, base_deck_signature,
-            games, wins, losses, draws, crowns
-        ) VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-        ON CONFLICT(loadout_signature) DO UPDATE SET
-            games=games+1, wins=wins+excluded.wins, losses=losses+excluded.losses,
-            draws=draws+excluded.draws, crowns=crowns+excluded.crowns
-        """,
-        (signature, loadout_payload(loadout), base_deck_signature, *result, crowns),
+    _upsert_full_loadout_orchestrated(
+        connection, signature, loadout, base_deck_signature, result, crowns
     )
 
 
@@ -419,31 +189,14 @@ def _upsert_full_matchup(
     opponent_crowns: int,
     battle_time: object,
 ) -> None:
-    if team_signature <= opponent_signature:
-        loadout_a, loadout_b = team_signature, opponent_signature
-        wins_a, wins_b = team_result[0], team_result[1]
-        crowns_a, crowns_b = team_crowns, opponent_crowns
-    else:
-        loadout_a, loadout_b = opponent_signature, team_signature
-        wins_a, wins_b = team_result[1], team_result[0]
-        crowns_a, crowns_b = opponent_crowns, team_crowns
-    latest = str(battle_time).strip() if battle_time else None
-    connection.execute(
-        """
-        INSERT INTO full_loadout_matchup_stats(
-            loadout_a_signature, loadout_b_signature, games, wins_a, wins_b, draws,
-            crowns_a, crowns_b, latest_battle_time
-        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(loadout_a_signature, loadout_b_signature) DO UPDATE SET
-            games=games+1, wins_a=wins_a+excluded.wins_a, wins_b=wins_b+excluded.wins_b,
-            draws=draws+excluded.draws, crowns_a=crowns_a+excluded.crowns_a,
-            crowns_b=crowns_b+excluded.crowns_b,
-            latest_battle_time=CASE
-                WHEN excluded.latest_battle_time IS NULL THEN latest_battle_time
-                WHEN latest_battle_time IS NULL OR excluded.latest_battle_time > latest_battle_time
-                THEN excluded.latest_battle_time ELSE latest_battle_time END
-        """,
-        (loadout_a, loadout_b, wins_a, wins_b, team_result[2], crowns_a, crowns_b, latest),
+    _upsert_full_matchup_orchestrated(
+        connection,
+        team_signature,
+        opponent_signature,
+        team_result,
+        team_crowns,
+        opponent_crowns,
+        battle_time,
     )
 
 
@@ -456,53 +209,16 @@ def _increment_loadout_features(
     loadout: dict,
     result: tuple[int, int, int],
 ) -> None:
-    tower = loadout["tower"]
-    tower_key = str(tower["id"])
-    if tower_key not in tower_counts:
-        tower_counts[tower_key] = [tower, 0, 0, 0, 0]
-    values = tower_counts[tower_key]
-    values[1] += 1
-    values[2] += result[0]
-    values[3] += result[1]
-    values[4] += result[2]
-    tower_entity_id = f"tower:{tower_key}"
-    if tower_entity_id not in entity_counts:
-        entity_counts[tower_entity_id] = ["tower", None, None, tower_key, tower, "tower", 0, 0, 0, 0]
-    tower_entity = entity_counts[tower_entity_id]
-    tower_entity[6] += 1
-    tower_entity[7] += result[0]
-    tower_entity[8] += result[1]
-    tower_entity[9] += result[2]
-    for card in loadout["cards"]:
-        catalog_key = str(card["id"])
-        card_name = str(card.get("name") or card["id"])
-        if catalog_key not in loadout_card_counts:
-            loadout_card_counts[catalog_key] = [card_name, 0, 0, 0]
-        catalog_values = loadout_card_counts[catalog_key]
-        catalog_values[0] = min(catalog_values[0], card_name)
-        catalog_values[1] += 1
-        catalog_values[2] += int(int(card.get("evolution_level") or 0) == 1)
-        catalog_values[3] += int(card.get("elite") is True)
-        evolution_level = int(card.get("evolution_level") or 0)
-        special_state = "elite" if card.get("elite") is True else (
-            "evolution" if evolution_level == 1 else "ordinary"
-        )
-        entity_id = f"card:{catalog_key}:{special_state}"
-        if entity_id not in entity_counts:
-            entity_counts[entity_id] = [
-                "card", catalog_key, card_name, None, card, special_state, 0, 0, 0, 0
-            ]
-        entity = entity_counts[entity_id]
-        entity[6] += 1
-        entity[7] += result[0]
-        entity[8] += result[1]
-        entity[9] += result[2]
-        if evolution_level == 1:
-            key = (str(card["id"]), str(card.get("name") or card["id"]), int(card["evolution_level"]))
-            _increment(evolution_counts, key, result)
-        if card.get("elite") is True:
-            key = (str(card["id"]), str(card.get("name") or card["id"]))
-            _increment(elite_counts, key, result)
+    _increment_loadout_features_orchestrated(
+        tower_counts,
+        evolution_counts,
+        elite_counts,
+        loadout_card_counts,
+        entity_counts,
+        loadout,
+        result,
+        increment=_increment,
+    )
 
 
 def _finalize_full_loadouts(
@@ -514,108 +230,16 @@ def _finalize_full_loadouts(
     loadout_card_counts: dict,
     entity_counts: dict,
 ) -> None:
-    connection.execute(
-        """
-        UPDATE full_loadout_stats SET
-            usage_rate=ROUND(games * 100.0 / ?, 6),
-            clean_win_rate=CASE WHEN wins+losses=0 THEN 0 ELSE ROUND(wins * 100.0 / (wins+losses), 6) END,
-            net_win_rate=CASE WHEN wins+losses=0 THEN -50 ELSE ROUND(wins * 100.0 / (wins+losses) - 50, 6) END
-        """,
-        (full_side_records,),
+    _finalize_full_loadouts_orchestrated(
+        connection,
+        full_side_records,
+        tower_counts,
+        evolution_counts,
+        elite_counts,
+        loadout_card_counts,
+        entity_counts,
+        wilson_lower_bound=_wilson_lower_bound,
     )
-    for tower_id, values in sorted(tower_counts.items()):
-        tower, appearances, wins, losses, draws = values
-        decisions = wins + losses
-        connection.execute(
-            "INSERT INTO tower_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                tower_id,
-                loadout_payload(tower),
-                appearances,
-                wins,
-                losses,
-                draws,
-                round(appearances * 100 / full_side_records, 6) if full_side_records else 0.0,
-                round(wins * 100 / decisions, 6) if decisions else 0.0,
-            ),
-        )
-    for (card_id, card_name, evolution_level), values in sorted(evolution_counts.items()):
-        appearances, wins, losses, draws = values
-        decisions = wins + losses
-        connection.execute(
-            "INSERT INTO evolution_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                card_id, card_name, evolution_level, appearances, wins, losses, draws,
-                round(appearances * 100 / full_side_records, 6) if full_side_records else 0.0,
-                round(wins * 100 / decisions, 6) if decisions else 0.0,
-            ),
-        )
-    for (card_id, card_name), values in sorted(elite_counts.items()):
-        appearances, wins, losses, draws = values
-        decisions = wins + losses
-        connection.execute(
-            "INSERT INTO elite_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                card_id, card_name, appearances, wins, losses, draws,
-                round(appearances * 100 / full_side_records, 6) if full_side_records else 0.0,
-                round(wins * 100 / decisions, 6) if decisions else 0.0,
-            ),
-        )
-    connection.executemany(
-        "INSERT INTO loadout_card_catalog VALUES (?, ?, ?, ?, ?)",
-        (
-            (card_id, values[0], *values[1:])
-            for card_id, values in sorted(loadout_card_counts.items())
-        ),
-    )
-    appearances_universe = sorted(values[6] for values in entity_counts.values())
-    universe = len(appearances_universe)
-    for entity_id, values in sorted(entity_counts.items()):
-        (
-            entity_type,
-            card_id,
-            card_name,
-            tower_id,
-            entity_payload,
-            special_state,
-            appearances,
-            wins,
-            losses,
-            draws,
-        ) = values
-        decisions = wins + losses
-        clean = wins / decisions * 100 if decisions else 0.0
-        usage = appearances / full_side_records * 100 if full_side_records else 0.0
-        percentile = (
-            sum(1 for count in appearances_universe if count <= appearances) / universe
-            if universe else 0.0
-        )
-        wilson = _wilson_lower_bound(wins, losses)
-        confidence = min(1.0, math.sqrt(decisions / 5000))
-        rating = 100 * (0.65 * wilson + 0.20 * percentile + 0.15 * confidence)
-        connection.execute(
-            "INSERT INTO loadout_entity_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                entity_id,
-                entity_type,
-                card_id,
-                card_name,
-                tower_id,
-                loadout_payload(entity_payload),
-                special_state,
-                appearances,
-                wins,
-                losses,
-                draws,
-                round(usage, 6),
-                round(clean, 6),
-                round(clean - 50, 6),
-                round(wilson * 100, 6),
-                round(percentile * 100, 6),
-                round(confidence * 100, 6),
-                round(rating, 6),
-            ),
-        )
 
 
 def _finalize_fixed_card_tables(
@@ -625,54 +249,14 @@ def _finalize_fixed_card_tables(
     opponents: dict,
     side_records: int,
 ) -> None:
-    appearances = sorted(values[0] for values in card_counts.values())
-    universe = len(appearances)
-    for card_name, values in sorted(card_counts.items()):
-        games, wins, losses, draws = values
-        decisions = wins + losses
-        clean = wins / decisions * 100 if decisions else 0.0
-        usage = games / side_records * 100 if side_records else 0.0
-        percentile = sum(1 for count in appearances if count <= games) / universe if universe else 0.0
-        wilson = _wilson_lower_bound(wins, losses)
-        confidence = min(1.0, math.sqrt(decisions / 5000))
-        rating = 100 * (0.65 * wilson + 0.20 * percentile + 0.15 * confidence)
-        connection.execute(
-            "INSERT INTO card_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                card_name,
-                games,
-                wins,
-                losses,
-                draws,
-                round(usage, 6),
-                round(clean, 6),
-                round(clean - 50, 6),
-                round(wilson * 100, 6),
-                round(percentile * 100, 6),
-                round(confidence * 100, 6),
-                round(rating, 6),
-            ),
-        )
-    connection.executemany(
-        "INSERT INTO card_teammates VALUES (?, ?, ?, ?, ?, ?)",
-        ((card, teammate, *values) for (card, teammate), values in sorted(teammates.items())),
-    )
-    connection.executemany(
-        "INSERT INTO card_opponents VALUES (?, ?, ?, ?, ?, ?)",
-        ((card, opponent, *values) for (card, opponent), values in sorted(opponents.items())),
+    return finalize_fixed_card_tables_orchestrated(
+        connection, card_counts, teammates, opponents, side_records,
+        wilson_lower_bound=_wilson_lower_bound,
     )
 
 
 def _finalize_decks(connection: sqlite3.Connection, side_records: int) -> None:
-    connection.execute(
-        """
-        UPDATE deck_stats SET
-            usage_rate=ROUND(games * 100.0 / ?, 6),
-            clean_win_rate=CASE WHEN wins+losses=0 THEN 0 ELSE ROUND(wins * 100.0 / (wins+losses), 6) END,
-            net_win_rate=CASE WHEN wins+losses=0 THEN -50 ELSE ROUND(wins * 100.0 / (wins+losses) - 50, 6) END
-        """,
-        (side_records,),
-    )
+    return finalize_decks_orchestrated(connection, side_records)
 
 
 def _finalize_archetypes(
@@ -681,32 +265,9 @@ def _finalize_archetypes(
     archetype_matchups: dict,
     side_records: int,
 ) -> None:
-    note = "Feature-weighted deck label; classification is heuristic, statistics are observed."
-    for archetype, values in sorted(archetype_counts.items()):
-        games, wins, losses, draws = values
-        decisions = wins + losses
-        clean = wins / decisions * 100 if decisions else 0.0
-        connection.execute(
-            "INSERT INTO archetype_stats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                archetype,
-                games,
-                wins,
-                losses,
-                draws,
-                round(games / side_records * 100, 6) if side_records else 0.0,
-                round(clean, 6),
-                round(clean - 50, 6),
-                f"feature-weighted-v2/{archetype_family(archetype)}",
-                note,
-            ),
-        )
-    connection.executemany(
-        "INSERT INTO archetype_matchups VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            (archetype, opponent, *values)
-            for (archetype, opponent), values in sorted(archetype_matchups.items())
-        ),
+    return finalize_archetypes_orchestrated(
+        connection, archetype_counts, archetype_matchups, side_records,
+        family=archetype_family,
     )
 
 

@@ -9,6 +9,17 @@ from pathlib import Path
 from rolling_corpus import DATASET_SCOPES, RollingCorpusStore
 from rolling_materializer import build_snapshot_group
 from structured_query import StructuredStatsRepository
+import clashroyale_agent.collection.rolling_materializer as packaged_materializer
+from clashroyale_agent.collection.materializer_primitives import (
+    atomic_json as packaged_atomic_json,
+    generation_id as packaged_generation_id,
+)
+from clashroyale_agent.collection.materializer_deltas import (
+    materialize_meta_deltas as packaged_materialize_meta_deltas,
+)
+from clashroyale_agent.collection.materializer_documents import (
+    build_rag_documents as packaged_build_rag_documents,
+)
 
 
 class FakeRetriever:
@@ -50,6 +61,16 @@ def _battle(battle_id: str) -> dict:
 
 
 class RollingMaterializerTests(unittest.TestCase):
+    def test_meta_delta_materialization_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_materialize_meta_deltas))
+
+    def test_rag_document_assembly_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_build_rag_documents))
+
+    def test_materializer_primitives_have_a_packaged_owner(self):
+        self.assertIs(packaged_materializer._atomic_json, packaged_atomic_json)
+        self.assertIs(packaged_materializer._generation_id, packaged_generation_id)
+
     def test_builds_one_scoped_stats_database_and_atomically_publishes_thirty_ranges(self):
         now = datetime(2026, 7, 30, 3, 0, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as temp_dir:

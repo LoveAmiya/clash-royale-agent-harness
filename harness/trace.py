@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -6,6 +7,7 @@ from pathlib import Path
 
 
 TRACE_LOG_PATH = Path("logs") / "traces.jsonl"
+TRACE_LOG_PATH_ENV = "CR_AGENT_TRACE_LOG_PATH"
 
 
 @dataclass(slots=True)
@@ -26,7 +28,8 @@ class TraceEvent:
 
 class TraceRecorder:
     def __init__(self, log_path: Path | None = None):
-        self.log_path = log_path or TRACE_LOG_PATH
+        configured_path = os.getenv(TRACE_LOG_PATH_ENV)
+        self.log_path = log_path or (Path(configured_path) if configured_path else TRACE_LOG_PATH)
 
     def new_trace_id(self) -> str:
         return f"trace-{uuid.uuid4().hex}"

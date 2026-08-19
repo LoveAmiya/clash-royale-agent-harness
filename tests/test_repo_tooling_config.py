@@ -65,7 +65,7 @@ class RepositoryToolingConfigTests(unittest.TestCase):
         refactor_queue = (ROOT / "docs" / "REFACTOR_QUEUE.md").read_text(encoding="utf-8")
 
         self.assertIn("Apache-2.0", health_plan)
-        self.assertIn("owner confirmation is still", health_plan)
+        self.assertIn("copyright notices", health_plan)
         self.assertIn("Post-Review Queue - 2026-08-18", refactor_queue)
         self.assertIn("supercell_live.py", refactor_queue)
         self.assertIn("collector strategy changes", refactor_queue)

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
+import hashlib
+import sqlite3
 import math
 import os
 import shutil
-import sqlite3
 import tempfile
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -18,6 +18,21 @@ from clashroyale_agent.collection.rolling_corpus import DATASET_SCOPES, RollingC
 from rag_document_policy import RAG_SOURCE_LIMITS, summarize_scope_documents
 from structured_query import CARD_ALIAS_OVERRIDES, TOWER_DISPLAY_NAMES_ZH
 from structured_stats import build_structured_stats
+from clashroyale_agent.collection.materializer_primitives import (
+    atomic_json as _atomic_json,
+    docs_fingerprint as _docs_fingerprint,
+    generation_id as _generation_id,
+    iso as _iso,
+    prune_group_versions as _prune_group_versions,
+    sha256_file as _sha256_file,
+)
+from clashroyale_agent.collection.materializer_deltas import (
+    materialize_meta_deltas as _materialize_meta_deltas_orchestrated,
+)
+from clashroyale_agent.collection.materializer_documents import (
+    build_rag_documents as _build_rag_documents_orchestrated,
+    validate_documents as _validate_documents_orchestrated,
+)
 
 
 GROUP_SCHEMA_VERSION = 2
@@ -27,81 +42,6 @@ DELTA_SCOPE_PAIRS = (
     ("d14_21", "d21_28"),
     ("d21_28", "d28_35"),
 )
-
-
-def _iso(value: datetime) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _docs_fingerprint(documents: list[dict]) -> str:
-    return hashlib.sha256(
-        json.dumps(documents, ensure_ascii=True, sort_keys=True).encode("utf-8")
-    ).hexdigest()
-
-
-def _atomic_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, path)
-    except Exception:
-        Path(temporary_name).unlink(missing_ok=True)
-        raise
-
-
-def _generation_id(store: RollingCorpusStore, now: datetime) -> str:
-    summaries = store.dataset_summaries(now=now)
-    fingerprint = hashlib.sha256(
-        json.dumps(summaries, ensure_ascii=True, sort_keys=True).encode("utf-8")
-    ).hexdigest()[:12]
-    return f"pol-{now.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}-{fingerprint}"
-
-
-def _prune_group_versions(data_dir: Path, active_group_id: str, keep: int = 2) -> list[str]:
-    groups_root = Path(data_dir) / "snapshot_groups"
-    published: list[tuple[str, str, Path]] = []
-    for directory in groups_root.iterdir() if groups_root.is_dir() else ():
-        if not directory.is_dir() or directory.name.startswith("."):
-            continue
-        try:
-            manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        group_id = str(manifest.get("snapshot_group_id") or "")
-        if group_id != directory.name or manifest.get("fully_aligned") is not True:
-            continue
-        published.append((str(manifest.get("published_at") or ""), group_id, directory))
-    published.sort(reverse=True)
-    retained = {active_group_id}
-    for _, group_id, _ in published:
-        if len(retained) >= max(1, keep):
-            break
-        retained.add(group_id)
-    removed = []
-    for _, group_id, directory in published:
-        if group_id in retained:
-            continue
-        try:
-            shutil.rmtree(directory)
-        except OSError:
-            continue
-        removed.append(group_id)
-    return removed
 
 
 def _write_scope_source(
@@ -154,17 +94,23 @@ def _quoted(identifier: str) -> str:
 
 
 def _merge_scope_stats(target: sqlite3.Connection, source_path: Path, scope: str) -> None:
-    source = sqlite3.connect(f"file:{source_path.as_posix()}?mode=ro", uri=True)
-    source.row_factory = sqlite3.Row
+    attached_schema = "merge_source"
+    target.execute(
+        f"ATTACH DATABASE ? AS {_quoted(attached_schema)}",
+        (str(source_path),),
+    )
     try:
         tables = [
             str(row[0])
-            for row in source.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='metadata'"
+            for row in target.execute(
+                f"SELECT name FROM {_quoted(attached_schema)}.sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='metadata'"
             )
         ]
         for table in tables:
-            columns = source.execute(f"PRAGMA table_info({_quoted(table)})").fetchall()
+            columns = target.execute(
+                f"PRAGMA {_quoted(attached_schema)}.table_info({_quoted(table)})"
+            ).fetchall()
             column_names = [str(column[1]) for column in columns]
             definitions = [
                 f"{_quoted(str(column[1]))} {str(column[2]) or 'TEXT'}"
@@ -175,19 +121,15 @@ def _merge_scope_stats(target: sqlite3.Connection, source_path: Path, scope: str
                 f"CREATE TABLE IF NOT EXISTS {_quoted(table)} "
                 f"(dataset_scope TEXT NOT NULL, {', '.join(definitions)})"
             )
-            placeholders = ",".join("?" for _ in range(len(column_names) + 1))
             selected = ",".join(_quoted(name) for name in column_names)
-            cursor = source.execute(f"SELECT {selected} FROM {_quoted(table)}")
-            while True:
-                rows = cursor.fetchmany(1000)
-                if not rows:
-                    break
-                target.executemany(
-                    f"INSERT INTO {_quoted(table)} VALUES ({placeholders})",
-                    ((scope, *tuple(row)) for row in rows),
-                )
+            target.execute(
+                f"INSERT INTO {_quoted(table)} ({_quoted('dataset_scope')}, {selected}) "
+                f"SELECT ?, {selected} FROM {_quoted(attached_schema)}.{_quoted(table)}",
+                (scope,),
+            )
+        target.commit()
     finally:
-        source.close()
+        target.execute(f"DETACH DATABASE {_quoted(attached_schema)}")
 
 
 def _create_group_indexes(connection: sqlite3.Connection) -> None:
@@ -229,548 +171,20 @@ def _wilson_interval(wins: int, losses: int, z: float = 1.96) -> tuple[float, fl
 
 
 def _materialize_meta_deltas(connection: sqlite3.Connection, datasets: dict[str, dict]) -> None:
-    connection.execute(
-        """
-        CREATE TABLE meta_delta(
-            current_scope TEXT NOT NULL,
-            baseline_scope TEXT NOT NULL,
-            category TEXT NOT NULL,
-            item_id TEXT NOT NULL,
-            current_sample INTEGER NOT NULL,
-            baseline_sample INTEGER NOT NULL,
-            current_usage_rate REAL NOT NULL,
-            baseline_usage_rate REAL NOT NULL,
-            usage_delta REAL NOT NULL,
-            current_win_rate REAL NOT NULL,
-            baseline_win_rate REAL NOT NULL,
-            win_delta REAL NOT NULL,
-            significant INTEGER NOT NULL,
-            confidence_note TEXT NOT NULL,
-            PRIMARY KEY(current_scope, baseline_scope, category, item_id)
-        )
-        """
+    _materialize_meta_deltas_orchestrated(
+        connection,
+        datasets,
+        dataset_scopes=DATASET_SCOPES,
+        scope_pairs=DELTA_SCOPE_PAIRS,
+        interval=_wilson_interval,
     )
-
-    def rows(table: str, scope: str, id_column: str, sample_column: str) -> dict[str, sqlite3.Row]:
-        return {
-            str(row[id_column]): row
-            for row in connection.execute(
-                f"SELECT * FROM {table} WHERE dataset_scope=?", (scope,)
-            )
-        }
-
-    def insert_pair(
-        current_scope: str,
-        baseline_scope: str,
-        category: str,
-        current_rows: dict[str, sqlite3.Row],
-        baseline_rows: dict[str, sqlite3.Row],
-        sample_column: str,
-        threshold: int,
-    ) -> None:
-        for item_id in sorted(set(current_rows) | set(baseline_rows)):
-            current = current_rows.get(item_id)
-            baseline = baseline_rows.get(item_id)
-            current_sample = int(current[sample_column]) if current is not None else 0
-            baseline_sample = int(baseline[sample_column]) if baseline is not None else 0
-            current_usage = float(current["usage_rate"]) if current is not None else 0.0
-            baseline_usage = float(baseline["usage_rate"]) if baseline is not None else 0.0
-            current_win = float(current["clean_win_rate"]) if current is not None else 0.0
-            baseline_win = float(baseline["clean_win_rate"]) if baseline is not None else 0.0
-            current_interval = _wilson_interval(
-                int(current["wins"]) if current is not None else 0,
-                int(current["losses"]) if current is not None else 0,
-            )
-            baseline_interval = _wilson_interval(
-                int(baseline["wins"]) if baseline is not None else 0,
-                int(baseline["losses"]) if baseline is not None else 0,
-            )
-            intervals_separate = (
-                current_interval[0] > baseline_interval[1]
-                or baseline_interval[0] > current_interval[1]
-            )
-            enough = current_sample >= threshold and baseline_sample >= threshold
-            appeared_or_disappeared = (
-                (current_sample == 0 and baseline_sample >= threshold)
-                or (baseline_sample == 0 and current_sample >= threshold)
-            )
-            meaningful_change = abs(current_usage - baseline_usage) >= 0.5 or abs(current_win - baseline_win) >= 3.0
-            significant = appeared_or_disappeared or (enough and intervals_separate and meaningful_change)
-            note = (
-                "significant_wilson95_and_absolute_threshold"
-                if significant else
-                "observed_below_significance_threshold"
-            )
-            connection.execute(
-                "INSERT INTO meta_delta VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    current_scope,
-                    baseline_scope,
-                    category,
-                    item_id,
-                    current_sample,
-                    baseline_sample,
-                    current_usage,
-                    baseline_usage,
-                    round(current_usage - baseline_usage, 6),
-                    current_win,
-                    baseline_win,
-                    round(current_win - baseline_win, 6),
-                    int(significant),
-                    note,
-                ),
-            )
-
-    def full_loadout_base_rows(scope: str) -> dict[str, sqlite3.Row]:
-        return {
-            str(row["deck_signature"]): row
-            for row in connection.execute(
-                """
-                SELECT base_deck_signature AS deck_signature,
-                       SUM(games) AS games, SUM(wins) AS wins, SUM(losses) AS losses,
-                       SUM(draws) AS draws, SUM(usage_rate) AS usage_rate,
-                       CASE WHEN SUM(wins)+SUM(losses)=0 THEN 0
-                            ELSE SUM(wins) * 100.0 / (SUM(wins)+SUM(losses)) END AS clean_win_rate
-                FROM full_loadout_stats WHERE dataset_scope=?
-                GROUP BY base_deck_signature
-                """,
-                (scope,),
-            )
-        }
-
-    levels = ("top_100", "top_200", "top_500", "top_1000", "all")
-    for current_prefix, baseline_prefix in DELTA_SCOPE_PAIRS:
-        for level in levels:
-            current_scope = f"{current_prefix}_{level}"
-            baseline_scope = f"{baseline_prefix}_{level}"
-            if not datasets[current_scope]["ready"] or not datasets[baseline_scope]["ready"]:
-                continue
-            insert_pair(
-                current_scope,
-                baseline_scope,
-                "entity",
-                rows("loadout_entity_stats", current_scope, "entity_id", "appearances"),
-                rows("loadout_entity_stats", baseline_scope, "entity_id", "appearances"),
-                "appearances",
-                200,
-            )
-            insert_pair(
-                current_scope,
-                baseline_scope,
-                "archetype",
-                rows("archetype_stats", current_scope, "archetype", "games"),
-                rows("archetype_stats", baseline_scope, "archetype", "games"),
-                "games",
-                200,
-            )
-            insert_pair(
-                current_scope,
-                baseline_scope,
-                "deck",
-                rows("deck_stats", current_scope, "deck_signature", "games"),
-                rows("deck_stats", baseline_scope, "deck_signature", "games"),
-                "games",
-                30,
-            )
-            datasets[current_scope]["delta_ready"] = True
-    for scope in DATASET_SCOPES:
-        if not datasets[scope]["ready"] or not datasets[scope]["complete_loadout_ready"]:
-            continue
-        insert_pair(
-            scope,
-            scope,
-            "base8_full_loadout_divergence",
-            rows("deck_stats", scope, "deck_signature", "games"),
-            full_loadout_base_rows(scope),
-            "games",
-            30,
-        )
-    connection.execute(
-        "CREATE INDEX idx_meta_delta_scope ON meta_delta(current_scope, category, significant DESC)"
-    )
-
 
 def _rag_documents(connection: sqlite3.Connection, group_id: str, datasets: dict[str, dict]) -> list[dict]:
-    connection.row_factory = sqlite3.Row
-    documents: list[dict] = []
-    for scope in DATASET_SCOPES:
-        dataset = datasets[scope]
-        common = {
-            "snapshot_id": group_id,
-            "snapshot_group_id": group_id,
-            "scope_snapshot_id": dataset["snapshot_id"],
-            "dataset_scope": scope,
-            "window_started_at": dataset["window_started_at"],
-            "window_ended_at": dataset["window_ended_at"],
-            "sample_battles": dataset["unique_battles"],
-            "unique_battles": dataset["unique_battles"],
-            "weekly_batch_count": dataset["weekly_batch_count"],
-            "daily_batch_count": dataset["daily_batch_count"],
-            "ranked_coverage": dataset["ranked_coverage"],
-            "missing_collection_dates": dataset["missing_collection_dates"],
-            "source": "Supercell API rolling Path of Legend corpus",
-            "full_loadout_battles": dataset["structured_counts"].get("full_loadout_battles", 0),
-            "full_loadout_side_records": dataset["structured_counts"].get("full_loadout_side_records", 0),
-            "excluded_incomplete_loadouts": dataset["structured_counts"].get("excluded_incomplete_loadouts", 0),
-        }
-        documents.append(
-            {
-                "doc_id": f"{group_id}:{scope}:overview",
-                "source_type": "snapshot",
-                "text": (
-                    f"Path of Legend rolling dataset {scope} contains {dataset['unique_battles']} unique battles "
-                    f"from {dataset['window_started_at']} through {dataset['window_ended_at']}."
-                ),
-                "metadata": common,
-            }
-        )
-        for rank, row in enumerate(
-            connection.execute(
-                "SELECT * FROM card_stats WHERE dataset_scope=? ORDER BY usage_rate DESC, card_name",
-                (scope,),
-            ),
-            start=1,
-        ):
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:card:{row['card_name']}",
-                    "source_type": "card",
-                    "text": (
-                        f"Card evidence for {row['card_name']}: rank {rank}, usage {row['usage_rate']}%, "
-                        f"clean win rate {row['clean_win_rate']}%, {row['appearances']} appearances."
-                    ),
-                    "metadata": {
-                        **common,
-                        "card_name": row["card_name"],
-                        "rank": rank,
-                        "usage_rate": row["usage_rate"],
-                        "win_rate": row["clean_win_rate"],
-                        "clean_win_rate": row["clean_win_rate"],
-                        "appearance_count": row["appearances"],
-                    },
-                }
-            )
-        for rank, row in enumerate(
-            connection.execute(
-                "SELECT * FROM loadout_entity_stats WHERE dataset_scope=? "
-                "ORDER BY usage_rate DESC, entity_id",
-                (scope,),
-            ),
-            start=1,
-        ):
-            if row["entity_type"] == "tower":
-                entity_payload = json.loads(row["entity_json"])
-                source_name = str(entity_payload.get("name") or row["tower_id"])
-                display_name = TOWER_DISPLAY_NAMES_ZH.get(source_name, source_name)
-            else:
-                source_name = str(row["card_name"] or row["card_id"])
-                base_name = CARD_ALIAS_OVERRIDES.get(source_name, [source_name])[0]
-                display_name = (
-                    f"觉醒{base_name}" if row["special_state"] == "evolution" else
-                    f"精英{base_name}" if row["special_state"] == "elite" else
-                    base_name
-                )
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:entity:{row['entity_id']}",
-                    "source_type": "card_variant" if row["entity_type"] == "card" else "tower",
-                    "text": (
-                        f"完整配置实体证据：{display_name}，排名 {rank}，使用率 {row['usage_rate']}%，"
-                        f"胜率 {row['clean_win_rate']}%，样本 {row['appearances']} 次。"
-                    ),
-                    "metadata": {
-                        **common,
-                        "deck_mode": "full_loadout",
-                        "entity_mode": "loadout_entity",
-                        "entity_id": row["entity_id"],
-                        "entity_type": row["entity_type"],
-                        "special_state": row["special_state"],
-                        "display_name_zh": display_name,
-                        "rank": rank,
-                        "usage_rate": row["usage_rate"],
-                        "win_rate": row["clean_win_rate"],
-                        "appearance_count": row["appearances"],
-                    },
-                }
-            )
-        deck_rows = connection.execute(
-            f"SELECT * FROM deck_stats WHERE dataset_scope=? ORDER BY games DESC, deck_signature LIMIT {RAG_SOURCE_LIMITS['deck']}",
-            (scope,),
-        ).fetchall()
-        for rank, row in enumerate(deck_rows, start=1):
-            cards = json.loads(row["deck_json"])
-            deck_name = " / ".join(cards)
-            metadata = {
-                **common,
-                "deck_mode": "base8",
-                "deck_name": deck_name,
-                "rank": rank,
-                "cards": cards,
-                "games": row["games"],
-                "sample_win_rate": row["clean_win_rate"],
-            }
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:deck:{row['deck_signature']}",
-                    "source_type": "deck",
-                    "text": f"Deck evidence: {deck_name}; {row['games']} games, {row['clean_win_rate']}% win rate.",
-                    "metadata": metadata,
-                }
-            )
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:deck-profile:{row['deck_signature']}",
-                    "source_type": "deck_profile",
-                    "text": f"Deck profile: {deck_name}; observed {row['games']} times in {scope}.",
-                    "metadata": metadata,
-                }
-            )
-        for row in connection.execute(
-            "SELECT * FROM archetype_stats WHERE dataset_scope=? ORDER BY games DESC, archetype",
-            (scope,),
-        ):
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:archetype:{row['archetype']}",
-                    "source_type": "archetype",
-                    "text": (
-                        f"Archetype evidence for {row['archetype']}: {row['games']} side records, "
-                        f"usage {row['usage_rate']}%, win rate {row['clean_win_rate']}%."
-                    ),
-                    "metadata": {
-                        **common,
-                        "deck_mode": "base8",
-                        "archetype": row["archetype"],
-                        "games": row["games"],
-                        "usage_rate": row["usage_rate"],
-                        "win_rate": row["clean_win_rate"],
-                        "classification": row["classification"],
-                    },
-                }
-            )
-        delta_rows = connection.execute(
-            "SELECT * FROM meta_delta WHERE current_scope=? "
-            "ORDER BY significant DESC, ABS(usage_delta) DESC, ABS(win_delta) DESC "
-            f"LIMIT {RAG_SOURCE_LIMITS['meta_delta'] - 1}",
-            (scope,),
-        ).fetchall()
-        if delta_rows:
-            significant_count = sum(int(row["significant"]) for row in delta_rows)
-            baseline_scope = str(delta_rows[0]["baseline_scope"])
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:meta-delta:overview",
-                    "source_type": "meta_delta",
-                    "text": (
-                        f"环境变化证据：{scope} 与 {baseline_scope} 比较，共物化 "
-                        f"{len(delta_rows)} 项变化，其中 {significant_count} 项达到显著阈值。"
-                    ),
-                    "metadata": {
-                        **common,
-                        "baseline_scope": baseline_scope,
-                        "delta_count": len(delta_rows),
-                        "significant_count": significant_count,
-                    },
-                }
-            )
-            for row in delta_rows:
-                item_hash = hashlib.sha256(str(row["item_id"]).encode("utf-8")).hexdigest()[:16]
-                documents.append(
-                    {
-                        "doc_id": f"{group_id}:{scope}:meta-delta:{row['category']}:{item_hash}",
-                        "source_type": "meta_delta",
-                        "text": (
-                            f"{row['category']} {row['item_id']}：使用率变化 {row['usage_delta']} 个百分点，"
-                            f"胜率变化 {row['win_delta']} 个百分点；当前样本 {row['current_sample']}，"
-                            f"对照样本 {row['baseline_sample']}，"
-                            f"{'达到显著阈值' if row['significant'] else '仅为观察结果'}。"
-                        ),
-                        "metadata": {
-                            **common,
-                            "baseline_scope": row["baseline_scope"],
-                            "delta_category": row["category"],
-                            "item_id": row["item_id"],
-                            "usage_delta": row["usage_delta"],
-                            "win_delta": row["win_delta"],
-                            "current_sample": row["current_sample"],
-                            "baseline_sample": row["baseline_sample"],
-                            "significant": bool(row["significant"]),
-                            "confidence_note": row["confidence_note"],
-                        },
-                    }
-                )
-        for rank, row in enumerate(
-            connection.execute(
-                "SELECT * FROM full_loadout_stats WHERE dataset_scope=? ORDER BY games DESC, loadout_signature "
-                f"LIMIT {RAG_SOURCE_LIMITS['full_loadout']}",
-                (scope,),
-            ),
-            start=1,
-        ):
-            loadout = json.loads(row["loadout_json"])
-            tower_name = (loadout.get("tower") or {}).get("name") or (loadout.get("tower") or {}).get("id")
-            cards = [card.get("name") or card.get("id") for card in loadout.get("cards", [])]
-            evolved = [card for card in loadout.get("cards", []) if int(card.get("evolution_level") or 0) == 1]
-            elite = [card for card in loadout.get("cards", []) if card.get("elite") is True]
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:full-loadout:{row['loadout_signature']}",
-                    "source_type": "full_loadout",
-                    "text": (
-                        f"Complete loadout evidence: tower {tower_name}; cards {' / '.join(cards)}; "
-                        f"{len(evolved)} evolved and {len(elite)} elite cards; "
-                        f"{row['games']} games, {row['clean_win_rate']}% win rate."
-                    ),
-                    "metadata": {
-                        **common,
-                        "deck_mode": "full_loadout",
-                        "rank": rank,
-                        "loadout_signature": row["loadout_signature"],
-                        "tower": loadout.get("tower"),
-                        "cards": loadout.get("cards", []),
-                        "games": row["games"],
-                        "win_rate": row["clean_win_rate"],
-                    },
-                }
-            )
-        for row in connection.execute(
-            f"""
-            SELECT * FROM full_loadout_matchup_stats WHERE dataset_scope=?
-            ORDER BY games DESC, loadout_a_signature, loadout_b_signature
-            LIMIT {RAG_SOURCE_LIMITS['full_loadout_matchup']}
-            """,
-            (scope,),
-        ):
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:full-matchup:{row['loadout_a_signature']}::{row['loadout_b_signature']}",
-                    "source_type": "full_loadout_matchup",
-                    "text": (
-                        f"Exact complete-loadout matchup: {row['games']} games; "
-                        f"first configuration won {row['wins_a']} and second won {row['wins_b']}."
-                    ),
-                    "metadata": {
-                        **common,
-                        "deck_mode": "full_loadout",
-                        "loadout_a_signature": row["loadout_a_signature"],
-                        "loadout_b_signature": row["loadout_b_signature"],
-                        "games": row["games"],
-                        "wins": row["wins_a"],
-                        "win_rate": round(row["wins_a"] / max(1, row["wins_a"] + row["wins_b"]) * 100, 6),
-                    },
-                }
-            )
-        for row in connection.execute(
-            f"""
-            SELECT * FROM matchup_stats WHERE dataset_scope=?
-            ORDER BY games DESC, deck_a_signature, deck_b_signature
-            LIMIT {RAG_SOURCE_LIMITS['matchup']}
-            """,
-            (scope,),
-        ):
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:matchup:{row['deck_a_signature']}::{row['deck_b_signature']}",
-                    "source_type": "matchup",
-                    "text": (
-                        f"Exact deck matchup evidence: {row['deck_a_signature']} versus {row['deck_b_signature']}; "
-                        f"{row['games']} games, first deck won {row['wins_a']} times."
-                    ),
-                    "metadata": {
-                        **common,
-                        "deck_name": row["deck_a_signature"],
-                        "opponent_deck_name": row["deck_b_signature"],
-                        "games": row["games"],
-                        "wins": row["wins_a"],
-                        "win_rate": round(row["wins_a"] / max(1, row["wins_a"] + row["wins_b"]) * 100, 6),
-                    },
-                }
-            )
-        for row in connection.execute(
-            f"""
-            SELECT card_name, teammate_name, games, wins, losses FROM card_teammates
-            WHERE dataset_scope=? AND card_name<teammate_name
-            ORDER BY games DESC, card_name, teammate_name
-            LIMIT {RAG_SOURCE_LIMITS['card_pair']}
-            """,
-            (scope,),
-        ):
-            decisions = row["wins"] + row["losses"]
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:card-pair:{row['card_name']}::{row['teammate_name']}",
-                    "source_type": "card_pair",
-                    "text": f"Card pair {row['card_name']} and {row['teammate_name']} appeared in {row['games']} side records.",
-                    "metadata": {
-                        **common,
-                        "cards": [row["card_name"], row["teammate_name"]],
-                        "games": row["games"],
-                        "sample_win_rate": round(row["wins"] / decisions * 100, 6) if decisions else 0.0,
-                    },
-                }
-            )
-        for row in connection.execute(
-            f"""
-            SELECT card_name, opponent_name, games, wins, losses FROM card_opponents
-            WHERE dataset_scope=? ORDER BY games DESC, card_name, opponent_name
-            LIMIT {RAG_SOURCE_LIMITS['counter']}
-            """,
-            (scope,),
-        ):
-            decisions = row["wins"] + row["losses"]
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:counter:{row['card_name']}::{row['opponent_name']}",
-                    "source_type": "counter",
-                    "text": f"Observed matchup evidence for {row['card_name']} against {row['opponent_name']} in {row['games']} side records.",
-                    "metadata": {
-                        **common,
-                        "card_name": row["card_name"],
-                        "opponent_card_name": row["opponent_name"],
-                        "games": row["games"],
-                        "win_rate": round(row["wins"] / decisions * 100, 6) if decisions else 0.0,
-                    },
-                }
-            )
-        for row in connection.execute(
-            "SELECT * FROM card_stats WHERE dataset_scope=? ORDER BY appearances DESC, card_name "
-            f"LIMIT {RAG_SOURCE_LIMITS['card_profile']}",
-            (scope,),
-        ):
-            documents.append(
-                {
-                    "doc_id": f"{group_id}:{scope}:card-profile:{row['card_name']}",
-                    "source_type": "card_profile",
-                    "text": f"Card profile for {row['card_name']}: {row['appearances']} appearances and {row['clean_win_rate']}% win rate.",
-                    "metadata": {
-                        **common,
-                        "card_name": row["card_name"],
-                        "games": row["appearances"],
-                        "win_rate": row["clean_win_rate"],
-                    },
-                }
-            )
-    return documents
+    return _build_rag_documents_orchestrated(connection, group_id, datasets)
 
 
 def _validate_documents(documents: list[dict], group_id: str) -> dict:
-    failures = []
-    doc_ids = [str(doc.get("doc_id") or "") for doc in documents]
-    scopes = {doc.get("metadata", {}).get("dataset_scope") for doc in documents}
-    if not documents or not all(doc_ids) or len(doc_ids) != len(set(doc_ids)):
-        failures.append("invalid_or_duplicate_doc_ids")
-    if scopes != set(DATASET_SCOPES):
-        failures.append("dataset_scope_coverage_mismatch")
-    if any(doc.get("metadata", {}).get("snapshot_group_id") != group_id for doc in documents):
-        failures.append("snapshot_group_mismatch")
-    return {
-        "passed": not failures,
-        "failures": failures,
-        "document_count": len(documents),
-        "source_counts": dict(Counter(str(doc.get("source_type")) for doc in documents)),
-        "docs_fingerprint": _docs_fingerprint(documents),
-    }
-
+    return _validate_documents_orchestrated(documents, group_id)
 
 def build_snapshot_group(
     store: RollingCorpusStore,

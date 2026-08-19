@@ -28,6 +28,7 @@ from app_config import (
 
 
 DATA_DIR = Path("data")
+QDRANT_ROOT = Path(__import__("os").getenv("CR_AGENT_QDRANT_ROOT", str(DATA_DIR / "daily_snapshot_qdrant")))
 DOCS_FILE = RAG_DOCS_FILE
 RETRIEVAL_FUSION_MODE = getattr(_app_config, "RETRIEVAL_FUSION_MODE", "rrf")
 RETRIEVAL_RRF_K = getattr(_app_config, "RETRIEVAL_RRF_K", 60)
@@ -64,7 +65,7 @@ class HybridRetriever:
 
         self.snapshot_id = self._snapshot_id_from_docs(docs)
         self.index_path = None if in_memory else index_path if index_path is not None else (
-            DATA_DIR / "daily_snapshot_qdrant" / self.snapshot_id if self.snapshot_id else None
+            QDRANT_ROOT / self.snapshot_id if self.snapshot_id else None
         )
         self.collection_name = COLLECTION_NAME
         self.manifest_path = self.index_path / "manifest.json" if self.index_path else None

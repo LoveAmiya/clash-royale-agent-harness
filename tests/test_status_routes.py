@@ -52,6 +52,37 @@ class StatusRouteRegistrationTests(unittest.TestCase):
         self.assertEqual(metrics.text, "cr_agent_runtime_state 1\n")
         self.assertEqual(calls, [])
 
+    def test_register_status_routes_require_admin_when_key_is_configured(self):
+        app = FastAPI()
+
+        register_status_routes(
+            app,
+            get_health_payload=lambda: {"status": "healthy"},
+            get_readiness_status=lambda: {
+                "status": "ready",
+                "http_status": 200,
+                "blockers": [],
+                "degraded_reasons": [],
+            },
+            get_model_status_payload=lambda: {"circuit_state": "closed"},
+            get_metrics_body=lambda: "cr_agent_runtime_state 1\n",
+            admin_api_key=lambda: "secret",
+            authorize_admin=lambda expected, actual: expected == "secret" and actual == "secret",
+        )
+
+        client = TestClient(app)
+        try:
+            self.assertEqual(client.get("/health").status_code, 200)
+            for path in ("/ready", "/model/status", "/metrics"):
+                with self.subTest(path=path):
+                    denied = client.get(path)
+                    accepted = client.get(path, headers={"X-Admin-Key": "secret"})
+                    self.assertEqual(denied.status_code, 401)
+                    self.assertEqual(denied.json()["detail"], "administrator credentials required")
+                    self.assertEqual(accepted.status_code, 200)
+        finally:
+            client.close()
+
 
 if __name__ == "__main__":
     unittest.main()

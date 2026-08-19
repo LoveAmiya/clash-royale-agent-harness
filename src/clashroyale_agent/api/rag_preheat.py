@@ -54,6 +54,31 @@ class RAGPreheatDependencies:
     data_dir: Any
 
 
+def build_rag_preheat_dependencies(dependencies_cls: Any, runtime: dict[str, Any]) -> Any:
+    """Bind RAG preheat dependencies from the runtime compatibility namespace."""
+    return dependencies_cls(
+        lock_factory=runtime["threading"].Lock,
+        load_docs=runtime["load_docs"],
+        validate_snapshot_rag_documents=runtime["validate_snapshot_rag_documents"],
+        retriever_factory=runtime["HybridRetriever"],
+        evaluate_rag_quality=runtime["evaluate_rag_quality"],
+        persist_quality_report=runtime["persist_quality_report"],
+        quality_gate_error=runtime["RAGQualityGateError"],
+        cleanup_snapshot_retention=runtime["cleanup_snapshot_retention"],
+        activate_snapshot_state=runtime["_activate_snapshot_state"],
+        logger=runtime["logger"],
+        index_mode=runtime["RAG_INDEX_MODE"],
+        quality_gate_enabled=runtime["RAG_QUALITY_GATE_ENABLED"],
+        external_api_required=runtime["EXTERNAL_API_REQUIRED"],
+        quality_report_dir=runtime["RAG_QUALITY_REPORT_DIR"],
+        min_documents=runtime["RAG_MIN_DOCUMENTS"],
+        min_source_types=runtime["RAG_MIN_SOURCE_TYPES"],
+        min_probe_recall=runtime["RAG_MIN_PROBE_RECALL_PERCENT"] / 100.0,
+        probes_per_source=runtime["RAG_PROBES_PER_SOURCE"],
+        data_dir=runtime["DATA_DIR"],
+    )
+
+
 def record_rag_preheat_baseline(
     app: Any,
     *,
@@ -228,6 +253,7 @@ def preheat_rag_retriever(
 
 __all__ = [
     "RAGPreheatDependencies",
+    "build_rag_preheat_dependencies",
     "preheat_rag_retriever",
     "record_rag_preheat_baseline",
 ]

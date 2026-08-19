@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import app_config  # noqa: F401 - initializes the src package path for root runs.
 from clashroyale_agent.collection import rolling_collector
+from src.clashroyale_agent.collection.collector_status import batch_baseline as packaged_batch_baseline
 from rolling_corpus import CorpusError
 from scripts.collect_rolling_corpus import (
     CollectionStatusReporter,
@@ -78,6 +79,9 @@ class RollingCollectionValidationPolicyTests(unittest.TestCase):
 
 
 class RollingCollectionBaselineTests(unittest.TestCase):
+    def test_collector_status_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_batch_baseline))
+
     def test_batch_baseline_uses_existing_duration_dedupe_and_staging_metrics(self):
         baseline = _batch_baseline(
             snapshot={

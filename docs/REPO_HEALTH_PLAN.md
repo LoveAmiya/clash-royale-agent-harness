@@ -5,7 +5,7 @@ This plan tracks the work needed to turn the current single-developer, fast-movi
 ## Baseline
 
 - The project already has strong operational coverage: CI, deterministic evaluation, fault injection, Docker/compose assets, metrics, alerting, and collection runbooks.
-- Most root entry modules now delegate to package owners. Remaining oversized compatibility surfaces are `runtime_multi.py` (1366 lines), `supercell_live.py` (1501 lines), and `query_parser.py` (584 lines); `query_answering.py` is 517 lines. `web_app.py` is a 324-line compatibility route surface and `web_ui_template.py` is a 20-line alias for the file-backed template.
+- Most root entry modules now delegate to package owners. The former oversized runtime and compatibility surfaces have been reduced to their target boundaries: `runtime_multi.py` is 600 lines, `query_parser.py` is 584 lines, `query_answering.py` is 517 lines, `web_app.py` is a 324-line compatibility route surface, and `web_ui_template.py` is a 20-line alias for the file-backed template. `supercell_live.py` is a compatibility facade with live client/snapshot owners under `src/clashroyale_agent/collection/`.
 - Public onboarding is mixed with local operations. `README.md`, `00_START_HERE.md`, and quality docs repeat some testing numbers with different historical contexts.
 - Runtime artifacts must remain private: `data/`, `logs/`, `tmp/`, SQLite databases, JSONL traces, generated reports, battle facts, player identifiers, and local zip exports.
 
@@ -19,7 +19,7 @@ not exactly match the earlier user-facing stage list.
 |---|---|---|
 | Stage 0 - repository hygiene | In place: ignore rules protect private data, generated reports, logs, SQLite files, JSONL traces, trace and benchmark outputs, and archives; `scripts/check_repo.ps1` audits tracked paths, ignore coverage, staged names, and whitespace. | Keep reviewing staged content manually; automated path checks cannot prove file contents are safe. |
 | Stage 1 - directory structure | In place: `src/clashroyale_agent` has API, web, QA, retrieval, stats, collection, snapshots and ops boundaries; current root entry points are compatibility facades. | Keep new behavior in package owners and retain only externally required root compatibility surfaces. |
-| Stage 2 - monolith split | In progress: API schemas, app construction, SSE helpers, status/snapshot helpers, route registration, QA, collection, and web template/proxy concerns have package owners. | `runtime_multi.py`, `query_parser.py`, `query_answering.py`, and `supercell_live.py` remain above the size targets. Additional reductions need separate behavior-preserving slices and regression gates. |
+| Stage 2 - monolith split | Target boundary reached: API schemas, app construction, SSE helpers, status/snapshot helpers, route registration, runtime QA orchestration, collection, and web template/proxy concerns have package owners; no non-test source module exceeds the 600-line giant-file threshold in the current tree scan. | Keep future changes in package owners and re-run the source-size audit after substantial additions. |
 | Stage 3 - quality gates | Core gate in place: `pyproject.toml` centralizes package, Ruff, pytest and mypy configuration; `scripts/check_repo.ps1` composes hygiene, compile, unit and full behavioral checks. External API/Supercell/Ollama tests remain opt-in. | Install Ruff/mypy/pytest in the development toolchain before changing their current advisory/config-only status; mark tests incrementally rather than in a bulk rewrite. |
 | Stage 4 - documentation refactor | In progress: README, startup guide, architecture, operations, data contract, RAG/QA, testing, ADR index, and contributing docs now have separate owners. | Keep README concise, keep local operations in 00_START_HERE.md/docs/OPERATIONS.md, and keep commit/private-data rules in CONTRIBUTING.md. |
 
@@ -227,6 +227,5 @@ source of truth for the next slice and for interruption recovery.
 - Performance baselines expose aggregate measurements only. Live provider and
   collector runs remain opt-in; compare their generated local reports outside
   version control.
-- `LICENSE` currently declares Apache-2.0, but owner confirmation is still
-  pending. Do not change the license text or project license metadata without
-  explicit maintainer direction.
+- `LICENSE` and project metadata now declare Apache-2.0. Keep the license text,
+  copyright notices, and third-party attribution boundaries intact.

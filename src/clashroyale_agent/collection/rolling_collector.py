@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import json
 import os
 import re
 import shutil
 import sys
 import tempfile
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +36,25 @@ from clashroyale_agent.collection.rolling_corpus import (
     RollingCorpusStore,
 )
 from clashroyale_agent.collection.rolling_materializer import build_snapshot_group
+from clashroyale_agent.collection.collector_status import (
+    CollectionStatusReporter,
+    batch_baseline as _batch_baseline,
+    bounded_fetch_concurrency as _bounded_fetch_concurrency,
+    collection_status_payload as _collection_status_payload,
+    elapsed_seconds as _elapsed_seconds,
+    STATUS_HEARTBEAT_SECONDS as _STATUS_HEARTBEAT_SECONDS,
+)
+from clashroyale_agent.collection.collector_staging import (
+    directory_size_bytes as _directory_size_bytes,
+    discard_lane_stage as _discard_lane_stage_orchestrated,
+    lane_paths as _lane_paths,
+    prepare_lane_stage as _prepare_lane_stage_orchestrated,
+    staging_limit_bytes as _staging_limit_bytes_orchestrated,
+)
+from clashroyale_agent.collection.collector_tokens import (
+    parse_api_tokens as _parse_api_tokens_orchestrated,
+    resolve_api_token as _resolve_api_token_orchestrated,
+)
 from supercell_live import SupercellAPIClient
 
 
@@ -50,231 +67,35 @@ _STAGING_LIMIT_BYTES_BY_MODE = {
 }
 _TOTAL_STAGING_LIMIT_BYTES = 5 * 1024**3
 _MERGE_LOCK_WAIT_SECONDS = 2 * 60 * 60
-_STATUS_HEARTBEAT_SECONDS = 60.0
-
-
-def _bounded_fetch_concurrency(value: int | str | None) -> int:
-    try:
-        parsed = int(value) if value is not None else 1
-    except (TypeError, ValueError):
-        parsed = 1
-    return max(1, min(parsed, 4))
-
-
-def _elapsed_seconds(started_at: float) -> float:
-    return round(max(0.0, time.monotonic() - started_at), 3)
-
-
-def _collection_status_payload(
-    *,
-    mode: str,
-    trigger_batch_id: str,
-    effective_batch_id: str,
-    resumed: bool,
-    stage: str,
-    status: str,
-    **fields,
-) -> dict:
-    return {
-        "schema_version": 1,
-        "status": status,
-        "stage": stage,
-        "batch_id": effective_batch_id,
-        "trigger_batch_id": trigger_batch_id,
-        "collection_mode": mode,
-        "resumed": resumed,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        **fields,
-    }
-
-
-def _batch_baseline(
-    *,
-    snapshot: dict,
-    imported: dict,
-    performance: dict,
-    staging: dict,
-) -> dict:
-    """Expose existing batch measurements under a stable aggregate contract."""
-    metrics = snapshot.get("collection_metrics") or {}
-    return {
-        "batch_duration_seconds": float(performance.get("total_seconds") or 0.0),
-        "dedupe": {
-            "pre_dedupe_records": int(metrics.get("raw_battle_records") or 0),
-            "post_dedupe_battles": int(snapshot.get("usable_battles") or 0),
-            "duplicates_skipped": int(metrics.get("duplicates_skipped") or 0),
-            "facts_inserted": int(imported.get("facts_inserted") or 0),
-            "observations_imported": int(imported.get("observations_imported") or 0),
-        },
-        "staging_size_bytes": int(staging.get("workspace_bytes") or 0),
-        "staging_limit_bytes": int(staging.get("workspace_limit_bytes") or 0),
-    }
-
-
-class CollectionStatusReporter:
-    """Atomically refresh one lane status while a long synchronous stage runs."""
-
-    def __init__(
-        self,
-        path: Path,
-        *,
-        base_fields: dict,
-        heartbeat_interval_seconds: float = _STATUS_HEARTBEAT_SECONDS,
-    ) -> None:
-        self.path = Path(path)
-        self.base_fields = dict(base_fields)
-        self.heartbeat_interval_seconds = max(0.01, float(heartbeat_interval_seconds))
-        self._fields: dict = {}
-        self._stage_started_at: float | None = None
-        self._sequence = 0
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def update(self, **fields) -> None:
-        with self._lock:
-            self._fields.update(fields)
-            self._write_locked()
-
-    def _write_locked(self) -> None:
-        self._sequence += 1
-        stage_elapsed = (
-            {"stage_elapsed_seconds": _elapsed_seconds(self._stage_started_at)}
-            if self._stage_started_at is not None
-            else {}
-        )
-        _atomic_json(
-            self.path,
-            {
-                **self.base_fields,
-                **self._fields,
-                **stage_elapsed,
-                "heartbeat_sequence": self._sequence,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-
-    def _heartbeat(self) -> None:
-        while not self._stop.wait(self.heartbeat_interval_seconds):
-            with self._lock:
-                self._write_locked()
-
-    def start(self, **fields) -> None:
-        self.update(**fields)
-        if self._thread is None:
-            self._thread = threading.Thread(
-                target=self._heartbeat,
-                name="collection-status-heartbeat",
-                daemon=True,
-            )
-            self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=max(1.0, self.heartbeat_interval_seconds + 1.0))
-            self._thread = None
-
-    @contextmanager
-    def stage(self, stage: str, *, status: str, **fields):
-        self._stage_started_at = time.monotonic()
-        self.start(stage=stage, status=status, **fields)
-        try:
-            yield self
-        finally:
-            with self._lock:
-                self._fields["stage_elapsed_seconds"] = _elapsed_seconds(self._stage_started_at)
-                self._write_locked()
-            self.stop()
-            self._stage_started_at = None
+def _resolve_api_token(mode: str) -> str:
+    return _resolve_api_token_orchestrated(
+        mode,
+        token_slot_by_mode=_TOKEN_SLOT_BY_MODE,
+        error_type=CorpusError,
+    )
 
 
 def _parse_api_tokens(raw: str) -> tuple[str, ...]:
-    value = str(raw or "").strip()
-    if not value:
-        return ()
-    if value.startswith("["):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise CorpusError("SUPERCELL_API_TOKENS must be valid JSON or separated text") from exc
-        if not isinstance(parsed, list):
-            raise CorpusError("SUPERCELL_API_TOKENS JSON value must be an array")
-        tokens = tuple(str(item).strip() for item in parsed if str(item).strip())
-    else:
-        tokens = tuple(item.strip() for item in re.split(r"[,;\r\n]+", value) if item.strip())
-    return tokens
-
-
-def _resolve_api_token(mode: str) -> str:
-    index = _TOKEN_SLOT_BY_MODE[mode]
-    tokens = _parse_api_tokens(os.getenv("SUPERCELL_API_TOKENS", ""))
-    legacy = os.getenv("SUPERCELL_API_TOKEN", "").strip()
-    if len(tokens) == 1 and legacy and tokens[0] != legacy:
-        tokens = (legacy, tokens[0])
-    if not tokens and mode == "daily_ranked":
-        if legacy:
-            return legacy
-    if len(tokens) <= index:
-        if mode == "weekly_expanded":
-            raise CorpusError("SUPERCELL_API_TOKENS requires a second token for weekly_expanded")
-        raise CorpusError("SUPERCELL_API_TOKENS requires a first token for daily_ranked")
-    return tokens[index]
-
-
-def _lane_paths(data_dir: Path, mode: str) -> tuple[Path, Path, Path]:
-    lane_root = Path(data_dir) / "rolling_lanes" / mode
-    return lane_root, lane_root / "active", lane_root / "active_batch.json"
-
-
-def _directory_size_bytes(root: Path) -> int:
-    if not root.exists():
-        return 0
-    return sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
+    return _parse_api_tokens_orchestrated(raw, CorpusError)
 
 
 def _staging_limit_bytes(mode: str) -> int:
-    configured = os.getenv(f"SUPERCELL_{mode.upper()}_STAGING_MAX_BYTES", "").strip()
-    if configured:
-        try:
-            return max(1, int(configured))
-        except ValueError:
-            pass
-    return _STAGING_LIMIT_BYTES_BY_MODE[mode]
+    return _staging_limit_bytes_orchestrated(mode, _STAGING_LIMIT_BYTES_BY_MODE)
 
 
 def _prepare_lane_stage(
     data_dir: Path, mode: str, preferred_batch_id: str, now: datetime
 ) -> tuple[str, Path, dict, bool]:
-    lane_root, work_root, state_path = _lane_paths(data_dir, mode)
-    lane_root.mkdir(parents=True, exist_ok=True)
-    if _directory_size_bytes(Path(data_dir) / "rolling_lanes") > _TOTAL_STAGING_LIMIT_BYTES:
-        raise CorpusError("total staging storage limit exceeded")
-    state = None
-    if state_path.is_file():
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise CorpusError("active staging state is unreadable") from exc
-    if isinstance(state, dict) and state.get("collection_mode") == mode and state.get("batch_id"):
-        return str(state["batch_id"]), work_root, state, True
-    if work_root.exists() and any(work_root.iterdir()):
-        raise CorpusError("untracked active staging workspace requires inspection")
-    state = {
-        "schema_version": 1,
-        "batch_id": preferred_batch_id,
-        "collection_mode": mode,
-        "started_at": now.isoformat(),
-    }
-    _atomic_json(state_path, state)
-    return preferred_batch_id, work_root, state, False
+    return _prepare_lane_stage_orchestrated(
+        data_dir, mode, preferred_batch_id, now,
+        total_staging_limit=_TOTAL_STAGING_LIMIT_BYTES,
+        atomic_json=_atomic_json,
+        error_type=CorpusError,
+    )
 
 
 def _discard_lane_stage(data_dir: Path, mode: str) -> None:
-    lane_root, work_root, state_path = _lane_paths(data_dir, mode)
-    if work_root.exists() and work_root.parent.resolve() == lane_root.resolve() and work_root.name == "active":
-        shutil.rmtree(work_root)
-    state_path.unlink(missing_ok=True)
+    _discard_lane_stage_orchestrated(data_dir, mode)
 
 
 def _status_path(data_dir: Path, mode: str) -> Path:

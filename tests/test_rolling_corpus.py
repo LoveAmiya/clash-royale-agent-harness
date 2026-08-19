@@ -13,6 +13,26 @@ from rolling_corpus import (
     DATASET_SCOPES,
     RollingCorpusStore,
 )
+from clashroyale_agent.collection.corpus_normalization import (
+    as_utc as packaged_as_utc,
+    canonical_battle as packaged_canonical_battle,
+    fact_json as packaged_fact_json,
+)
+from clashroyale_agent.collection.corpus_observations import (
+    insert_fact_observation as packaged_insert_fact_observation,
+    upsert_loadout as packaged_upsert_loadout,
+)
+from clashroyale_agent.collection.corpus_lifecycle import create_batch as packaged_create_batch
+from clashroyale_agent.collection.corpus_schema import create_schema as packaged_create_schema
+from clashroyale_agent.collection.corpus_imports import import_workspace_batch as packaged_import_workspace_batch
+from clashroyale_agent.collection.corpus_finalize import finalize_batch as packaged_finalize_batch
+import clashroyale_agent.collection.rolling_corpus as packaged_rolling_corpus
+from clashroyale_agent.collection.corpus_policy import (
+    BatchValidationPolicy as PackagedBatchValidationPolicy,
+    CorpusConflictError as PackagedCorpusConflictError,
+    CorpusWriterBusyError as PackagedCorpusWriterBusyError,
+    CorpusWriterLock as PackagedCorpusWriterLock,
+)
 
 
 UTC = timezone.utc
@@ -75,6 +95,36 @@ def _battle_with_loadouts(battle_id: str) -> dict:
 
 
 class RollingCorpusStoreTests(unittest.TestCase):
+    def test_batch_lifecycle_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_create_batch))
+
+    def test_schema_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_create_schema))
+
+    def test_import_orchestration_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_import_workspace_batch))
+
+    def test_finalize_orchestration_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_finalize_batch))
+
+    def test_observation_persistence_has_a_packaged_owner(self):
+        self.assertIs(
+            packaged_rolling_corpus.insert_fact_observation,
+            packaged_insert_fact_observation,
+        )
+        self.assertIs(packaged_rolling_corpus.upsert_loadout, packaged_upsert_loadout)
+
+    def test_normalization_helpers_have_a_packaged_owner(self):
+        self.assertIs(packaged_rolling_corpus._as_utc, packaged_as_utc)
+        self.assertIs(packaged_rolling_corpus._canonical_battle, packaged_canonical_battle)
+        self.assertIs(packaged_rolling_corpus._fact_json, packaged_fact_json)
+
+    def test_corpus_policy_primitives_keep_legacy_exports(self):
+        self.assertIs(BatchValidationPolicy, PackagedBatchValidationPolicy)
+        self.assertIs(CorpusConflictError, PackagedCorpusConflictError)
+        self.assertIs(CorpusWriterBusyError, PackagedCorpusWriterBusyError)
+        self.assertIs(CorpusWriterLock, PackagedCorpusWriterLock)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.store = RollingCorpusStore(Path(self.temp_dir.name) / "corpus.sqlite")

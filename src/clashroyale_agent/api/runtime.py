@@ -32,6 +32,45 @@ class RuntimeAppDependencies:
     feedback_route_options: Callable[[Any], Mapping[str, Any]]
 
 
+def build_runtime_app_dependencies(dependencies_cls: Any, runtime: dict[str, Any]) -> Any:
+    """Bind non-process route options from the runtime compatibility namespace."""
+    return dependencies_cls(
+        title="ClashRoyaleMatchCoordinator",
+        lifespan=runtime["lifespan"],
+        allowed_origins=runtime["ALLOWED_ORIGINS"],
+        request_body_limit_middleware_class=runtime["RequestBodyLimitMiddleware"],
+        max_request_body_bytes=runtime["MAX_REQUEST_BODY_BYTES"],
+        normalize_request_id=runtime["normalize_request_id"],
+        structured_error_type=runtime["StructuredQueryError"],
+        status_dependencies=runtime["_status_route_dependencies"](),
+        settings_route_options=lambda runtime_app: {
+            "get_settings_payload": lambda: runtime["get_live_sample_settings"](runtime_app),
+            "configure_target": lambda target: runtime["configure_live_sample_target"](runtime_app, target),
+            "refresh_live_snapshot_once": lambda: runtime["refresh_live_snapshot_once"](runtime_app),
+            "live_sample_settings_admin_enabled": lambda: runtime["LIVE_SAMPLE_SETTINGS_ADMIN_ENABLED"],
+            "admin_api_key": lambda: runtime["ADMIN_API_KEY"],
+            "authorize_admin": runtime["authorize_admin"],
+        },
+        snapshot_route_options=lambda runtime_app: {
+            "get_snapshot_status_payload": lambda: runtime["get_live_snapshot_status"](runtime_app),
+            "admin_api_key": lambda: runtime["ADMIN_API_KEY"],
+            "authorize_admin": runtime["authorize_admin"],
+        },
+        structured_route_options=lambda runtime_app: {
+            "default_dataset_scope": runtime["DEFAULT_DATASET_SCOPE"],
+            "get_dataset_catalog": lambda: runtime["get_dataset_catalog"](runtime_app),
+            "get_repository": lambda scope: runtime["get_structured_repository"](runtime_app, scope),
+            "card_ranking_metrics": runtime["CARD_RANKING_METRICS"],
+        },
+        feedback_route_options=lambda runtime_app: {
+            "get_recent_answers": lambda: getattr(runtime_app.state, "recent_answers", None),
+            "get_feedback_store": lambda: getattr(runtime_app.state, "feedback_store", None),
+            "admin_api_key": lambda: runtime["ADMIN_API_KEY"],
+            "authorize_admin": runtime["authorize_admin"],
+        },
+    )
+
+
 def create_registered_runtime_app(*, dependencies: RuntimeAppDependencies) -> Any:
     """Create the FastAPI app and register all non-process runtime route groups."""
     app = create_runtime_app(
@@ -51,4 +90,4 @@ def create_registered_runtime_app(*, dependencies: RuntimeAppDependencies) -> An
     return app
 
 
-__all__ = ["RuntimeAppDependencies", "create_registered_runtime_app"]
+__all__ = ["RuntimeAppDependencies", "build_runtime_app_dependencies", "create_registered_runtime_app"]

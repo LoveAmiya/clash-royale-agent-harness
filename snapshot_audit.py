@@ -7,21 +7,43 @@ Supercell HTTP client. It works only with an already-published snapshot archive.
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import os
 import re
 import shutil
 import sqlite3
 import tempfile
-import time
 from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
+import app_config as _app_config  # noqa: F401 - bootstrap src package imports
+
 from snapshot_store import compute_rag_docs_fingerprint
+from src.clashroyale_agent.snapshots.review_validation import (
+    read_jsonl_documents as read_jsonl_documents_orchestrated,
+    normalized_numbers as normalized_numbers_orchestrated,
+    verify_audit_files as verify_audit_files_orchestrated,
+    review_validation_report as review_validation_report_orchestrated,
+)
+try:
+    from clashroyale_agent.snapshots.audit_primitives import (
+        publish_directory as _publish_directory_orchestrated,
+        read_json as _read_json_orchestrated,
+        sha256 as _sha256_orchestrated,
+        validated_snapshot_id as _validated_snapshot_id_orchestrated,
+        write_json as _write_json_orchestrated,
+    )
+except ModuleNotFoundError:
+    from src.clashroyale_agent.snapshots.audit_primitives import (
+        publish_directory as _publish_directory_orchestrated,
+        read_json as _read_json_orchestrated,
+        sha256 as _sha256_orchestrated,
+        validated_snapshot_id as _validated_snapshot_id_orchestrated,
+        write_json as _write_json_orchestrated,
+    )
 
 
 AUDIT_SCHEMA_VERSION = 1
@@ -45,46 +67,23 @@ class ExternalReviewValidationError(ValueError):
 
 
 def _validated_snapshot_id(snapshot_id: str) -> str:
-    value = str(snapshot_id or "").strip()
-    if not value or not _SAFE_SNAPSHOT_ID.fullmatch(value):
-        raise SnapshotAuditError("invalid snapshot_id")
-    return value
+    return _validated_snapshot_id_orchestrated(snapshot_id, SnapshotAuditError)
 
 
 def _read_json(path: Path) -> dict | list:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SnapshotAuditError(f"cannot read JSON file: {path.name}") from exc
+    return _read_json_orchestrated(path, SnapshotAuditError)
 
 
 def _write_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    _write_json_orchestrated(path, value)
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return _sha256_orchestrated(path)
 
 
 def _publish_directory(source: Path, destination: Path) -> None:
-    """Atomically publish a new directory, tolerating brief Windows file locks."""
-    for attempt in range(6):
-        try:
-            os.replace(source, destination)
-            return
-        except PermissionError:
-            if attempt == 5 or destination.exists():
-                raise
-            time.sleep(0.05 * (attempt + 1))
+    _publish_directory_orchestrated(source, destination)
 
 
 def _file_entry(root: Path, path: Path, *, role: str, records: int | None = None) -> dict:
@@ -493,63 +492,15 @@ def export_snapshot_audit(
 
 
 def _read_jsonl_documents(path: Path) -> list[dict]:
-    documents: list[dict] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if len(line.encode("utf-8")) > MAX_REVIEW_DOCUMENT_BYTES:
-                raise SnapshotAuditError(f"review document line {line_number} exceeds size limit")
-            if not line.strip():
-                continue
-            try:
-                document = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise SnapshotAuditError(f"invalid review JSON on line {line_number}") from exc
-            if not isinstance(document, dict):
-                raise SnapshotAuditError(f"review line {line_number} is not an object")
-            documents.append(document)
-    return documents
+    return read_jsonl_documents_orchestrated(path, max_bytes=MAX_REVIEW_DOCUMENT_BYTES, error_type=SnapshotAuditError)
 
 
 def _normalized_numbers(value: object) -> Counter[str]:
-    tokens: Counter[str] = Counter()
-
-    def add(number: object) -> None:
-        if isinstance(number, bool):
-            return
-        try:
-            decimal = Decimal(str(number)).normalize()
-        except (InvalidOperation, ValueError):
-            return
-        tokens[format(decimal, "f")] += 1
-
-    if isinstance(value, str):
-        for match in _NUMBER_TOKEN.finditer(value):
-            add(match.group(0))
-    elif isinstance(value, dict):
-        for item in value.values():
-            if isinstance(item, (int, float, Decimal)) and not isinstance(item, bool):
-                add(item)
-            elif isinstance(item, (dict, list, tuple)):
-                tokens.update(_normalized_numbers(item))
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            tokens.update(_normalized_numbers(item))
-    return tokens
+    return normalized_numbers_orchestrated(value)
 
 
 def _verify_audit_files(audit_dir: Path, manifest: dict) -> list[str]:
-    mismatches: list[str] = []
-    for entry in manifest.get("files", []):
-        relative = str(entry.get("path") or "")
-        candidate = (audit_dir / relative).resolve()
-        try:
-            candidate.relative_to(audit_dir.resolve())
-        except ValueError:
-            mismatches.append(relative or "<missing-path>")
-            continue
-        if not candidate.is_file() or _sha256(candidate) != entry.get("sha256"):
-            mismatches.append(relative or "<missing-path>")
-    return mismatches
+    return verify_audit_files_orchestrated(audit_dir, manifest, sha256=_sha256)
 
 
 def _review_validation_report(
@@ -560,80 +511,12 @@ def _review_validation_report(
     audit_hash_mismatches: list[str],
     reviewed_path: Path,
 ) -> dict:
-    failures: set[str] = set()
-    invalid_doc_ids: set[str] = set()
-    if audit_hash_mismatches:
-        failures.add("audit_file_hash_mismatch")
-    expected_by_id = {
-        document.get("doc_id"): document
-        for document in expected
-        if isinstance(document, dict) and isinstance(document.get("doc_id"), str)
-    }
-    reviewed_by_id: dict[str, dict] = {}
-    for document in reviewed:
-        doc_id = document.get("doc_id")
-        if not isinstance(doc_id, str) or not doc_id or doc_id in reviewed_by_id:
-            failures.add("duplicate_or_missing_doc_id")
-            invalid_doc_ids.add(str(doc_id or "<missing-doc-id>"))
-            continue
-        reviewed_by_id[doc_id] = document
-    if set(expected_by_id) != set(reviewed_by_id):
-        failures.add("document_id_coverage_mismatch")
-        invalid_doc_ids.update(str(value) for value in set(expected_by_id) ^ set(reviewed_by_id))
-
-    for doc_id in set(expected_by_id) & set(reviewed_by_id):
-        source = expected_by_id[doc_id]
-        candidate = reviewed_by_id[doc_id]
-        if set(candidate) != {"doc_id", "source_type", "text", "metadata"}:
-            failures.add("invalid_document_shape")
-            invalid_doc_ids.add(doc_id)
-        if candidate.get("source_type") != source.get("source_type"):
-            failures.add("source_field_mismatch")
-            invalid_doc_ids.add(doc_id)
-        metadata = candidate.get("metadata")
-        if metadata != source.get("metadata"):
-            failures.add("metadata_mismatch")
-            invalid_doc_ids.add(doc_id)
-        if not isinstance(metadata, dict) or metadata.get("snapshot_id") != snapshot_id:
-            failures.add("snapshot_id_mismatch")
-            invalid_doc_ids.add(doc_id)
-        if not isinstance(metadata, dict) or metadata.get("source") != "Supercell API live sample":
-            failures.add("source_field_mismatch")
-            invalid_doc_ids.add(doc_id)
-        text = candidate.get("text")
-        if not isinstance(text, str) or not text.strip():
-            failures.add("invalid_document_text")
-            invalid_doc_ids.add(doc_id)
-            continue
-        allowed_numbers = _normalized_numbers(source.get("text", ""))
-        allowed_numbers.update(_normalized_numbers(source.get("metadata", {})))
-        candidate_numbers = _normalized_numbers(text)
-        if any(candidate_numbers[token] > allowed_numbers[token] for token in candidate_numbers):
-            failures.add("numeric_claim_mismatch")
-            invalid_doc_ids.add(doc_id)
-
-    return {
-        "schema_version": REVIEW_SCHEMA_VERSION,
-        "snapshot_id": snapshot_id,
-        "validated_at": datetime.now(timezone.utc).isoformat(),
-        "passed": not failures,
-        "failures": sorted(failures),
-        "invalid_doc_ids": sorted(invalid_doc_ids),
-        "audit_hash_mismatches": sorted(audit_hash_mismatches),
-        "document_count": len(reviewed),
-        "expected_document_count": len(expected),
-        "reviewed_file_sha256": _sha256(reviewed_path),
-        "reviewed_docs_fingerprint": compute_rag_docs_fingerprint(reviewed),
-        "generated_docs_fingerprint": compute_rag_docs_fingerprint(expected),
-        "activation": "staged_only",
-        "active_rag_documents_changed": False,
-        "cost_boundaries": {
-            "supercell_requests": 0,
-            "cloud_llm_calls": 0,
-            "cloud_embedding_calls": 0,
-            "local_embedding_calls": 0,
-        },
-    }
+    return review_validation_report_orchestrated(
+        snapshot_id=snapshot_id, expected=expected, reviewed=reviewed,
+        audit_hash_mismatches=audit_hash_mismatches, reviewed_path=reviewed_path,
+        schema_version=REVIEW_SCHEMA_VERSION, source="Supercell API live sample",
+        fingerprint=compute_rag_docs_fingerprint, sha256=_sha256,
+    )
 
 
 def import_reviewed_rag_documents(

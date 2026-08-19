@@ -426,6 +426,16 @@ class ProductionHardeningHTTPContractTests(unittest.TestCase):
         self.assertEqual(metrics.status_code, 200)
         self.assertIn("cr_agent_runtime_state", metrics.text)
 
+    def test_runtime_operations_endpoints_require_admin_when_key_is_configured(self):
+        with patch.object(runtime_multi, "ADMIN_API_KEY", "expected-key"):
+            for path in ("/ready", "/model/status", "/metrics", "/snapshot/status", "/feedback/stats"):
+                with self.subTest(path=path):
+                    denied = self.client.get(path)
+                    accepted = self.client.get(path, headers={"X-Admin-Key": "expected-key"})
+                    self.assertEqual(denied.status_code, 401)
+                    self.assertEqual(denied.json()["detail"], "administrator credentials required")
+                    self.assertIn(accepted.status_code, {200, 503})
+
     def test_process_sse_includes_request_id_and_enforces_rate_limit(self):
         with patch.object(runtime_multi, "build_answer", AsyncMock(return_value=self._answer_result())):
             first = self.client.post("/process", json=self._payload(), headers={"X-Request-ID": "sse-contract"})

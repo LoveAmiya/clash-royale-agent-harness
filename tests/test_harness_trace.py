@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -133,3 +134,18 @@ class HarnessTraceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error", event)
         self.assertIn("parsed", event)
         self.assertIn("timestamp_ms", event)
+
+    def test_default_trace_path_can_be_redirected_for_test_isolation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            isolated_path = Path(directory) / "isolated-traces.jsonl"
+            previous = os.environ.get("CR_AGENT_TRACE_LOG_PATH")
+            os.environ["CR_AGENT_TRACE_LOG_PATH"] = str(isolated_path)
+            try:
+                recorder = TraceRecorder()
+            finally:
+                if previous is None:
+                    os.environ.pop("CR_AGENT_TRACE_LOG_PATH", None)
+                else:
+                    os.environ["CR_AGENT_TRACE_LOG_PATH"] = previous
+
+        self.assertEqual(recorder.log_path, isolated_path)

@@ -7,6 +7,21 @@ from pathlib import Path
 
 from structured_stats import build_structured_stats
 from structured_query import StructuredQueryError, StructuredStatsRepository
+from src.clashroyale_agent.stats.query_contracts import validate_deck as packaged_validate_deck
+from src.clashroyale_agent.stats.build_primitives import sha256 as packaged_sha256
+from src.clashroyale_agent.stats.card_queries import card_catalog as packaged_card_catalog
+from src.clashroyale_agent.stats.card_detail_queries import card_stats as packaged_card_stats
+from src.clashroyale_agent.stats.entity_queries import entity_catalog as packaged_entity_catalog
+from src.clashroyale_agent.stats.loadout_catalog import loadout_catalog as packaged_loadout_catalog
+from src.clashroyale_agent.stats.answer_payload import build_answer_payload as packaged_answer_payload
+from src.clashroyale_agent.stats.deck_queries import deck_profile as packaged_deck_profile
+from src.clashroyale_agent.stats.full_loadout_queries import full_loadout_profile as packaged_full_loadout_profile
+from src.clashroyale_agent.stats.archetype_queries import archetypes as packaged_archetypes
+from src.clashroyale_agent.stats.finalize import finalize_decks as packaged_finalize_decks
+from src.clashroyale_agent.stats.math_primitives import result as packaged_result
+from src.clashroyale_agent.stats.loadout_stats import increment_loadout_features as packaged_increment_loadout_features
+from src.clashroyale_agent.stats.schema import create_schema as packaged_create_schema
+from src.clashroyale_agent.stats.write_primitives import upsert_deck as packaged_upsert_deck
 
 
 SNAPSHOT_ID = "supercell-structured-test"
@@ -128,6 +143,51 @@ def _create_archive(data_dir: Path) -> None:
 
 
 class StructuredStatsBuildTests(unittest.TestCase):
+    def test_entity_queries_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_entity_catalog))
+
+    def test_loadout_catalog_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_loadout_catalog))
+
+    def test_answer_payload_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_answer_payload))
+
+    def test_deck_queries_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_deck_profile))
+
+    def test_full_loadout_queries_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_full_loadout_profile))
+
+    def test_archetype_queries_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_archetypes))
+
+    def test_structured_query_contracts_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_validate_deck))
+
+    def test_structured_stats_build_primitives_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_sha256))
+
+    def test_structured_stats_math_has_a_packaged_owner(self):
+        self.assertEqual(packaged_result(2, 1), (1, 0, 0))
+
+    def test_structured_stats_schema_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_create_schema))
+
+    def test_structured_stats_write_primitives_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_upsert_deck))
+
+    def test_structured_stats_loadout_features_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_increment_loadout_features))
+
+    def test_structured_query_card_queries_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_card_catalog))
+
+    def test_structured_query_card_detail_queries_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_card_stats))
+
+    def test_structured_stats_finalize_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_finalize_decks))
+
     def test_build_expands_valid_battles_into_two_sided_statistics(self):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)

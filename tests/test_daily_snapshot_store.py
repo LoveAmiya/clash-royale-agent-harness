@@ -25,6 +25,22 @@ from snapshot_store import (
     snapshot_refresh_due,
     validate_snapshot_rag_documents,
 )
+from clashroyale_agent.snapshots.retention import (
+    cleanup_snapshot_retention as packaged_cleanup_snapshot_retention,
+)
+from src.clashroyale_agent.snapshots.aggregate_evidence import (
+    build_aggregate_evidence_documents as packaged_build_aggregate_evidence_documents,
+)
+from src.clashroyale_agent.snapshots.rag_validation import validate_snapshot_rag_documents as packaged_validate_rag_documents
+from src.clashroyale_agent.snapshots.publisher import publish_daily_snapshot as packaged_publish_daily_snapshot
+from src.clashroyale_agent.snapshots.documents import build_snapshot_rag_documents as packaged_build_rag_documents
+from src.clashroyale_agent.snapshots.storage import atomic_write_json as packaged_atomic_write_json
+from src.clashroyale_agent.snapshots.status_summary import collector_snapshot_summary as packaged_collector_snapshot_summary
+from src.clashroyale_agent.snapshots.identity import compute_rag_docs_fingerprint as packaged_compute_rag_docs_fingerprint
+from src.clashroyale_agent.snapshots.evidence_primitives import (
+    raw_deck as packaged_raw_deck,
+    with_snapshot_metadata as packaged_with_snapshot_metadata,
+)
 from supercell_live import (
     JsonlRecordSequence,
     PATH_OF_LEGEND_COLLECTION_SCOPE,
@@ -85,6 +101,41 @@ def complete_snapshot(*, fetched_at=None):
 
 
 class DailySnapshotStoreTests(unittest.TestCase):
+    def test_rag_validation_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_validate_rag_documents))
+
+    def test_snapshot_publication_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_publish_daily_snapshot))
+
+    def test_snapshot_documents_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_build_rag_documents))
+
+    def test_snapshot_storage_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_atomic_write_json))
+
+    def test_snapshot_status_summary_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_collector_snapshot_summary))
+
+    def test_snapshot_identity_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_compute_rag_docs_fingerprint))
+
+    def test_aggregate_evidence_has_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_build_aggregate_evidence_documents))
+
+    def test_snapshot_evidence_primitives_have_a_packaged_owner(self):
+        snapshot = complete_snapshot()
+        self.assertEqual(
+            packaged_raw_deck({"cards": ["B", "A"]}, "cards"),
+            ("A", "B"),
+        )
+        self.assertEqual(
+            packaged_with_snapshot_metadata([{"card_name": "Zap"}], snapshot)[0]["snapshot_id"],
+            snapshot["snapshot_id"],
+        )
+
+    def test_snapshot_retention_has_a_packaged_owner(self):
+        self.assertIsNotNone(packaged_cleanup_snapshot_retention)
+
     def test_complete_snapshot_is_the_only_publishable_snapshot(self):
         self.assertTrue(is_complete_daily_snapshot(complete_snapshot()))
 

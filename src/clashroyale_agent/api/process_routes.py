@@ -50,6 +50,28 @@ class ProcessRuntimeDependencies:
     new_uuid: Callable[[], Any] = uuid.uuid4
 
 
+def build_process_runtime_dependencies(dependencies_cls: Any, runtime: dict[str, Any]) -> Any:
+    """Bind process-route providers from the runtime compatibility namespace."""
+    return dependencies_cls(
+        app=runtime["app"], validate_dataset_scope=runtime["_validate_dataset_scope"],
+        load_active_manifest=lambda: runtime["_active_snapshot_group_manifest"](runtime["DATA_DIR"]),
+        default_dataset_scope=runtime["DEFAULT_DATASET_SCOPE"], structured_query_error=runtime["StructuredQueryError"],
+        get_user_text=runtime["get_user_text"], max_query_chars=runtime["MAX_QUERY_CHARS"],
+        normalize_request_id=runtime["normalize_request_id"], resolve_client_id=runtime["resolve_client_id"],
+        trust_proxy_headers=runtime["TRUST_PROXY_HEADERS"], runtime_metrics_factory=runtime["RuntimeMetrics"],
+        process_quota_factory=lambda: runtime["create_process_quota"](
+            backend=runtime["PROCESS_QUOTA_BACKEND"], max_concurrent=runtime["PROCESS_MAX_CONCURRENT"],
+            requests_per_minute=runtime["PROCESS_RATE_LIMIT_PER_MINUTE"], redis_url=runtime["REDIS_URL"],
+            lease_seconds=runtime["PROCESS_QUOTA_LEASE_SECONDS"], key_prefix=runtime["PROCESS_QUOTA_KEY_PREFIX"],
+            fail_mode=runtime["PROCESS_QUOTA_FAIL_MODE"],
+        ),
+        logger=runtime["logger"], openai_model=runtime["OPENAI_MODEL"], build_answer=runtime["build_answer"],
+        read_trace=runtime["read_trace"], redact_for_client=runtime["redact_for_client"],
+        record_model_stream_mode=runtime["record_model_stream_mode"],
+        semantic_content_interval_seconds=runtime["SEMANTIC_CONTENT_INTERVAL_SECONDS"],
+    )
+
+
 async def handle_process_request(
     request: Request | ProcessRequest,
     payload: ProcessRequest | None = None,
@@ -383,6 +405,7 @@ def register_process_routes(
 __all__ = [
     "ProcessEndpoint",
     "ProcessRuntimeDependencies",
+    "build_process_runtime_dependencies",
     "handle_process_request",
     "register_process_routes",
 ]

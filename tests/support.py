@@ -1,8 +1,18 @@
 import importlib.util
+import os
 import sys
+import tempfile
 import types
+from pathlib import Path
 
 from evaluation.contract_fixtures import sample_cards, sample_decks, sample_schedule
+
+
+_TRACE_TEST_DIR = Path(tempfile.gettempdir()) / "clashroyale_agent_tests"
+os.environ.setdefault("CR_AGENT_TRACE_LOG_PATH", str(_TRACE_TEST_DIR / "traces.jsonl"))
+os.environ.setdefault("FEEDBACK_DB_FILE", str(_TRACE_TEST_DIR / "feedback.sqlite3"))
+os.environ.setdefault("RAG_QUALITY_REPORT_DIR", str(_TRACE_TEST_DIR / "rag_quality"))
+os.environ.setdefault("CR_AGENT_QDRANT_ROOT", str(_TRACE_TEST_DIR / "daily_snapshot_qdrant"))
 
 
 def _has_module(name: str) -> bool:

@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -176,10 +177,18 @@ class AnswerQueryRAGRoutingTests(unittest.IsolatedAsyncioTestCase):
         cls.deck_data = sample_decks()
         cls.card_data = sample_cards()
 
+    def setUp(self):
+        self._trace_tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._trace_tmpdir.cleanup)
+        self.trace_dir = Path(self._trace_tmpdir.name)
+
     async def test_answer_query_uses_skill_registry_for_direct_queries(self):
         stub_skill = StubSkill()
         registry = SkillRegistry([stub_skill])
-        executor = SkillExecutor(registry, recorder=TraceRecorder(log_path=Path(self.deck_data.__class__.__name__ + "_unused.jsonl")))
+        executor = SkillExecutor(
+            registry,
+            recorder=TraceRecorder(log_path=self.trace_dir / f"{self.deck_data.__class__.__name__}_unused.jsonl"),
+        )
         parsed = {"intent": "schedule_query", "round": 1, "date": None, "ask_players": False}
 
         with patch.object(query_answering, "SKILL_EXECUTOR", executor):
@@ -204,7 +213,7 @@ class AnswerQueryRAGRoutingTests(unittest.IsolatedAsyncioTestCase):
             reviewer_model_builder=lambda api_key: {"api_key": api_key},
         )
         registry = SkillRegistry([rag_skill])
-        executor = SkillExecutor(registry, recorder=TraceRecorder(log_path=Path("deck_trace_unused.jsonl")))
+        executor = SkillExecutor(registry, recorder=TraceRecorder(log_path=self.trace_dir / "deck_trace_unused.jsonl"))
         retriever = object()
         parsed = {"intent": "deck_query", "rank": None, "top_n": None}
 
@@ -242,7 +251,7 @@ class AnswerQueryRAGRoutingTests(unittest.IsolatedAsyncioTestCase):
             reviewer_model_builder=lambda api_key: {"api_key": api_key},
         )
         registry = SkillRegistry([rag_skill])
-        executor = SkillExecutor(registry, recorder=TraceRecorder(log_path=Path("card_trace_unused.jsonl")))
+        executor = SkillExecutor(registry, recorder=TraceRecorder(log_path=self.trace_dir / "card_trace_unused.jsonl"))
         retriever = object()
         parsed = {"intent": "card_query", "card_name": None, "rank": None, "top_n": None}
 

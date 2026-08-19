@@ -192,7 +192,7 @@ class RetrievalFallbackTests(unittest.TestCase):
             }
         ]
         with patch.object(HybridRetriever, "_build_dense_index", side_effect=RuntimeError("ollama unavailable")):
-            retriever = HybridRetriever(docs)
+            retriever = HybridRetriever(docs, in_memory=True)
 
         results = retriever.hybrid_search("空军防守", final_top_k=1)
 
@@ -216,7 +216,7 @@ class RetrievalFallbackTests(unittest.TestCase):
             },
         ]
         with patch.object(HybridRetriever, "_build_dense_index", side_effect=RuntimeError("offline")):
-            retriever = HybridRetriever(docs)
+            retriever = HybridRetriever(docs, in_memory=True)
 
         results = retriever.hybrid_search("Fireball usage", dataset_scope="35d_all")
 
@@ -259,7 +259,7 @@ class RetrievalFallbackTests(unittest.TestCase):
             },
         ]
         with patch.object(HybridRetriever, "_build_dense_index", side_effect=RuntimeError("offline")):
-            retriever = HybridRetriever(docs)
+            retriever = HybridRetriever(docs, in_memory=True)
 
         results = retriever.hybrid_search(
             "same evidence", dataset_scope="7d_all", deck_mode="full_loadout", final_top_k=5

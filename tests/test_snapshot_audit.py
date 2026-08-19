@@ -12,6 +12,7 @@ from snapshot_audit import (
     import_reviewed_rag_documents,
 )
 from snapshot_store import compute_rag_docs_fingerprint
+from src.clashroyale_agent.snapshots.audit_primitives import sha256 as packaged_audit_sha256
 
 
 SNAPSHOT_ID = "supercell-test-audit"
@@ -146,6 +147,9 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 class SnapshotAuditExportTests(unittest.TestCase):
+    def test_audit_primitives_have_a_packaged_owner(self):
+        self.assertTrue(callable(packaged_audit_sha256))
+
     def test_export_streams_normalized_battles_and_records_verified_hashes(self):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)

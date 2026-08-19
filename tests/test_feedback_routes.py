@@ -54,6 +54,32 @@ class FeedbackRouteRegistrationTests(unittest.TestCase):
         self.assertEqual(stats.status_code, 200)
         self.assertEqual(stats.json(), {"total": 1})
 
+    def test_register_feedback_routes_keep_submission_public_but_stats_admin_only(self):
+        app = FastAPI()
+        store = _FeedbackStore()
+
+        register_feedback_routes(
+            app,
+            get_recent_answers=lambda: {},
+            get_feedback_store=lambda: store,
+            admin_api_key=lambda: "secret",
+            authorize_admin=lambda expected, actual: expected == "secret" and actual == "secret",
+        )
+
+        client = TestClient(app)
+        try:
+            recorded = client.post("/feedback", json={"request_id": "stored-1", "rating": "positive"})
+            denied = client.get("/feedback/stats")
+            accepted = client.get("/feedback/stats", headers={"X-Admin-Key": "secret"})
+        finally:
+            client.close()
+
+        self.assertEqual(recorded.status_code, 200)
+        self.assertEqual(denied.status_code, 401)
+        self.assertEqual(denied.json()["detail"], "administrator credentials required")
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.json(), {"total": 1})
+
     def test_register_feedback_routes_reports_missing_store_as_unavailable(self):
         app = FastAPI()
         register_feedback_routes(
