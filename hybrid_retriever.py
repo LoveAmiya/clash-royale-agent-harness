@@ -72,6 +72,20 @@ class HybridRetriever:
         self.docs_fingerprint = hashlib.sha256(
             json.dumps(docs, ensure_ascii=True, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        self.vector_input_fingerprint = hashlib.sha256(
+            json.dumps(
+                [
+                    {
+                        "source_type": doc.get("source_type"),
+                        "text": doc.get("text"),
+                        "dataset_scope": doc.get("metadata", {}).get("dataset_scope"),
+                    }
+                    for doc in docs
+                ],
+                ensure_ascii=True,
+                sort_keys=False,
+            ).encode("utf-8")
+        ).hexdigest()
         self.qdrant = None
         self.dense_available = False
         self.reused_persisted_index = False
@@ -114,9 +128,17 @@ class HybridRetriever:
         except (OSError, json.JSONDecodeError):
             return False
         return (
-            manifest.get("snapshot_id") == self.snapshot_id
-            and manifest.get("docs_fingerprint") == self.docs_fingerprint
-            and self.qdrant is not None
+            (
+                manifest.get("snapshot_id") == self.snapshot_id
+                and manifest.get("docs_fingerprint") == self.docs_fingerprint
+            )
+            or (
+                manifest.get("vector_input_fingerprint") == self.vector_input_fingerprint
+                and manifest.get("embedding_model") == EMBED_MODEL
+                and manifest.get("vector_size") == VECTOR_SIZE
+            )
+        ) and (
+            self.qdrant is not None
             and self.qdrant.collection_exists(self.collection_name)
         )
 
@@ -127,7 +149,13 @@ class HybridRetriever:
         temporary = self.manifest_path.with_suffix(".tmp")
         temporary.write_text(
             json.dumps(
-                {"snapshot_id": self.snapshot_id, "docs_fingerprint": self.docs_fingerprint},
+                {
+                    "snapshot_id": self.snapshot_id,
+                    "docs_fingerprint": self.docs_fingerprint,
+                    "vector_input_fingerprint": self.vector_input_fingerprint,
+                    "embedding_model": EMBED_MODEL,
+                    "vector_size": VECTOR_SIZE,
+                },
                 ensure_ascii=False,
             ),
             encoding="utf-8",

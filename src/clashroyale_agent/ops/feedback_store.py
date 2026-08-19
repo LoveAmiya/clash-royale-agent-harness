@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from clashroyale_agent.ops.app_config import FEEDBACK_MAX_RECORDS, FEEDBACK_RETENTION_DAYS
+
 
 class RecentAnswerCache:
     def __init__(self, *, max_items: int = 512, ttl_seconds: float = 3600) -> None:
@@ -52,11 +54,21 @@ class RecentAnswerCache:
 
 
 class FeedbackStore:
-    def __init__(self, path: Path, *, max_correction_chars: int = 4000, answer_ttl_seconds: int = 3600) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        max_correction_chars: int = 4000,
+        answer_ttl_seconds: int = 3600,
+        feedback_ttl_seconds: int = FEEDBACK_RETENTION_DAYS * 24 * 60 * 60,
+        max_records: int = FEEDBACK_MAX_RECORDS,
+    ) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.max_correction_chars = max(1, int(max_correction_chars))
         self.answer_ttl_seconds = max(60, int(answer_ttl_seconds))
+        self.feedback_ttl_seconds = max(1, int(feedback_ttl_seconds))
+        self.max_records = max(1, int(max_records))
         self._lock = threading.Lock()
         self._initialize()
 
@@ -83,6 +95,10 @@ class FeedbackStore:
                 )
                 """
             )
+            self._deduplicate_feedback(connection)
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_request_id ON feedback(request_id)"
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS recent_answers (
@@ -98,9 +114,35 @@ class FeedbackStore:
             )
             connection.commit()
 
+    @staticmethod
+    def _deduplicate_feedback(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            DELETE FROM feedback
+            WHERE rowid NOT IN (
+                SELECT MAX(rowid) FROM feedback GROUP BY request_id
+            )
+            """
+        )
+
+    def _purge_feedback_locked(self, connection: sqlite3.Connection) -> None:
+        cutoff = datetime.now(timezone.utc).timestamp() - self.feedback_ttl_seconds
+        cutoff_iso = datetime.fromtimestamp(cutoff, timezone.utc).isoformat()
+        connection.execute("DELETE FROM feedback WHERE created_at < ?", (cutoff_iso,))
+        connection.execute(
+            """
+            DELETE FROM feedback
+            WHERE rowid NOT IN (
+                SELECT rowid FROM feedback ORDER BY created_at DESC, rowid DESC LIMIT ?
+            )
+            """,
+            (self.max_records,),
+        )
+
     def register_answer(self, answer: dict[str, Any]) -> None:
         now = time.time()
         with self._lock, closing(self._connect()) as connection:
+            self._purge_feedback_locked(connection)
             connection.execute("DELETE FROM recent_answers WHERE created_epoch < ?", (now - self.answer_ttl_seconds,))
             connection.execute(
                 """
@@ -160,6 +202,17 @@ class FeedbackStore:
             "parsed_json": json.dumps(answer.get("parsed", {}), ensure_ascii=False, sort_keys=True),
         }
         with self._lock, closing(self._connect()) as connection:
+            self._purge_feedback_locked(connection)
+            existing = connection.execute(
+                """
+                SELECT feedback_id, request_id, created_at, rating, correction, snapshot_id
+                FROM feedback WHERE request_id = ?
+                """,
+                (str(answer["request_id"]),),
+            ).fetchone()
+            if existing is not None:
+                connection.commit()
+                return dict(existing)
             connection.execute(
                 """
                 INSERT INTO feedback (
@@ -172,11 +225,14 @@ class FeedbackStore:
                     "question", "answer", "snapshot_id", "parsed_json",
                 )),
             )
+            self._purge_feedback_locked(connection)
             connection.commit()
         return {key: value for key, value in record.items() if key not in {"question", "answer", "parsed_json"}}
 
     def stats(self) -> dict[str, int]:
-        with closing(self._connect()) as connection:
+        with self._lock, closing(self._connect()) as connection:
+            self._purge_feedback_locked(connection)
+            connection.commit()
             rows = connection.execute("SELECT rating, COUNT(*) AS count FROM feedback GROUP BY rating").fetchall()
         counts = {"positive": 0, "negative": 0}
         counts.update({str(row["rating"]): int(row["count"]) for row in rows})
@@ -185,7 +241,9 @@ class FeedbackStore:
 
     def list_correction_candidates(self, *, limit: int = 1000) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 10_000))
-        with closing(self._connect()) as connection:
+        with self._lock, closing(self._connect()) as connection:
+            self._purge_feedback_locked(connection)
+            connection.commit()
             rows = connection.execute(
                 """
                 SELECT feedback_id, request_id, created_at, question, answer,
@@ -202,4 +260,3 @@ class FeedbackStore:
             item["parsed"] = json.loads(item.pop("parsed_json") or "{}")
             results.append(item)
         return results
-

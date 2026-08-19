@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import app_config  # noqa: F401 - initializes the src package path for root runs.
 from clashroyale_agent.collection import rolling_collector
+from clashroyale_agent.collection.publication_queue import enqueue, pending, remove, queue_path
 from src.clashroyale_agent.collection.collector_status import batch_baseline as packaged_batch_baseline
 from rolling_corpus import CorpusError
 from scripts.collect_rolling_corpus import (
@@ -202,6 +203,69 @@ class RollingCollectionLaneStageTests(unittest.TestCase):
 
 
 class RollingCollectionPublicationRepairTests(unittest.TestCase):
+    def test_publication_queue_is_deduplicated_and_removable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            first = enqueue(
+                data_dir,
+                mode="daily_ranked",
+                batch_id="daily-1",
+                queued_at=datetime(2026, 8, 11, tzinfo=timezone.utc),
+            )
+            duplicate = enqueue(data_dir, mode="daily_ranked", batch_id="daily-1")
+
+            self.assertEqual(first, duplicate)
+            self.assertEqual(pending(data_dir), [first])
+            self.assertTrue(queue_path(data_dir).exists())
+            remove(data_dir, mode="daily_ranked", batch_id="daily-1")
+            self.assertEqual(pending(data_dir), [])
+            self.assertFalse(queue_path(data_dir).exists())
+
+    def test_publication_queue_processes_at_most_one_oldest_item(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            enqueue(data_dir, mode="daily_ranked", batch_id="daily-1")
+            enqueue(data_dir, mode="weekly_expanded", batch_id="weekly-1")
+            (data_dir / "corpus").mkdir(parents=True, exist_ok=True)
+
+            with patch.object(
+                rolling_collector,
+                "build_snapshot_group",
+                return_value={"snapshot_group_id": "pol-queued"},
+            ) as build:
+                result = rolling_collector.process_publication_queue(data_dir=data_dir)
+
+            self.assertEqual(pending(data_dir)[0]["batch_id"], "weekly-1")
+
+        self.assertEqual(
+            result,
+            {"status": "published", "processed": 1, "batch_id": "daily-1", "snapshot_group_id": "pol-queued"},
+        )
+        build.assert_called_once()
+
+    def test_accepted_publication_exposes_aggregate_stage_timings(self):
+        manifest = {
+            "snapshot_group_id": "pol-timings",
+            "datasets": {"7d_all": {}},
+            "fully_aligned": True,
+            "publication_timings_seconds": {
+                "scope_materialization": 12.5,
+                "total": 15.0,
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("scripts.collect_rolling_corpus.build_snapshot_group", return_value=manifest):
+                publication, publication_error = _publish_snapshot_if_accepted(
+                    object(),
+                    data_dir=Path(temp_dir),
+                    now=datetime(2026, 8, 11, tzinfo=timezone.utc),
+                    validation_report={"passed": True},
+                )
+
+        self.assertIsNone(publication_error)
+        self.assertEqual(publication["publication_timings_seconds"], manifest["publication_timings_seconds"])
+
     def test_rejected_batch_does_not_rebuild_or_publish_a_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch("scripts.collect_rolling_corpus.build_snapshot_group") as build:

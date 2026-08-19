@@ -127,6 +127,8 @@ FEEDBACK_DB_FILE = Path(os.getenv("FEEDBACK_DB_FILE", "data/feedback.sqlite3"))
 FEEDBACK_CACHE_MAX_ITEMS = _bounded_int("FEEDBACK_CACHE_MAX_ITEMS", 512, 16, 10_000)
 FEEDBACK_CACHE_TTL_SECONDS = max(60, min(int(os.getenv("FEEDBACK_CACHE_TTL_SECONDS", "3600")), 86_400))
 FEEDBACK_MAX_CORRECTION_CHARS = _bounded_int("FEEDBACK_MAX_CORRECTION_CHARS", 4000, 64, 20_000)
+FEEDBACK_RETENTION_DAYS = _bounded_int("FEEDBACK_RETENTION_DAYS", 35, 1, 3650)
+FEEDBACK_MAX_RECORDS = _bounded_int("FEEDBACK_MAX_RECORDS", 10_000, 100, 1_000_000)
 
 # Official live data is opt-in because Supercell API credentials are IP-restricted.
 SUPERCELL_API_TOKEN = os.getenv("SUPERCELL_API_TOKEN", "").strip()

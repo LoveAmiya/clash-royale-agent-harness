@@ -1,5 +1,8 @@
 import tempfile
 import unittest
+import sqlite3
+from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from feedback_store import FeedbackStore, RecentAnswerCache
@@ -67,6 +70,47 @@ class FeedbackStoreTests(unittest.TestCase):
                 "selected_skill": "CardMetaSkill",
             })
             self.assertEqual(reader.get_answer("req-shared")["selected_skill"], "CardMetaSkill")
+
+    def test_feedback_is_idempotent_per_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FeedbackStore(Path(directory) / "feedback.sqlite3", max_records=10)
+            answer = {"request_id": "req-idempotent", "question": "q", "answer": "a"}
+            first = store.submit(answer=answer, rating="positive")
+            second = store.submit(answer=answer, rating="negative")
+
+            self.assertEqual(first["feedback_id"], second["feedback_id"])
+            self.assertEqual(second["rating"], "positive")
+            self.assertEqual(store.stats()["total"], 1)
+
+    def test_feedback_expires_after_configured_retention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "feedback.sqlite3"
+            store = FeedbackStore(path, feedback_ttl_seconds=60, max_records=10)
+            old_created_at = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
+            with closing(sqlite3.connect(path)) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO feedback (
+                        feedback_id, request_id, created_at, rating, correction,
+                        question, answer, snapshot_id, parsed_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("fb-old", "req-old", old_created_at, "positive", None, "q", "a", None, "{}"),
+                )
+                connection.commit()
+
+            self.assertEqual(store.stats()["total"], 0)
+
+    def test_feedback_capacity_prunes_oldest_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FeedbackStore(Path(directory) / "feedback.sqlite3", max_records=2)
+            for index in range(3):
+                store.submit(
+                    answer={"request_id": f"req-{index}", "question": "q", "answer": "a"},
+                    rating="positive",
+                )
+
+            self.assertEqual(store.stats()["total"], 2)
 
 
 if __name__ == "__main__":

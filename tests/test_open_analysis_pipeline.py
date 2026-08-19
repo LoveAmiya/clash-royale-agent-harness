@@ -144,6 +144,47 @@ class RetrievalFallbackTests(unittest.TestCase):
         self.assertTrue(second.dense_available)
         self.assertEqual(embed.call_count, 1)
 
+    def test_vector_index_is_reused_for_equivalent_new_snapshot_documents(self):
+        class FakeQdrant:
+            collections_by_path = {}
+
+            def __init__(self, *args, **kwargs):
+                path = kwargs.get("path") or (args[0] if args else ":memory:")
+                self.collections = self.collections_by_path.setdefault(str(path), set())
+
+            def collection_exists(self, name):
+                return name in self.collections
+
+            def delete_collection(self, name):
+                self.collections.discard(name)
+
+            def create_collection(self, collection_name, vectors_config):
+                self.collections.add(collection_name)
+
+            def upsert(self, collection_name, points):
+                return None
+
+        first_docs = [{
+            "doc_id": "snapshot-1:overview",
+            "source_type": "snapshot",
+            "text": "Stable scoped evidence",
+            "metadata": {"snapshot_id": "snapshot-1", "dataset_scope": "7d_all"},
+        }]
+        second_docs = [{
+            "doc_id": "snapshot-2:overview",
+            "source_type": "snapshot",
+            "text": "Stable scoped evidence",
+            "metadata": {"snapshot_id": "snapshot-2", "dataset_scope": "7d_all"},
+        }]
+        with tempfile.TemporaryDirectory() as temp_dir, patch("hybrid_retriever.QdrantClient", FakeQdrant), patch.object(
+            HybridRetriever, "embed_texts", return_value=[[0.0] * 1024]
+        ) as embed:
+            HybridRetriever(first_docs, index_path=Path(temp_dir))
+            second = HybridRetriever(second_docs, index_path=Path(temp_dir))
+
+        self.assertTrue(second.reused_persisted_index)
+        self.assertEqual(embed.call_count, 1)
+
     def test_dense_index_batches_embeddings_and_qdrant_upserts(self):
         class FakeQdrant:
             def __init__(self, *args, **kwargs):

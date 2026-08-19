@@ -133,6 +133,19 @@ class RollingMaterializerTests(unittest.TestCase):
             self.assertEqual(set(manifest["datasets"]), set(DATASET_SCOPES))
             self.assertTrue(manifest["fully_aligned"])
             self.assertTrue(manifest["datasets"]["7d_all"]["delta_ready"])
+            timings = manifest["publication_timings_seconds"]
+            self.assertEqual(
+                set(timings),
+                {
+                    "scope_materialization",
+                    "group_indexes_and_deltas",
+                    "rag_documents",
+                    "vector_index_validation",
+                    "publish_and_cleanup",
+                    "total",
+                },
+            )
+            self.assertTrue(all(value >= 0 for value in timings.values()))
 
             stats_path = data_dir / "snapshot_groups" / manifest["snapshot_group_id"] / "structured_stats.sqlite"
             connection = sqlite3.connect(stats_path)
@@ -227,6 +240,44 @@ class RollingMaterializerTests(unittest.TestCase):
                 "SELECT status FROM publication_generations ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             self.assertEqual(generation["status"], "failed")
+            store.close()
+
+    def test_reuses_scope_stats_only_when_scope_content_is_unchanged(self):
+        now = datetime(2026, 7, 30, 3, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = RollingCorpusStore(data_dir / "corpus" / "corpus.sqlite")
+            store.create_batch(
+                "weekly-1",
+                batch_type="weekly_expanded",
+                started_at=now,
+                leaderboard_frozen_at=now,
+            )
+            store.accept_batch_for_test("weekly-1", completed_at=now)
+            store.ingest_battle(
+                "weekly-1",
+                _battle("same-content"),
+                observer_tag="#A",
+                observer_rank=1,
+                observer_source="ranked_direct",
+                observed_at=now,
+            )
+
+            first = build_snapshot_group(
+                store,
+                data_dir=data_dir,
+                now=now,
+                retriever_factory=FakeRetriever,
+            )
+            second = build_snapshot_group(
+                store,
+                data_dir=data_dir,
+                now=now + timedelta(minutes=1),
+                retriever_factory=FakeRetriever,
+            )
+
+            self.assertNotEqual(first["snapshot_group_id"], second["snapshot_group_id"])
+            self.assertTrue(all(dataset["reused"] for dataset in second["datasets"].values()))
             store.close()
 
 

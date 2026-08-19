@@ -11,6 +11,41 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 
+[tool.setuptools]
+include-package-data = true
+py-modules = [
+  "analysis_boundaries",
+  "answer_builder",
+  "answer_presentation",
+  "app_config",
+  "battle_loadout",
+  "deck_archetypes",
+  "feedback_store",
+  "hybrid_retriever",
+  "logging_config",
+  "model_gateway",
+  "model_resilience",
+  "query_answering",
+  "query_parser",
+  "rag_data_builder",
+  "rag_document_policy",
+  "rag_quality",
+  "retrieval_postprocess",
+  "rolling_corpus",
+  "rolling_materializer",
+  "runtime_events",
+  "runtime_hardening",
+  "snapshot_audit",
+  "snapshot_store",
+  "structured_query",
+  "structured_stats",
+  "supercell_live",
+]
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["clashroyale_agent*", "skills*", "planner*"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

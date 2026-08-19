@@ -36,6 +36,11 @@ from clashroyale_agent.collection.rolling_corpus import (
     RollingCorpusStore,
 )
 from clashroyale_agent.collection.rolling_materializer import build_snapshot_group
+from clashroyale_agent.collection.publication_queue import (
+    enqueue as enqueue_pending_publication,
+    pending as pending_publications,
+    remove as remove_pending_publication,
+)
 from clashroyale_agent.collection.collector_status import (
     CollectionStatusReporter,
     batch_baseline as _batch_baseline,
@@ -169,6 +174,7 @@ def _publish_snapshot_if_accepted(
                 "snapshot_group_id": manifest["snapshot_group_id"],
                 "dataset_count": len(manifest["datasets"]),
                 "fully_aligned": manifest.get("fully_aligned") is True,
+                "publication_timings_seconds": manifest.get("publication_timings_seconds", {}),
             },
             None,
         )
@@ -385,6 +391,13 @@ def collect(mode: str, *, data_dir: Path, batch_id: str | None = None) -> dict:
                     now=completed_at,
                     validation_report=report,
                 )
+            if publication_error is not None and report["passed"]:
+                enqueue_pending_publication(
+                    data_dir,
+                    mode=mode,
+                    batch_id=resolved_batch_id,
+                    queued_at=completed_at,
+                )
             performance["publishing_seconds"] = _elapsed_seconds(publishing_started_at)
             performance["total_seconds"] = _elapsed_seconds(collect_started_at)
             staging = {
@@ -489,6 +502,7 @@ def retry_failed_publication(*, data_dir: Path) -> dict:
             "snapshot_group_id": manifest["snapshot_group_id"],
             "dataset_count": len(manifest["datasets"]),
             "fully_aligned": manifest.get("fully_aligned") is True,
+            "publication_timings_seconds": manifest.get("publication_timings_seconds", {}),
         }
         repaired = {
             **current,
@@ -504,6 +518,11 @@ def retry_failed_publication(*, data_dir: Path) -> dict:
         costs["local_embedding_index_builds"] = 1
         repaired["cost_boundaries"] = costs
         _atomic_json(status_path, repaired)
+        remove_pending_publication(
+            data_dir,
+            mode=str(current.get("collection_mode") or ""),
+            batch_id=str(current.get("batch_id") or ""),
+        )
 
         mode = str(current.get("collection_mode") or "")
         if mode in _TOKEN_SLOT_BY_MODE:
@@ -522,6 +541,35 @@ def retry_failed_publication(*, data_dir: Path) -> dict:
             "collection_mode": current.get("collection_mode"),
             "publication": publication,
         }
+
+
+def process_publication_queue(*, data_dir: Path) -> dict:
+    """Consume the oldest pending publication without contacting Supercell."""
+    data_dir = Path(data_dir)
+    entries = pending_publications(data_dir)
+    if not entries:
+        return {"status": "empty", "processed": 0}
+    entry = entries[0]
+    corpus_dir = data_dir / "corpus"
+    with CorpusWriterLock(corpus_dir / "writer.lock"):
+        store = RollingCorpusStore(corpus_dir / "corpus.sqlite")
+        try:
+            now = datetime.now(timezone.utc)
+            store.expire_and_prune(now=now)
+            manifest = build_snapshot_group(store, data_dir=data_dir, now=now)
+        finally:
+            store.close()
+    remove_pending_publication(
+        data_dir,
+        mode=str(entry.get("mode") or ""),
+        batch_id=str(entry.get("batch_id") or ""),
+    )
+    return {
+        "status": "published",
+        "processed": 1,
+        "batch_id": entry.get("batch_id"),
+        "snapshot_group_id": manifest["snapshot_group_id"],
+    }
 
 
 def main() -> int:
