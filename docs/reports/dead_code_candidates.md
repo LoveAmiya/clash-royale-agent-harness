@@ -24,9 +24,9 @@ cleanup is an operations action and must not be mixed with code deletion.
 | Candidate | Static evidence | Why confirmation is required |
 |---|---|---|
 | `run_collector.ps1` | No in-repository filename reference was found. It starts an older isolated collector server through `run_backend.ps1`. | It may be an operator's manual entry point or an external scheduled task; verify task definitions and operator usage before removal. |
-| `client.py` | No Python import or documented command reference was found. It is an interactive local SSE client with a hard-coded loopback API target. | It may be an undocumented operator/debug tool. Confirm no external user or tutorial depends on it before removal or relocation. |
+| `client.py` | Removed 2026-08-19 after a repository-wide reference scan found no import, documented command, or scheduled-task reference. | Keep the deletion isolated; restore only if an operator later identifies an external dependency. |
 | `run_rolling_collection.ps1`, `scripts/run_rolling_schedule.ps1`, `scripts/install_rolling_schedule.ps1` | They form an older rolling-schedule chain and are referenced by historical plan docs/tests, while current collection uses the parallel-task installer. | Preserve until Windows task inventory and backward-compatibility intent are reviewed. |
-| `scripts/monitor_snapshot.ps1`, `scripts/migrate_legacy_snapshot.py`, `scripts/import_snapshot_review.py` | References appear only in historical planning material. | These may be recovery or migration tools for an older private snapshot. Confirm that no operator needs them before archival or deletion. |
+| `scripts/monitor_snapshot.ps1`, `scripts/migrate_legacy_snapshot.py`, `scripts/import_snapshot_review.py` | Historical recovery and migration docs still provide runnable commands for these files. | Retain as explicit recovery compatibility tools; do not include them in dead-code deletion until those runbooks are retired and their private-data workflows are migrated. |
 
 ## Keep
 
