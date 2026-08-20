@@ -72,3 +72,7 @@ SHARE_PATH_OF_LEGEND_RAW_*.zip
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local packaging/build output.
+/build/
+*.egg-info/

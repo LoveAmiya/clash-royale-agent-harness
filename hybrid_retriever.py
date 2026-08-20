@@ -8,6 +8,7 @@ import json
 import hashlib
 import logging
 import math
+import os
 from collections import OrderedDict
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -38,6 +39,11 @@ VECTOR_SIZE = 1024
 logger = logging.getLogger(__name__)
 
 
+def _configured_qdrant_root() -> Path:
+    """Resolve the index root when a retriever is created, not only at import time."""
+    return Path(os.getenv("CR_AGENT_QDRANT_ROOT", str(QDRANT_ROOT)))
+
+
 class HybridRetriever:
     """Build BM25 plus a snapshot-versioned local Qdrant index."""
     def __init__(
@@ -65,7 +71,7 @@ class HybridRetriever:
 
         self.snapshot_id = self._snapshot_id_from_docs(docs)
         self.index_path = None if in_memory else index_path if index_path is not None else (
-            QDRANT_ROOT / self.snapshot_id if self.snapshot_id else None
+            _configured_qdrant_root() / self.snapshot_id if self.snapshot_id else None
         )
         self.collection_name = COLLECTION_NAME
         self.manifest_path = self.index_path / "manifest.json" if self.index_path else None

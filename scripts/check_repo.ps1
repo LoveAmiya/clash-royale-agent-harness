@@ -151,7 +151,7 @@ if (-not $SkipTests) {
         }
     } else {
         Invoke-Step "unit discovery" {
-            & $pythonExe -m unittest discover -s tests
+            & $pythonExe -m unittest discover -s tests -t .
         }
     }
 }

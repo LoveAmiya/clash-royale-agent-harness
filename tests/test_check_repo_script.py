@@ -17,7 +17,7 @@ class CheckRepoScriptTests(unittest.TestCase):
         self.assertIn("git ls-files", self.script)
         self.assertIn("git check-ignore", self.script)
         self.assertIn("-m compileall", self.script)
-        self.assertIn("-m unittest discover -s tests", self.script)
+        self.assertIn("-m unittest discover -s tests -t .", self.script)
         self.assertIn("run_tests.ps1", self.script)
         self.assertIn("Summary: checks run:", self.script)
         self.assertIn("Summary: checks skipped:", self.script)

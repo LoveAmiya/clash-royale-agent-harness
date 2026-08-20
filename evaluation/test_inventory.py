@@ -103,8 +103,19 @@ def classify_test_class(class_name: str) -> str:
 
 
 def build_inventory(start_dir: str = "tests") -> dict[str, Any]:
-    suite = unittest.defaultTestLoader.discover(start_dir)
-    class_counts = Counter(_class_name(test.id()) for test in _iter_tests(suite))
+    try:
+        suite = unittest.TestLoader().discover(start_dir)
+    except ImportError as exc:
+        raise RuntimeError(f"test discovery import failures: {exc}") from exc
+    tests = list(_iter_tests(suite))
+    failed_imports = [test.id() for test in tests if test.__class__.__name__ == "_FailedTest"]
+    if failed_imports:
+        preview = ", ".join(failed_imports[:5])
+        suffix = "..." if len(failed_imports) > 5 else ""
+        raise RuntimeError(
+            f"test discovery import failures ({len(failed_imports)}): {preview}{suffix}"
+        )
+    class_counts = Counter(_class_name(test.id()) for test in tests)
     layers: dict[str, dict[str, Any]] = {
         layer_id: {**definition, "test_count": 0, "class_count": 0, "classes": []}
         for layer_id, definition in LAYERS.items()

@@ -37,9 +37,19 @@ python -m evaluation.run_live_rag_smoke --help
 python -m evaluation.run_live_llm_eval --help
 ```
 
-Prefer descriptive local names such as
-`evaluation/reports/retrieval-<date>.json`. Do not overwrite a report while a
-run is active; use the command's atomic writer or a temporary sibling file.
+For manual runs, prefer an explicit system-temporary report directory because
+the repository report directory may be read-only or held by another process:
+
+```powershell
+$reportRoot = Join-Path ([System.IO.Path]::GetTempPath()) "clashroyale-agent-reports"
+New-Item -ItemType Directory -Force -Path $reportRoot | Out-Null
+python -m evaluation.run_fault_injection --report (Join-Path $reportRoot "fault-injection.json")
+```
+
+When the repository report directory is known to be writable, descriptive
+local names such as `evaluation/reports/retrieval-<date>.json` remain valid.
+Do not overwrite a report while a run is active; use the command's atomic
+writer or a temporary sibling file.
 
 ## Retention and Review
 

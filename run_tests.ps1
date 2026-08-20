@@ -24,7 +24,7 @@ try {
     Remove-Item Env:SUPERCELL_API_TOKEN -ErrorAction SilentlyContinue
     $env:OPENAI_API_KEY = "test-key"
 
-    & $pythonExe -m unittest discover -s tests
+    & $pythonExe -m unittest discover -s tests -t .
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

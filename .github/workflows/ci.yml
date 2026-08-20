@@ -43,7 +43,7 @@ jobs:
       - name: Repository hygiene gate
         shell: pwsh
         run: ./scripts/check_repo.ps1 -SkipTests -SkipRuff
-      - run: python -m unittest discover -s tests
+      - run: python -m unittest discover -s tests -t .
       - run: python -m evaluation.run_eval --report evaluation/reports/ci-contract.json
       - run: >
           python -m evaluation.run_fault_injection

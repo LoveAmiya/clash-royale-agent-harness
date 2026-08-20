@@ -166,7 +166,7 @@ Minimum checks for a package-migration slice:
 
 ~~~powershell
 python -m compileall -q src *.py evaluation harness planner skills tests
-python -m unittest discover -s tests
+python -m unittest discover -s tests -t .
 powershell -ExecutionPolicy Bypass -File .\scripts\check_repo.ps1
 ~~~
 

@@ -193,7 +193,7 @@ The first migration should move modules without changing behavior. Function-leve
 
 - Public deterministic gate: `./run_tests.ps1` on Windows PowerShell.
 - Repository hygiene gate: `./scripts/check_repo.ps1`; use `-Full` before a reviewable phase boundary.
-- Unit/integration discovery: `python -m unittest discover -s tests`.
+- Unit/integration discovery: `python -m unittest discover -s tests -t .`.
 - Testing numbers must link to `docs/TESTING.md` instead of being repeated across multiple docs.
 - Windows-only tests must skip at runtime when Windows PowerShell is unavailable; they must not fail during module import on Linux.
 - Live model or Supercell checks must remain opt-in and credentialed.

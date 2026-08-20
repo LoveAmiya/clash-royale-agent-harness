@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import types
 import unittest
@@ -106,6 +107,30 @@ class TraceReadTests(unittest.TestCase):
 
 
 class RetrievalFallbackTests(unittest.TestCase):
+    def test_default_index_path_resolves_qdrant_root_when_retriever_is_created(self):
+        class FakeQdrant:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def close(self):
+                return None
+
+        docs = [{
+            "doc_id": "snapshot-late-env:overview",
+            "source_type": "snapshot",
+            "text": "Isolated test evidence",
+            "metadata": {"snapshot_id": "snapshot-late-env"},
+        }]
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CR_AGENT_QDRANT_ROOT": temp_dir},
+        ), patch("hybrid_retriever.QdrantClient", FakeQdrant), patch.object(
+            HybridRetriever, "_build_dense_index"
+        ):
+            retriever = HybridRetriever(docs)
+
+        self.assertEqual(retriever.index_path, Path(temp_dir) / "snapshot-late-env")
+
     def test_snapshot_index_is_reused_without_reembedding_after_restart(self):
         class FakeQdrant:
             collections_by_path = {}
@@ -416,6 +441,13 @@ class ProcessSSETests(unittest.IsolatedAsyncioTestCase):
         rolling_manifest = patch.object(runtime_multi, "_active_snapshot_group_manifest", return_value=None)
         rolling_manifest.start()
         self.addCleanup(rolling_manifest.stop)
+        retriever = patch.object(
+            runtime_multi,
+            "ensure_dataset_retriever",
+            side_effect=lambda app, _dataset_scope: getattr(app.state, "retriever", None),
+        )
+        retriever.start()
+        self.addCleanup(retriever.stop)
 
     async def test_process_forwards_validated_page_intent_to_answer_pipeline(self):
         import runtime_multi

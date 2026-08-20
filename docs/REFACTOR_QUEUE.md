@@ -46,7 +46,7 @@ closed before the project is considered healthy.
 
 - Docs-only slice: `powershell -ExecutionPolicy Bypass -File .\scripts\check_repo.ps1 -SkipTests`
 
-- Import/package slice: `.\.venv\Scripts\python.exe -m unittest discover -s tests`
+- Import/package slice: `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .`
 
 - Runtime, QA/RAG, collector, snapshot, or publication slice: `powershell -ExecutionPolicy Bypass -File .\run_tests.ps1`
 

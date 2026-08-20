@@ -37,6 +37,13 @@ class SupercellLiveDataTests(unittest.IsolatedAsyncioTestCase):
         rolling_manifest = patch.object(runtime_multi, "_active_snapshot_group_manifest", return_value=None)
         rolling_manifest.start()
         self.addCleanup(rolling_manifest.stop)
+        retriever = patch.object(
+            runtime_multi,
+            "ensure_dataset_retriever",
+            side_effect=lambda app, _dataset_scope: getattr(app.state, "retriever", None),
+        )
+        retriever.start()
+        self.addCleanup(retriever.stop)
         live_data_enabled = patch.object(runtime_multi, "SUPERCELL_LIVE_DATA_ENABLED", True)
         live_data_enabled.start()
         self.addCleanup(live_data_enabled.stop)

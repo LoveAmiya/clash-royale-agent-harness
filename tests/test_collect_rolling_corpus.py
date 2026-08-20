@@ -243,6 +243,44 @@ class RollingCollectionPublicationRepairTests(unittest.TestCase):
         )
         build.assert_called_once()
 
+    def test_publication_queue_repairs_matching_global_and_lane_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            corpus_dir = data_dir / "corpus"
+            corpus_dir.mkdir(parents=True)
+            failed = {
+                "schema_version": 1,
+                "status": "accepted_publication_failed",
+                "batch_id": "daily-1",
+                "collection_mode": "daily_ranked",
+                "publication": None,
+                "publication_error": {"error_type": "PermissionError", "message": "locked"},
+                "cost_boundaries": {"local_embedding_index_builds": 0},
+            }
+            global_status = corpus_dir / "collection_status.json"
+            lane_status = corpus_dir / "collection_status.daily_ranked.json"
+            global_status.write_text(json.dumps(failed), encoding="utf-8")
+            lane_status.write_text(json.dumps(failed), encoding="utf-8")
+            enqueue(data_dir, mode="daily_ranked", batch_id="daily-1")
+            manifest = {
+                "snapshot_group_id": "pol-queued",
+                "datasets": {"7d_all": {}},
+                "fully_aligned": True,
+                "publication_timings_seconds": {"total": 3.5},
+            }
+
+            with patch.object(rolling_collector, "build_snapshot_group", return_value=manifest):
+                rolling_collector.process_publication_queue(data_dir=data_dir)
+
+            repaired_global = json.loads(global_status.read_text(encoding="utf-8"))
+            repaired_lane = json.loads(lane_status.read_text(encoding="utf-8"))
+
+        for repaired in (repaired_global, repaired_lane):
+            self.assertEqual(repaired["status"], "accepted")
+            self.assertEqual(repaired["publication"]["snapshot_group_id"], "pol-queued")
+            self.assertIsNone(repaired["publication_error"])
+            self.assertEqual(repaired["cost_boundaries"]["local_embedding_index_builds"], 1)
+
     def test_accepted_publication_exposes_aggregate_stage_timings(self):
         manifest = {
             "snapshot_group_id": "pol-timings",

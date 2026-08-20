@@ -555,15 +555,54 @@ def process_publication_queue(*, data_dir: Path) -> dict:
         store = RollingCorpusStore(corpus_dir / "corpus.sqlite")
         try:
             now = datetime.now(timezone.utc)
-            store.expire_and_prune(now=now)
+            retention = store.expire_and_prune(now=now)
             manifest = build_snapshot_group(store, data_dir=data_dir, now=now)
         finally:
             store.close()
-    remove_pending_publication(
-        data_dir,
-        mode=str(entry.get("mode") or ""),
-        batch_id=str(entry.get("batch_id") or ""),
-    )
+        status_path = corpus_dir / "collection_status.json"
+        current = _read_json_object(status_path)
+        if (
+            current is not None
+            and current.get("status") == "accepted_publication_failed"
+            and current.get("batch_id") == entry.get("batch_id")
+            and current.get("collection_mode") == entry.get("mode")
+        ):
+            publication = {
+                "status": "published",
+                "snapshot_group_id": manifest["snapshot_group_id"],
+                "dataset_count": len(manifest.get("datasets") or {}),
+                "fully_aligned": manifest.get("fully_aligned") is True,
+                "publication_timings_seconds": manifest.get("publication_timings_seconds", {}),
+            }
+            repaired = {
+                **current,
+                "status": "accepted",
+                "retention": retention,
+                "publication": publication,
+                "publication_error": None,
+                "publication_repaired_at": now.isoformat(),
+            }
+            costs = dict(current.get("cost_boundaries") or {})
+            costs["cloud_llm_calls"] = 0
+            costs["cloud_embedding_calls"] = 0
+            costs["local_embedding_index_builds"] = 1
+            repaired["cost_boundaries"] = costs
+            _atomic_json(status_path, repaired)
+            mode = str(entry.get("mode") or "")
+            if mode in _TOKEN_SLOT_BY_MODE:
+                lane_status_path = _status_path(data_dir, mode)
+                lane_status = _read_json_object(lane_status_path)
+                if (
+                    lane_status is not None
+                    and lane_status.get("status") == "accepted_publication_failed"
+                    and lane_status.get("batch_id") == entry.get("batch_id")
+                ):
+                    _atomic_json(lane_status_path, repaired)
+        remove_pending_publication(
+            data_dir,
+            mode=str(entry.get("mode") or ""),
+            batch_id=str(entry.get("batch_id") or ""),
+        )
     return {
         "status": "published",
         "processed": 1,
